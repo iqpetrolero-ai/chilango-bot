@@ -5,3 +5,4 @@ anthropic==0.40.0
 openpyxl==3.1.5
 python-multipart==0.0.17
 python-dotenv==1.0.1
+aiofiles==24.1.0

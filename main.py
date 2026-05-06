@@ -32,11 +32,11 @@ async def webhook(
 
     print(f"[MENSAJE] {phone}: {message}")
 
-    palabras_carta = ["carta", "menu", "menú", "carta completa", "ver carta", "ver menu", "qué tienen", "que tienen"]
+    palabras_carta = ["carta", "menu", "menú", "carta completa", "ver carta", "ver menu", "qué tienen", "que tienen", "1"]
     if message.lower() in ["/reset", "reiniciar"]:
         reset_conversation(phone)
         replies = ["¡Listo! Conversación reiniciada. ¿En qué te puedo ayudar? 🌮"]
-    elif any(p in message.lower() for p in palabras_carta):
+    elif message.strip() == "1" or any(p in message.lower() for p in palabras_carta):
         resp = MessagingResponse()
         if PDF_URL:
             msg = resp.message("¡Aquí está nuestra carta! 🌮👇")

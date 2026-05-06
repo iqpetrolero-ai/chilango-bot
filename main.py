@@ -1,12 +1,13 @@
 import os
+import json
+import httpx
 from dotenv import load_dotenv
 
 load_dotenv()
 
-from fastapi import FastAPI, Form, Request
-from fastapi.responses import HTMLResponse, PlainTextResponse
+from fastapi import FastAPI, Request, Query
+from fastapi.responses import HTMLResponse, PlainTextResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from twilio.twiml.messaging_response import MessagingResponse
 
 from bot import process_message, reset_conversation
 from orders import get_orders_count
@@ -18,56 +19,132 @@ import os as _os
 if _os.path.exists("static"):
     app.mount("/static", StaticFiles(directory="static"), name="static")
 
-BASE_URL = _os.environ.get("RAILWAY_PUBLIC_DOMAIN", "")
+META_ACCESS_TOKEN = os.environ.get("META_ACCESS_TOKEN", "").strip()
+META_PHONE_NUMBER_ID = os.environ.get("META_PHONE_NUMBER_ID", "").strip()
+META_VERIFY_TOKEN = os.environ.get("META_VERIFY_TOKEN", "chilango2026").strip()
+BASE_URL = os.environ.get("RAILWAY_PUBLIC_DOMAIN", "")
 PDF_URL = f"https://{BASE_URL}/static/carta.pdf" if BASE_URL else ""
 
+PALABRAS_CARTA = ["carta", "menu", "menú", "ver carta", "ver menu", "qué tienen", "que tienen"]
 
-@app.post("/webhook")
-async def webhook(
-    From: str = Form(...),
-    Body: str = Form(...),
-):
-    phone = From
-    message = Body.strip()
 
+async def send_whatsapp_message(to: str, text: str):
+    url = f"https://graph.facebook.com/v19.0/{META_PHONE_NUMBER_ID}/messages"
+    headers = {
+        "Authorization": f"Bearer {META_ACCESS_TOKEN}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": to,
+        "type": "text",
+        "text": {"body": text},
+    }
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(url, json=payload, headers=headers)
+        if resp.status_code != 200:
+            print(f"[ERROR META] {resp.status_code} {resp.text}")
+
+
+async def send_whatsapp_document(to: str, caption: str, doc_url: str):
+    url = f"https://graph.facebook.com/v19.0/{META_PHONE_NUMBER_ID}/messages"
+    headers = {
+        "Authorization": f"Bearer {META_ACCESS_TOKEN}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": to,
+        "type": "document",
+        "document": {
+            "link": doc_url,
+            "caption": caption,
+            "filename": "Carta_Chilango.pdf",
+        },
+    }
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(url, json=payload, headers=headers)
+        if resp.status_code != 200:
+            print(f"[ERROR META DOC] {resp.status_code} {resp.text}")
+
+
+async def handle_message(phone: str, message: str):
+    msg_lower = message.lower().strip()
     print(f"[MENSAJE] {phone}: {message}")
 
-    palabras_carta = ["carta", "menu", "menú", "carta completa", "ver carta", "ver menu", "qué tienen", "que tienen", "1"]
-    if message.lower() in ["/reset", "reiniciar"]:
-        reset_conversation(phone)
-        replies = ["¡Listo! Conversación reiniciada. ¿En qué te puedo ayudar? 🌮"]
-    elif message.strip() == "1" or any(p in message.lower() for p in palabras_carta):
-        resp = MessagingResponse()
+    # Enviar carta como PDF o texto
+    if message.strip() == "1" or any(p in msg_lower for p in PALABRAS_CARTA):
         if PDF_URL:
-            msg = resp.message("¡Aquí está nuestra carta! 🌮👇")
-            msg.media(PDF_URL)
+            await send_whatsapp_document(phone, "¡Aquí está nuestra carta! 🌮", PDF_URL)
         else:
             mitad = len(MENU_TEXTO) // 2
             corte = MENU_TEXTO.rfind("\n", mitad - 200, mitad + 200)
             if corte == -1:
                 corte = mitad
-            resp.message(MENU_TEXTO[:corte].strip())
-            resp.message(MENU_TEXTO[corte:].strip())
-        return PlainTextResponse(str(resp), media_type="text/xml")
+            await send_whatsapp_message(phone, MENU_TEXTO[:corte].strip())
+            await send_whatsapp_message(phone, MENU_TEXTO[corte:].strip())
+        return
+
+    if message.lower() in ["/reset", "reiniciar"]:
+        reset_conversation(phone)
+        await send_whatsapp_message(phone, "¡Listo! Conversación reiniciada. ¿En qué te puedo ayudar? 🌮")
+        return
+
+    reply = await process_message(phone, message)
+
+    # Dividir si el mensaje es muy largo
+    if len(reply) > 1500:
+        mitad = len(reply) // 2
+        corte = reply.rfind("\n", mitad - 200, mitad + 200)
+        if corte == -1:
+            corte = mitad
+        await send_whatsapp_message(phone, reply[:corte].strip())
+        await send_whatsapp_message(phone, reply[corte:].strip())
     else:
-        reply = await process_message(phone, message)
-        if len(reply) > 1500:
-            mitad = len(reply) // 2
-            corte = reply.rfind("\n", mitad - 200, mitad + 200)
-            if corte == -1:
-                corte = mitad
-            replies = [reply[:corte].strip(), reply[corte:].strip()]
+        await send_whatsapp_message(phone, reply)
+
+
+# ── Webhook Meta ──────────────────────────────────────────────
+@app.get("/webhook")
+async def verify_webhook(
+    hub_mode: str = Query(None, alias="hub.mode"),
+    hub_verify_token: str = Query(None, alias="hub.verify_token"),
+    hub_challenge: str = Query(None, alias="hub.challenge"),
+):
+    if hub_mode == "subscribe" and hub_verify_token == META_VERIFY_TOKEN:
+        print("[WEBHOOK] Verificación exitosa")
+        return PlainTextResponse(hub_challenge)
+    return PlainTextResponse("Token inválido", status_code=403)
+
+
+@app.post("/webhook")
+async def receive_message(request: Request):
+    body = await request.json()
+
+    try:
+        entry = body["entry"][0]
+        changes = entry["changes"][0]["value"]
+
+        if "messages" not in changes:
+            return JSONResponse({"status": "ok"})
+
+        message_data = changes["messages"][0]
+        phone = message_data["from"]
+        msg_type = message_data.get("type", "")
+
+        if msg_type == "text":
+            text = message_data["text"]["body"]
+            await handle_message(phone, text)
         else:
-            replies = [reply]
+            await send_whatsapp_message(phone, "Por favor envía un mensaje de texto 😊")
 
-    print(f"[RESPUESTA] {replies[0][:80]}...")
+    except Exception as e:
+        print(f"[ERROR WEBHOOK] {e}")
 
-    resp = MessagingResponse()
-    for r in replies:
-        resp.message(r)
-    return PlainTextResponse(str(resp), media_type="text/xml")
+    return JSONResponse({"status": "ok"})
 
 
+# ── Páginas ───────────────────────────────────────────────────
 @app.get("/", response_class=HTMLResponse)
 async def home():
     count = get_orders_count()
@@ -84,8 +161,8 @@ async def home():
     <body>
         <h1>🌮 Chilango Bot</h1>
         <p>El bot está funcionando correctamente ✅</p>
-        <p>Pedidos registrados hoy: <span class="badge">{count}</span></p>
-        <p><small>Horario de atención: Vie · Sáb · Dom · 5pm – 11pm</small></p>
+        <p>Pedidos registrados: <span class="badge">{count}</span></p>
+        <p><small>Horario: Vie · Sáb · Dom · 5pm – 11pm</small></p>
     </body>
     </html>
     """
@@ -94,17 +171,6 @@ async def home():
 @app.get("/health")
 async def health():
     return {"status": "ok", "bot": "Chilango 🌮"}
-
-
-@app.get("/debug-key")
-async def debug_key():
-    key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
-    return {
-        "encontrada": bool(key),
-        "longitud": len(key),
-        "inicio": key[:12] if key else "vacía",
-        "valida": key.startswith("sk-ant-"),
-    }
 
 
 if __name__ == "__main__":

@@ -28,8 +28,9 @@ PDF_URL = f"https://{BASE_URL}/static/carta.pdf" if BASE_URL else ""
 PALABRAS_CARTA = ["carta", "menu", "menú", "ver carta", "ver menu", "qué tienen", "que tienen"]
 
 
-async def send_whatsapp_message(to: str, text: str):
-    url = f"https://graph.facebook.com/v19.0/{META_PHONE_NUMBER_ID}/messages"
+async def send_whatsapp_message(to: str, text: str, phone_number_id: str = None):
+    pid = phone_number_id or META_PHONE_NUMBER_ID
+    url = f"https://graph.facebook.com/v19.0/{pid}/messages"
     headers = {
         "Authorization": f"Bearer {META_ACCESS_TOKEN}",
         "Content-Type": "application/json",
@@ -46,8 +47,9 @@ async def send_whatsapp_message(to: str, text: str):
             print(f"[ERROR META] {resp.status_code} {resp.text}")
 
 
-async def send_whatsapp_document(to: str, caption: str, doc_url: str):
-    url = f"https://graph.facebook.com/v19.0/{META_PHONE_NUMBER_ID}/messages"
+async def send_whatsapp_document(to: str, caption: str, doc_url: str, phone_number_id: str = None):
+    pid = phone_number_id or META_PHONE_NUMBER_ID
+    url = f"https://graph.facebook.com/v19.0/{pid}/messages"
     headers = {
         "Authorization": f"Bearer {META_ACCESS_TOKEN}",
         "Content-Type": "application/json",
@@ -68,40 +70,40 @@ async def send_whatsapp_document(to: str, caption: str, doc_url: str):
             print(f"[ERROR META DOC] {resp.status_code} {resp.text}")
 
 
-async def handle_message(phone: str, message: str):
+async def handle_message(phone: str, message: str, phone_number_id: str = None):
     msg_lower = message.lower().strip()
+    sending_id = phone_number_id or META_PHONE_NUMBER_ID
     print(f"[MENSAJE] {phone}: {message}")
 
     # Enviar carta como PDF o texto
     if message.strip() == "1" or any(p in msg_lower for p in PALABRAS_CARTA):
         if PDF_URL:
-            await send_whatsapp_document(phone, "¡Aquí está nuestra carta! 🌮", PDF_URL)
+            await send_whatsapp_document(phone, "¡Aquí está nuestra carta! 🌮", PDF_URL, sending_id)
         else:
             mitad = len(MENU_TEXTO) // 2
             corte = MENU_TEXTO.rfind("\n", mitad - 200, mitad + 200)
             if corte == -1:
                 corte = mitad
-            await send_whatsapp_message(phone, MENU_TEXTO[:corte].strip())
-            await send_whatsapp_message(phone, MENU_TEXTO[corte:].strip())
+            await send_whatsapp_message(phone, MENU_TEXTO[:corte].strip(), sending_id)
+            await send_whatsapp_message(phone, MENU_TEXTO[corte:].strip(), sending_id)
         return
 
     if message.lower() in ["/reset", "reiniciar"]:
         reset_conversation(phone)
-        await send_whatsapp_message(phone, "¡Listo! Conversación reiniciada. ¿En qué te puedo ayudar? 🌮")
+        await send_whatsapp_message(phone, "¡Listo! Conversación reiniciada. ¿En qué te puedo ayudar? 🌮", sending_id)
         return
 
     reply = await process_message(phone, message)
 
-    # Dividir si el mensaje es muy largo
     if len(reply) > 1500:
         mitad = len(reply) // 2
         corte = reply.rfind("\n", mitad - 200, mitad + 200)
         if corte == -1:
             corte = mitad
-        await send_whatsapp_message(phone, reply[:corte].strip())
-        await send_whatsapp_message(phone, reply[corte:].strip())
+        await send_whatsapp_message(phone, reply[:corte].strip(), sending_id)
+        await send_whatsapp_message(phone, reply[corte:].strip(), sending_id)
     else:
-        await send_whatsapp_message(phone, reply)
+        await send_whatsapp_message(phone, reply, sending_id)
 
 
 # ── Webhook Meta ──────────────────────────────────────────────
@@ -128,15 +130,16 @@ async def receive_message(request: Request):
         if "messages" not in changes:
             return JSONResponse({"status": "ok"})
 
+        phone_number_id = changes.get("metadata", {}).get("phone_number_id", META_PHONE_NUMBER_ID)
         message_data = changes["messages"][0]
         phone = message_data["from"]
         msg_type = message_data.get("type", "")
 
         if msg_type == "text":
             text = message_data["text"]["body"]
-            await handle_message(phone, text)
+            await handle_message(phone, text, phone_number_id)
         else:
-            await send_whatsapp_message(phone, "Por favor envía un mensaje de texto 😊")
+            await send_whatsapp_message(phone, "Por favor envía un mensaje de texto 😊", phone_number_id)
 
     except Exception as e:
         print(f"[ERROR WEBHOOK] {e}")

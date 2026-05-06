@@ -65,6 +65,18 @@ async def health():
     return {"status": "ok", "bot": "Chilango 🌮"}
 
 
+@app.get("/debug-key")
+async def debug_key():
+    key = os.environ.get("ANTHROPIC_API_KEY", "")
+    return {
+        "encontrada": bool(key),
+        "longitud": len(key),
+        "inicio": key[:12] if key else "vacía",
+        "tiene_espacios": " " in key,
+        "tiene_saltos": "\n" in key or "\r" in key,
+    }
+
+
 if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 8000))

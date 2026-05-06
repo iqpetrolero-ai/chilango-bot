@@ -3,7 +3,7 @@ from anthropic import AsyncAnthropic
 from menu import MENU_TEXTO
 from orders import save_order
 
-client = AsyncAnthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+client = AsyncAnthropic(api_key=os.environ["ANTHROPIC_API_KEY"].strip())
 
 # Conversaciones activas por número de teléfono (en memoria)
 conversaciones: dict[str, list] = {}

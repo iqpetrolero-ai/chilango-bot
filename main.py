@@ -5,6 +5,7 @@ load_dotenv()
 
 from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, PlainTextResponse
+from fastapi.staticfiles import StaticFiles
 from twilio.twiml.messaging_response import MessagingResponse
 
 from bot import process_message, reset_conversation
@@ -12,6 +13,13 @@ from orders import get_orders_count
 from menu import MENU_TEXTO
 
 app = FastAPI(title="Chilango Bot 🌮")
+
+import os as _os
+if _os.path.exists("static"):
+    app.mount("/static", StaticFiles(directory="static"), name="static")
+
+BASE_URL = _os.environ.get("RAILWAY_PUBLIC_DOMAIN", "")
+PDF_URL = f"https://{BASE_URL}/static/carta.pdf" if BASE_URL else ""
 
 
 @app.post("/webhook")
@@ -29,11 +37,18 @@ async def webhook(
         reset_conversation(phone)
         replies = ["¡Listo! Conversación reiniciada. ¿En qué te puedo ayudar? 🌮"]
     elif any(p in message.lower() for p in palabras_carta):
-        mitad = len(MENU_TEXTO) // 2
-        corte = MENU_TEXTO.rfind("\n", mitad - 200, mitad + 200)
-        if corte == -1:
-            corte = mitad
-        replies = [MENU_TEXTO[:corte].strip(), MENU_TEXTO[corte:].strip()]
+        resp = MessagingResponse()
+        if PDF_URL:
+            msg = resp.message("¡Aquí está nuestra carta! 🌮👇")
+            msg.media(PDF_URL)
+        else:
+            mitad = len(MENU_TEXTO) // 2
+            corte = MENU_TEXTO.rfind("\n", mitad - 200, mitad + 200)
+            if corte == -1:
+                corte = mitad
+            resp.message(MENU_TEXTO[:corte].strip())
+            resp.message(MENU_TEXTO[corte:].strip())
+        return PlainTextResponse(str(resp), media_type="text/xml")
     else:
         reply = await process_message(phone, message)
         if len(reply) > 1500:

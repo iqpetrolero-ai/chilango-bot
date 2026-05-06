@@ -32,7 +32,7 @@ def esta_en_horario() -> bool:
 def mensaje_fuera_horario() -> str:
     return (
         "¡Hola! 👋 Gracias por escribirnos.\n\n"
-        "En este momento estamos descansando 😔\n\n"
+        "En este momento estamos cerrados 😔\n\n"
         "🕒 Atendemos:\n"
         "*Viernes, Sábado y Domingo*\n"
         "de *5:00 pm a 11:00 pm*\n\n"
@@ -61,7 +61,7 @@ Tienes personalidad amigable, con onda mexicana auténtica. Eres entusiasta con 
 ━━━ DATOS DEL RESTAURANTE ━━━
 - Nombre: Chilango 🌮
 - Ciudad: Tacna, Perú
-- Modalidad: Solo delivery (si hay recojo en local, en caso pregunten)
+- Modalidad: Solo delivery (no hay recojo en tienda)
 - Horario: Viernes, Sábado y Domingo de 5pm a 11pm
 - WhatsApp: 953 038 816
 - Instagram: @chilangotacna
@@ -84,7 +84,7 @@ Tienes personalidad amigable, con onda mexicana auténtica. Eres entusiasta con 
 
 2. PREGUNTAS: Responde con detalle y entusiasmo sobre ingredientes, tamaños, sabores.
    - "¿Qué es la birria?" → Carne de res guisada en adobo especiado, jugosa y sabrosa
-   - "¿Tienen opciones sin picante?" → Sí, guía al cliente (nada es picante, la salsa va aparte)
+   - "¿Tienen opciones sin picante?" → Sí, guía al cliente
    - "¿Cuánto demora el delivery?" → Aprox 30-45 min según la zona
 
 3. TOMAR PEDIDO: Cuando el cliente quiera pedir:
@@ -109,7 +109,7 @@ Tienes personalidad amigable, con onda mexicana auténtica. Eres entusiasta con 
 5. ESCALACIÓN: Si el cliente escribe "humano", "agente" o "hablar con alguien",
    dile que el equipo lo atenderá pronto al 953 038 816.
 
-6. TONO: Español mexicano amigable, sin exagerar la jerga. Emojis con moderación. Respuestas cortas y claras.
+6. TONO: Español amigable, sin exagerar la jerga. Emojis con moderación. Respuestas cortas y claras.
 
 IMPORTANTE: Nunca inventes precios ni productos que no estén en la carta.
 """
@@ -118,17 +118,11 @@ IMPORTANTE: Nunca inventes precios ni productos que no estén en la carta.
 async def process_message(phone: str, message: str) -> str:
     msg_lower = message.lower().strip()
 
-    # Primer mensaje — enviar bienvenida si está en horario
+    # Primer mensaje — enviar bienvenida
     if phone not in bienvenida_enviada:
         bienvenida_enviada.add(phone)
         conversaciones[phone] = []
-        if not esta_en_horario():
-            return mensaje_fuera_horario()
         return mensaje_bienvenida()
-
-    # Fuera de horario — bloquear pedidos pero responder preguntas
-    if not esta_en_horario() and any(p in msg_lower for p in ["pedir", "pedido", "quiero", "dame", "orden"]):
-        return mensaje_fuera_horario()
 
     if phone not in conversaciones:
         conversaciones[phone] = []

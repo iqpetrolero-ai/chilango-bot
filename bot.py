@@ -1,9 +1,9 @@
 import os
-from anthropic import Anthropic
+from anthropic import AsyncAnthropic
 from menu import MENU_TEXTO
 from orders import save_order
 
-client = Anthropic()
+client = AsyncAnthropic()
 
 # Conversaciones activas por número de teléfono (en memoria)
 conversaciones: dict[str, list] = {}
@@ -83,7 +83,7 @@ async def process_message(phone: str, message: str) -> str:
     # Mantener solo los últimos 30 mensajes para no exceder tokens
     history = conversaciones[phone][-30:]
 
-    response = client.messages.create(
+    response = await client.messages.create(
         model="claude-haiku-4-5-20251001",
         max_tokens=1024,
         system=SYSTEM_PROMPT,

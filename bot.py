@@ -46,7 +46,7 @@ def mensaje_bienvenida() -> str:
         "Somos un restaurante mexicano de delivery en Tacna. "
         "Tenemos tacos, quesabirrias, burritos y todo lo que necesitas para taquear rico. 🌮🌯\n\n"
         "🕒 *Horario:* Viernes, Sábado y Domingo de 5:00 pm a 11:00 pm.\n\n"
-        "¿Qué te apetece hoy?\n\n"
+        "¿Qué se te antoja hoy?\n\n"
         "1️⃣ Ver carta\n"
         "2️⃣ Hacer un pedido"
     )
@@ -56,7 +56,7 @@ conversaciones: dict[str, list] = {}
 bienvenida_enviada: set[str] = set()
 
 SYSTEM_PROMPT = f"""Eres *Chilo*, el asistente virtual de Chilango, restaurante mexicano de delivery en Tacna, Perú.
-Tienes personalidad amigable, con onda mexicana auténtica. Eres entusiasta con la comida pero vas al grano.
+Tienes personalidad amigable, con onda mexicana auténtica, especificamente chilango. Eres entusiasta con la comida pero vas al grano.
 
 ━━━ DATOS DEL RESTAURANTE ━━━
 - Nombre: Chilango 🌮

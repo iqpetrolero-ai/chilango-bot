@@ -67,13 +67,12 @@ async def health():
 
 @app.get("/debug-key")
 async def debug_key():
-    key = os.environ.get("ANTHROPIC_API_KEY", "")
+    key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
     return {
         "encontrada": bool(key),
         "longitud": len(key),
         "inicio": key[:12] if key else "vacía",
-        "tiene_espacios": " " in key,
-        "tiene_saltos": "\n" in key or "\r" in key,
+        "valida": key.startswith("sk-ant-"),
     }
 
 

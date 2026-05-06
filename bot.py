@@ -3,7 +3,16 @@ from anthropic import AsyncAnthropic
 from menu import MENU_TEXTO
 from orders import save_order
 
-client = AsyncAnthropic(api_key=os.environ["ANTHROPIC_API_KEY"].strip())
+_client = None
+
+def get_client() -> AsyncAnthropic:
+    global _client
+    if _client is None:
+        api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+        if not api_key:
+            raise RuntimeError("ANTHROPIC_API_KEY no está configurada en las variables de entorno")
+        _client = AsyncAnthropic(api_key=api_key)
+    return _client
 
 # Conversaciones activas por número de teléfono (en memoria)
 conversaciones: dict[str, list] = {}
@@ -83,7 +92,7 @@ async def process_message(phone: str, message: str) -> str:
     # Mantener solo los últimos 30 mensajes para no exceder tokens
     history = conversaciones[phone][-30:]
 
-    response = await client.messages.create(
+    response = await get_client().messages.create(
         model="claude-haiku-4-5-20251001",
         max_tokens=1024,
         system=SYSTEM_PROMPT,

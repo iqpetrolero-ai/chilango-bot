@@ -1,5 +1,6 @@
 import os
 import html
+import json
 import httpx
 from dotenv import load_dotenv
 
@@ -241,55 +242,153 @@ async def health():
 @app.get("/admin", response_class=HTMLResponse)
 async def admin(credentials: HTTPBasicCredentials = Depends(verificar_admin)):
     conversaciones = db.get_all_conversations()
-    filas = ""
+    num_orders = get_orders_count()
+
+    # Sidebar de contactos
+    contacts_html = ""
     for phone, mensajes in conversaciones.items():
         if not mensajes:
             continue
-        burbujas = ""
-        for m in mensajes:
-            content = m["content"]
-            if isinstance(content, list):
-                texto = next((b["text"] for b in content if b.get("type") == "text"), "[imagen]")
+        ultimo = mensajes[-1]
+        contenido = ultimo["content"]
+        if isinstance(contenido, list):
+            preview = next((b["text"] for b in contenido if b.get("type") == "text"), "[imagen]")
+        else:
+            preview = contenido
+        preview = html.escape(str(preview)[:50])
+        contacts_html += f"""
+        <div class="contact" id="c_{html.escape(phone)}" onclick="showChat('{html.escape(phone)}')">
+            <div class="avatar">👤</div>
+            <div class="contact-info">
+                <div class="contact-name">+{html.escape(phone)}</div>
+                <div class="contact-preview">{preview}</div>
+            </div>
+            <div class="contact-count">{len(mensajes)}</div>
+        </div>"""
+
+    if not contacts_html:
+        contacts_html = "<div class='no-convs'>Sin conversaciones aún</div>"
+
+    # Serializar conversaciones para JS (imágenes excluidas por tamaño)
+    conv_clean = {}
+    for phone, msgs in conversaciones.items():
+        conv_clean[phone] = []
+        for m in msgs:
+            c = m["content"]
+            if isinstance(c, list):
+                texto = next((b["text"] for b in c if b.get("type") == "text"), "[imagen 📷]")
             else:
-                texto = content
-            # Escapar HTML para prevenir XSS
-            texto_seguro = html.escape(str(texto))
-            lado = "cliente" if m["role"] == "user" else "bot"
-            label = "Cliente" if lado == "cliente" else "🤖 Bot"
-            burbujas += f'<div class="msg {lado}"><b>{label}:</b> {texto_seguro}</div>'
-        filas += f"""
-        <details>
-            <summary>📱 +{html.escape(phone)} ({len(mensajes)} mensajes)</summary>
-            <div class="chat">{burbujas}</div>
-        </details>"""
+                texto = c
+            conv_clean[phone].append({"role": m["role"], "content": texto})
+    conv_json = json.dumps(conv_clean, ensure_ascii=False)
 
-    if not filas:
-        filas = "<p style='color:#888'>No hay conversaciones activas.</p>"
+    return f"""<!DOCTYPE html>
+<html>
+<head>
+    <title>Admin — Chilango Bot</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f0f2f5; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }}
+        .header {{ background: #2D5016; color: white; padding: 10px 20px; display: flex; align-items: center; gap: 12px; flex-shrink: 0; }}
+        .header img {{ height: 44px; border-radius: 8px; object-fit: cover; }}
+        .header h1 {{ font-size: 17px; }}
+        .header .sub {{ font-size: 12px; opacity: 0.7; }}
+        .header .stats {{ margin-left: auto; font-size: 13px; opacity: 0.85; text-align: right; }}
+        .container {{ display: flex; flex: 1; overflow: hidden; }}
+        .sidebar {{ width: 320px; background: white; border-right: 1px solid #e0e0e0; display: flex; flex-direction: column; overflow: hidden; flex-shrink: 0; }}
+        .sidebar-title {{ padding: 12px 16px; font-size: 12px; color: #667781; background: #f0f2f5; border-bottom: 1px solid #e9edef; font-weight: 600; letter-spacing: .5px; }}
+        .sidebar-list {{ overflow-y: auto; flex: 1; }}
+        .contact {{ padding: 12px 16px; border-bottom: 1px solid #e9edef; cursor: pointer; display: flex; align-items: center; gap: 12px; transition: background .1s; }}
+        .contact:hover {{ background: #f5f5f5; }}
+        .contact.active {{ background: #d9fdd3; }}
+        .avatar {{ width: 46px; height: 46px; border-radius: 50%; background: #25d366; display: flex; align-items: center; justify-content: center; font-size: 20px; flex-shrink: 0; }}
+        .contact-info {{ flex: 1; min-width: 0; }}
+        .contact-name {{ font-weight: 600; font-size: 14px; color: #111; }}
+        .contact-preview {{ font-size: 13px; color: #667781; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }}
+        .contact-count {{ font-size: 11px; background: #25d366; color: white; border-radius: 50%; width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-weight: 600; }}
+        .chat-panel {{ flex: 1; display: flex; flex-direction: column; background: #efeae2; overflow: hidden; }}
+        .chat-header {{ background: #f0f2f5; padding: 10px 16px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid #e0e0e0; flex-shrink: 0; }}
+        .chat-header .avatar {{ width: 38px; height: 38px; font-size: 16px; }}
+        .chat-header-name {{ font-weight: 600; font-size: 15px; }}
+        .chat-messages {{ flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 4px; }}
+        .empty-state {{ flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; color: #667781; gap: 10px; }}
+        .empty-state img {{ height: 80px; opacity: 0.4; border-radius: 8px; }}
+        .bubble {{ max-width: 65%; padding: 7px 12px 7px 12px; border-radius: 8px; font-size: 14px; line-height: 1.5; white-space: pre-wrap; word-wrap: break-word; }}
+        .bubble.cliente {{ background: white; align-self: flex-start; border-radius: 0 8px 8px 8px; box-shadow: 0 1px 1px rgba(0,0,0,.08); }}
+        .bubble.bot {{ background: #d9fdd3; align-self: flex-end; border-radius: 8px 0 8px 8px; box-shadow: 0 1px 1px rgba(0,0,0,.08); }}
+        .sender {{ font-size: 11px; font-weight: 700; margin-bottom: 3px; color: #25d366; }}
+        .bubble.bot .sender {{ color: #128c7e; }}
+        .no-convs {{ padding: 24px; color: #667781; text-align: center; font-size: 14px; }}
+        .refresh-note {{ font-size: 11px; color: #667781; text-align: center; padding: 6px; background: #f0f2f5; flex-shrink: 0; }}
+    </style>
+</head>
+<body>
+    <div class="header">
+        <img src="/static/logo.png" alt="Chilango">
+        <div>
+            <h1>Chilango Bot</h1>
+            <div class="sub">Panel de conversaciones</div>
+        </div>
+        <div class="stats">
+            👥 {len(conversaciones)} conversaciones<br>
+            📦 {num_orders} pedidos registrados
+        </div>
+    </div>
+    <div class="container">
+        <div class="sidebar">
+            <div class="sidebar-title">CONVERSACIONES</div>
+            <div class="sidebar-list">{contacts_html}</div>
+        </div>
+        <div class="chat-panel" id="chatPanel">
+            <div class="empty-state">
+                <img src="/static/logo.png" alt="">
+                <span>Selecciona una conversación</span>
+            </div>
+        </div>
+    </div>
+    <div class="refresh-note">🔄 Actualización automática cada 20 segundos</div>
 
-    return f"""
-    <html>
-    <head>
-        <title>Admin — Chilango Bot</title>
-        <meta charset="utf-8">
-        <meta http-equiv="refresh" content="15">
-        <style>
-            body {{ font-family: Arial, sans-serif; max-width: 800px; margin: 40px auto; padding: 0 20px; }}
-            h1 {{ color: #2D5016; }}
-            details {{ border: 1px solid #ddd; border-radius: 8px; margin: 10px 0; padding: 10px; }}
-            summary {{ cursor: pointer; font-weight: bold; }}
-            .chat {{ margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }}
-            .msg {{ padding: 8px 12px; border-radius: 8px; max-width: 85%; white-space: pre-wrap; font-size: 14px; }}
-            .cliente {{ background: #f0f0f0; align-self: flex-start; }}
-            .bot {{ background: #dcf8c6; align-self: flex-end; }}
-        </style>
-    </head>
-    <body>
-        <h1>🌮 Chilango Bot — Conversaciones</h1>
-        <p>Activas: <b>{len(conversaciones)}</b> &nbsp;|&nbsp; Pedidos totales: <b>{get_orders_count()}</b></p>
-        {filas}
-    </body>
-    </html>
-    """
+    <script>
+        const convs = {conv_json};
+
+        function esc(s) {{
+            return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\\n/g,'<br>');
+        }}
+
+        function showChat(phone) {{
+            document.querySelectorAll('.contact').forEach(c => c.classList.remove('active'));
+            const el = document.getElementById('c_' + phone);
+            if (el) el.classList.add('active');
+
+            const msgs = convs[phone] || [];
+            const bubbles = msgs.map(m => {{
+                const lado = m.role === 'user' ? 'cliente' : 'bot';
+                const label = m.role === 'user' ? 'Cliente' : '🤖 Chilo';
+                return `<div class="bubble ${{lado}}"><div class="sender">${{label}}</div>${{esc(m.content)}}</div>`;
+            }}).join('');
+
+            document.getElementById('chatPanel').innerHTML = `
+                <div class="chat-header">
+                    <div class="avatar">👤</div>
+                    <div class="chat-header-name">+${{esc(phone)}}</div>
+                </div>
+                <div class="chat-messages" id="msgs">${{bubbles}}</div>`;
+
+            const msgsEl = document.getElementById('msgs');
+            if (msgsEl) msgsEl.scrollTop = msgsEl.scrollHeight;
+            sessionStorage.setItem('activePhone', phone);
+        }}
+
+        // Restaurar conversación activa después del auto-refresh
+        const saved = sessionStorage.getItem('activePhone');
+        if (saved && convs[saved]) showChat(saved);
+
+        setTimeout(() => location.reload(), 20000);
+    </script>
+</body>
+</html>"""
 
 
 if __name__ == "__main__":

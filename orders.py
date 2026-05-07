@@ -1,6 +1,7 @@
 import os
 from datetime import datetime, timezone, timedelta
 
+import httpx
 import openpyxl
 from openpyxl import load_workbook
 from openpyxl.styles import Font, PatternFill, Alignment
@@ -8,8 +9,7 @@ from openpyxl.styles import Font, PatternFill, Alignment
 EXCEL_FILE = "pedidos_chilango.xlsx"
 PERU_TZ = timezone(timedelta(hours=-5))
 
-OWNER_WHATSAPP = "whatsapp:+51953038816"
-TWILIO_FROM = "whatsapp:+14155238886"
+OWNER_PHONE = "51953038816"
 
 
 def _init_excel():
@@ -40,12 +40,11 @@ def _init_excel():
 
 def _notify_owner(phone_clean: str, items: str, total: str, now: datetime):
     try:
-        from twilio.rest import Client
-        account_sid = os.environ.get("TWILIO_ACCOUNT_SID", "").strip()
-        auth_token = os.environ.get("TWILIO_AUTH_TOKEN", "").strip()
-        if not account_sid or not auth_token:
+        token = os.environ.get("META_ACCESS_TOKEN", "").strip()
+        phone_number_id = os.environ.get("META_PHONE_NUMBER_ID", "").strip()
+        if not token or not phone_number_id:
+            print("[NOTIFICACIÓN] META_ACCESS_TOKEN o META_PHONE_NUMBER_ID no configurados")
             return
-        client = Client(account_sid, auth_token)
         mensaje = (
             f"🆕 *NUEVO PEDIDO — Chilango*\n"
             f"👤 Cliente: +{phone_clean}\n"
@@ -53,12 +52,22 @@ def _notify_owner(phone_clean: str, items: str, total: str, now: datetime):
             f"💰 {total}\n"
             f"🕒 {now.strftime('%d/%m · %I:%M %p')}"
         )
-        client.messages.create(
-            body=mensaje,
-            from_=TWILIO_FROM,
-            to=OWNER_WHATSAPP,
-        )
-        print(f"[NOTIFICACIÓN] Enviada al dueño")
+        url = f"https://graph.facebook.com/v19.0/{phone_number_id}/messages"
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "messaging_product": "whatsapp",
+            "to": OWNER_PHONE,
+            "type": "text",
+            "text": {"body": mensaje},
+        }
+        resp = httpx.post(url, json=payload, headers=headers, timeout=10)
+        if resp.status_code == 200:
+            print("[NOTIFICACIÓN] Enviada al dueño")
+        else:
+            print(f"[ERROR NOTIFICACIÓN] {resp.status_code} {resp.text}")
     except Exception as e:
         print(f"[ERROR NOTIFICACIÓN] {e}")
 

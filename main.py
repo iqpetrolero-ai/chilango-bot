@@ -1,5 +1,5 @@
 import os
-import json
+import html
 import httpx
 from dotenv import load_dotenv
 
@@ -11,9 +11,10 @@ import secrets
 from fastapi.responses import HTMLResponse, PlainTextResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from bot import process_message, process_message_with_image, reset_conversation, conversaciones
+from bot import process_message, process_message_with_image, reset_conversation, mensaje_bienvenida
 from orders import get_orders_count
 from menu import MENU_TEXTO
+import db
 
 app = FastAPI(title="Chilango Bot 🌮")
 
@@ -21,9 +22,12 @@ import os as _os
 if _os.path.exists("static"):
     app.mount("/static", StaticFiles(directory="static"), name="static")
 
-ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "chilango2026").strip()
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "").strip()
+if not ADMIN_PASSWORD:
+    raise RuntimeError("La variable de entorno ADMIN_PASSWORD no está configurada")
 
 security = HTTPBasic()
+
 
 def verificar_admin(credentials: HTTPBasicCredentials = Depends(security)):
     ok_user = secrets.compare_digest(credentials.username.encode(), b"admin")
@@ -32,13 +36,18 @@ def verificar_admin(credentials: HTTPBasicCredentials = Depends(security)):
         raise HTTPException(status_code=401, detail="Acceso no autorizado",
                             headers={"WWW-Authenticate": "Basic"})
 
+
 META_ACCESS_TOKEN = os.environ.get("META_ACCESS_TOKEN", "").strip()
 META_PHONE_NUMBER_ID = os.environ.get("META_PHONE_NUMBER_ID", "").strip()
-META_VERIFY_TOKEN = os.environ.get("META_VERIFY_TOKEN", "chilango2026").strip()
+META_VERIFY_TOKEN = os.environ.get("META_VERIFY_TOKEN", "").strip()
 BASE_URL = os.environ.get("RAILWAY_PUBLIC_DOMAIN", "")
 PDF_URL = f"https://{BASE_URL}/static/carta.pdf" if BASE_URL else ""
 
 PALABRAS_CARTA = ["carta", "menu", "menú", "ver carta", "ver menu", "qué tienen", "que tienen"]
+
+# Saludos genéricos que no necesitan procesarse después de la bienvenida
+SALUDOS_GENERICOS = {"hola", "buenas", "buenos días", "buenas tardes", "buenas noches",
+                     "hi", "hello", "hey", "ola", "buenas noches", "2"}
 
 
 async def send_whatsapp_message(to: str, text: str, phone_number_id: str = None):
@@ -84,7 +93,6 @@ async def send_whatsapp_document(to: str, caption: str, doc_url: str, phone_numb
 
 
 async def download_meta_image(media_id: str) -> tuple:
-    """Descarga imagen de Meta y retorna (bytes, mime_type) o (None, None)."""
     headers = {"Authorization": f"Bearer {META_ACCESS_TOKEN}"}
     async with httpx.AsyncClient() as client:
         resp = await client.get(f"https://graph.facebook.com/v19.0/{media_id}", headers=headers)
@@ -101,6 +109,18 @@ async def download_meta_image(media_id: str) -> tuple:
             print(f"[ERROR IMAGEN] No se pudo descargar: {resp2.status_code}")
             return None, None
         return resp2.content, mime_type
+
+
+async def _send_reply(phone: str, reply: str, sending_id: str):
+    if len(reply) > 1500:
+        mitad = len(reply) // 2
+        corte = reply.rfind("\n", mitad - 200, mitad + 200)
+        if corte == -1:
+            corte = mitad
+        await send_whatsapp_message(phone, reply[:corte].strip(), sending_id)
+        await send_whatsapp_message(phone, reply[corte:].strip(), sending_id)
+    else:
+        await send_whatsapp_message(phone, reply, sending_id)
 
 
 async def handle_message(phone: str, message: str, phone_number_id: str = None):
@@ -126,17 +146,18 @@ async def handle_message(phone: str, message: str, phone_number_id: str = None):
         await send_whatsapp_message(phone, "¡Listo! Conversación reiniciada. ¿En qué te puedo ayudar? 🌮", sending_id)
         return
 
-    reply = await process_message(phone, message)
+    # Nuevo usuario: enviar bienvenida primero
+    if not db.is_welcomed(phone):
+        db.mark_welcomed(phone)
+        await send_whatsapp_message(phone, mensaje_bienvenida(), sending_id)
+        # Si el primer mensaje ya es un pedido o pregunta real, procesarlo también
+        if msg_lower not in SALUDOS_GENERICOS and message.strip():
+            reply = await process_message(phone, message)
+            await _send_reply(phone, reply, sending_id)
+        return
 
-    if len(reply) > 1500:
-        mitad = len(reply) // 2
-        corte = reply.rfind("\n", mitad - 200, mitad + 200)
-        if corte == -1:
-            corte = mitad
-        await send_whatsapp_message(phone, reply[:corte].strip(), sending_id)
-        await send_whatsapp_message(phone, reply[corte:].strip(), sending_id)
-    else:
-        await send_whatsapp_message(phone, reply, sending_id)
+    reply = await process_message(phone, message)
+    await _send_reply(phone, reply, sending_id)
 
 
 # ── Webhook Meta ──────────────────────────────────────────────
@@ -219,6 +240,7 @@ async def health():
 
 @app.get("/admin", response_class=HTMLResponse)
 async def admin(credentials: HTTPBasicCredentials = Depends(verificar_admin)):
+    conversaciones = db.get_all_conversations()
     filas = ""
     for phone, mensajes in conversaciones.items():
         if not mensajes:
@@ -230,11 +252,14 @@ async def admin(credentials: HTTPBasicCredentials = Depends(verificar_admin)):
                 texto = next((b["text"] for b in content if b.get("type") == "text"), "[imagen]")
             else:
                 texto = content
+            # Escapar HTML para prevenir XSS
+            texto_seguro = html.escape(str(texto))
             lado = "cliente" if m["role"] == "user" else "bot"
-            burbujas += f'<div class="msg {lado}"><b>{"Cliente" if lado == "cliente" else "🤖 Bot"}:</b> {texto}</div>'
+            label = "Cliente" if lado == "cliente" else "🤖 Bot"
+            burbujas += f'<div class="msg {lado}"><b>{label}:</b> {texto_seguro}</div>'
         filas += f"""
         <details>
-            <summary>📱 +{phone} ({len(mensajes)} mensajes)</summary>
+            <summary>📱 +{html.escape(phone)} ({len(mensajes)} mensajes)</summary>
             <div class="chat">{burbujas}</div>
         </details>"""
 

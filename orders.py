@@ -6,9 +6,10 @@ import openpyxl
 from openpyxl import load_workbook
 from openpyxl.styles import Font, PatternFill, Alignment
 
+import db
+
 EXCEL_FILE = "pedidos_chilango.xlsx"
 PERU_TZ = timezone(timedelta(hours=-5))
-
 OWNER_PHONE = "51954713696"
 
 
@@ -23,7 +24,7 @@ def _init_excel():
 
         header_fill = PatternFill(start_color="2D5016", end_color="2D5016", fill_type="solid")
         header_font = Font(bold=True, color="FFFFFF", size=11)
-        for col, cell in enumerate(ws[1], 1):
+        for cell in ws[1]:
             cell.fill = header_fill
             cell.font = header_font
             cell.alignment = Alignment(horizontal="center")
@@ -38,7 +39,7 @@ def _init_excel():
         wb.save(EXCEL_FILE)
 
 
-def _notify_owner(phone_clean: str, items: str, total: str, now: datetime):
+async def _notify_owner(phone_clean: str, items: str, total: str, now: datetime):
     try:
         token = os.environ.get("META_ACCESS_TOKEN", "").strip()
         phone_number_id = os.environ.get("META_PHONE_NUMBER_ID", "").strip()
@@ -63,48 +64,49 @@ def _notify_owner(phone_clean: str, items: str, total: str, now: datetime):
             "type": "text",
             "text": {"body": mensaje},
         }
-        resp = httpx.post(url, json=payload, headers=headers, timeout=10)
-        if resp.status_code == 200:
-            print("[NOTIFICACIÓN] Enviada al dueño")
-        else:
-            print(f"[ERROR NOTIFICACIÓN] {resp.status_code} {resp.text}")
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(url, json=payload, headers=headers)
+            if resp.status_code == 200:
+                print("[NOTIFICACIÓN] Enviada al dueño")
+            else:
+                print(f"[ERROR NOTIFICACIÓN] {resp.status_code} {resp.text}")
     except Exception as e:
         print(f"[ERROR NOTIFICACIÓN] {e}")
 
 
-def save_order(phone: str, items: str, total: str):
-    _init_excel()
-    wb = load_workbook(EXCEL_FILE)
-    ws = wb.active
-
+async def save_order(phone: str, items: str, total: str):
     now = datetime.now(PERU_TZ)
     phone_clean = phone.replace("whatsapp:", "").replace("+", "")
 
-    row = [
-        now.strftime("%d/%m/%Y"),
-        now.strftime("%H:%M"),
-        phone_clean,
-        items,
-        total,
-        "Nuevo 🆕",
-    ]
-    ws.append(row)
-
-    last_row = ws.max_row
-    if last_row % 2 == 0:
-        row_fill = PatternFill(start_color="F2F7EE", end_color="F2F7EE", fill_type="solid")
-        for cell in ws[last_row]:
-            cell.fill = row_fill
-
-    wb.save(EXCEL_FILE)
+    # Persistencia confiable en SQLite
+    db.save_order_db(phone_clean, items, total)
     print(f"[PEDIDO GUARDADO] {now.strftime('%d/%m %H:%M')} | {phone_clean} | {total}")
 
-    _notify_owner(phone_clean, items, total, now)
+    # Excel como backup (se pierde en reinicios sin Railway Volume)
+    try:
+        _init_excel()
+        wb = load_workbook(EXCEL_FILE)
+        ws = wb.active
+        row = [
+            now.strftime("%d/%m/%Y"),
+            now.strftime("%H:%M"),
+            phone_clean,
+            items,
+            total,
+            "Nuevo 🆕",
+        ]
+        ws.append(row)
+        last_row = ws.max_row
+        if last_row % 2 == 0:
+            row_fill = PatternFill(start_color="F2F7EE", end_color="F2F7EE", fill_type="solid")
+            for cell in ws[last_row]:
+                cell.fill = row_fill
+        wb.save(EXCEL_FILE)
+    except Exception as e:
+        print(f"[EXCEL] No se pudo guardar en Excel: {e}")
+
+    await _notify_owner(phone_clean, items, total, now)
 
 
 def get_orders_count() -> int:
-    if not os.path.exists(EXCEL_FILE):
-        return 0
-    wb = load_workbook(EXCEL_FILE)
-    ws = wb.active
-    return ws.max_row - 1
+    return db.get_orders_count()

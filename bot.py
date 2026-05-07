@@ -1,4 +1,5 @@
 import os
+import base64
 from datetime import datetime, timezone, timedelta
 from anthropic import AsyncAnthropic
 from menu import MENU_TEXTO
@@ -46,7 +47,7 @@ def mensaje_bienvenida() -> str:
         "Somos un restaurante mexicano de delivery en Tacna. "
         "Tenemos tacos, quesabirrias, burritos y todo lo que necesitas para taquear rico. 🌮🌯\n\n"
         "🕒 *Horario:* Viernes, Sábado y Domingo de 5:00 pm a 11:00 pm.\n\n"
-        "¿Qué se te antoja hoy?\n\n"
+        "¿Qué te apetece hoy?\n\n"
         "1️⃣ Ver carta\n"
         "2️⃣ Hacer un pedido"
     )
@@ -65,7 +66,7 @@ Tienes personalidad amigable, con onda mexicana auténtica. Eres entusiasta con 
 - Horario: Viernes, Sábado y Domingo de 5pm a 11pm
 - WhatsApp: 953 038 816
 - Instagram: @chilangotacna
-- Formas de pago: Yape · Plin · Efectivo · Tarjeta
+- Formas de pago: Yape · Plin · Efectivo
 - Número Yape/Plin: {YAPE_PLIN_NUMBER} (distinto al WhatsApp)
 - Empaque eco resistente: S/ 2.00 por pedido (SIEMPRE incluir en el total)
 
@@ -102,15 +103,19 @@ Tienes personalidad amigable, con onda mexicana auténtica. Eres entusiasta con 
      Subtotal: S/ XX.XX
      Empaque: S/ 2.00
      *TOTAL: S/ XX.XX*
-   - Pregunta cómo va a pagar (Yape, Plin, Efectivo o Tarjeta)
+   - Pregunta cómo va a pagar (Yape, Plin o Efectivo)
    - Pregunta la dirección de entrega
    - Confirma el pedido mostrando el resumen final
 
 4. CONFIRMAR PEDIDO: Cuando el cliente confirme (diga "sí", "correcto", "dale", etc.),
-   muestra el resumen final y si el pago es por Yape o Plin agrega:
-   "📲 Puedes yapear/plinear al *{YAPE_PLIN_NUMBER}*"
-   Luego al FINAL de tu mensaje incluye EXACTAMENTE esta línea:
-   [PEDIDO_OK|items: descripción completa del pedido|total: S/XX.XX]
+   muestra el resumen final y si el pago es por Yape o Plin:
+   - Indica: "📲 Puedes yapear/plinear al *{YAPE_PLIN_NUMBER}*"
+   - Solicita: "Por favor envíanos la captura del pago para confirmar tu pedido ✅"
+   - Solo cuando el cliente envíe la captura de pago, verifica la imagen:
+     * Si el monto en la imagen coincide con el total del pedido: confirma y agrega [PEDIDO_OK|...]
+     * Si el monto es menor al total: indica la diferencia y pide que complete el pago
+     * Si no se puede leer el monto claramente: pide una captura más nítida
+   Si el pago es en Efectivo, incluye el tag [PEDIDO_OK|...] directamente al confirmar.
 
 5. ESCALACIÓN: Si el cliente escribe "humano", "agente" o "hablar con alguien",
    dile que el equipo lo atenderá pronto al 953 038 816.
@@ -136,6 +141,62 @@ async def process_message(phone: str, message: str) -> str:
     conversaciones[phone].append({
         "role": "user",
         "content": message,
+    })
+
+    history = conversaciones[phone][-30:]
+
+    response = await get_client().messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=1024,
+        system=SYSTEM_PROMPT,
+        messages=history,
+    )
+
+    reply: str = response.content[0].text
+
+    if "[PEDIDO_OK|" in reply:
+        try:
+            start = reply.index("[PEDIDO_OK|")
+            end = reply.index("]", start)
+            tag = reply[start : end + 1]
+            parts = tag[len("[PEDIDO_OK|") : -1].split("|")
+            items = parts[0].replace("items: ", "").strip()
+            total = parts[1].replace("total: ", "").strip()
+            save_order(phone, items, total)
+            reply = (reply[:start] + reply[end + 1 :]).strip()
+        except Exception as e:
+            print(f"[ERROR] No se pudo parsear el pedido: {e}")
+
+    conversaciones[phone].append({
+        "role": "assistant",
+        "content": reply,
+    })
+
+    return reply
+
+
+async def process_message_with_image(phone: str, image_bytes: bytes, mime_type: str = "image/jpeg") -> str:
+    if phone not in conversaciones:
+        conversaciones[phone] = []
+
+    image_b64 = base64.standard_b64encode(image_bytes).decode("utf-8")
+
+    conversaciones[phone].append({
+        "role": "user",
+        "content": [
+            {
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": mime_type,
+                    "data": image_b64,
+                },
+            },
+            {
+                "type": "text",
+                "text": "Te envío la captura del pago.",
+            },
+        ],
     })
 
     history = conversaciones[phone][-30:]

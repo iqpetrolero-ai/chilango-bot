@@ -5,11 +5,13 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from fastapi import FastAPI, Request, Query
+from fastapi import FastAPI, Request, Query, Depends, HTTPException
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
+import secrets
 from fastapi.responses import HTMLResponse, PlainTextResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from bot import process_message, process_message_with_image, reset_conversation
+from bot import process_message, process_message_with_image, reset_conversation, conversaciones
 from orders import get_orders_count
 from menu import MENU_TEXTO
 
@@ -18,6 +20,17 @@ app = FastAPI(title="Chilango Bot 🌮")
 import os as _os
 if _os.path.exists("static"):
     app.mount("/static", StaticFiles(directory="static"), name="static")
+
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "chilango2026").strip()
+
+security = HTTPBasic()
+
+def verificar_admin(credentials: HTTPBasicCredentials = Depends(security)):
+    ok_user = secrets.compare_digest(credentials.username.encode(), b"admin")
+    ok_pass = secrets.compare_digest(credentials.password.encode(), ADMIN_PASSWORD.encode())
+    if not (ok_user and ok_pass):
+        raise HTTPException(status_code=401, detail="Acceso no autorizado",
+                            headers={"WWW-Authenticate": "Basic"})
 
 META_ACCESS_TOKEN = os.environ.get("META_ACCESS_TOKEN", "").strip()
 META_PHONE_NUMBER_ID = os.environ.get("META_PHONE_NUMBER_ID", "").strip()
@@ -202,6 +215,55 @@ async def home():
 @app.get("/health")
 async def health():
     return {"status": "ok", "bot": "Chilango 🌮"}
+
+
+@app.get("/admin", response_class=HTMLResponse)
+async def admin(credentials: HTTPBasicCredentials = Depends(verificar_admin)):
+    filas = ""
+    for phone, mensajes in conversaciones.items():
+        if not mensajes:
+            continue
+        burbujas = ""
+        for m in mensajes:
+            content = m["content"]
+            if isinstance(content, list):
+                texto = next((b["text"] for b in content if b.get("type") == "text"), "[imagen]")
+            else:
+                texto = content
+            lado = "cliente" if m["role"] == "user" else "bot"
+            burbujas += f'<div class="msg {lado}"><b>{"Cliente" if lado == "cliente" else "🤖 Bot"}:</b> {texto}</div>'
+        filas += f"""
+        <details>
+            <summary>📱 +{phone} ({len(mensajes)} mensajes)</summary>
+            <div class="chat">{burbujas}</div>
+        </details>"""
+
+    if not filas:
+        filas = "<p style='color:#888'>No hay conversaciones activas.</p>"
+
+    return f"""
+    <html>
+    <head>
+        <title>Admin — Chilango Bot</title>
+        <meta charset="utf-8">
+        <style>
+            body {{ font-family: Arial, sans-serif; max-width: 800px; margin: 40px auto; padding: 0 20px; }}
+            h1 {{ color: #2D5016; }}
+            details {{ border: 1px solid #ddd; border-radius: 8px; margin: 10px 0; padding: 10px; }}
+            summary {{ cursor: pointer; font-weight: bold; }}
+            .chat {{ margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }}
+            .msg {{ padding: 8px 12px; border-radius: 8px; max-width: 85%; white-space: pre-wrap; font-size: 14px; }}
+            .cliente {{ background: #f0f0f0; align-self: flex-start; }}
+            .bot {{ background: #dcf8c6; align-self: flex-end; }}
+        </style>
+    </head>
+    <body>
+        <h1>🌮 Chilango Bot — Conversaciones</h1>
+        <p>Activas: <b>{len(conversaciones)}</b> &nbsp;|&nbsp; Pedidos totales: <b>{get_orders_count()}</b></p>
+        {filas}
+    </body>
+    </html>
+    """
 
 
 if __name__ == "__main__":

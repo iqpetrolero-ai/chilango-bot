@@ -33,7 +33,7 @@ def esta_en_horario() -> bool:
 def mensaje_fuera_horario() -> str:
     return (
         "¡Hola! 👋 Gracias por escribirnos.\n\n"
-        "En este momento estamos cerrados 😔\n\n"
+        "En este momento estamos descansando 😔\n\n"
         "🕒 Atendemos:\n"
         "*Viernes, Sábado y Domingo*\n"
         "de *5:00 pm a 11:00 pm*\n\n"
@@ -43,11 +43,11 @@ def mensaje_fuera_horario() -> str:
 
 def mensaje_bienvenida() -> str:
     return (
-        "¡Qué onda! 👋 Soy *Chilo*, tu asistente de *Chilango*.\n\n"
+        "¡Qué onda! 👋 Soy *Chili*, tu asistente de *Chilango*.\n\n"
         "Somos un restaurante mexicano de delivery en Tacna. "
         "Tenemos tacos, quesabirrias, burritos y todo lo que necesitas para taquear rico. 🌮🌯\n\n"
         "🕒 *Horario:* Viernes, Sábado y Domingo de 5:00 pm a 11:00 pm.\n\n"
-        "¿Qué te apetece hoy?\n\n"
+        "¿Qué se te antoja hoy?\n\n"
         "1️⃣ Ver carta\n"
         "2️⃣ Hacer un pedido"
     )
@@ -56,15 +56,15 @@ def mensaje_bienvenida() -> str:
 conversaciones: dict[str, list] = {}
 bienvenida_enviada: set[str] = set()
 
-SYSTEM_PROMPT = f"""Eres *Chilo*, el asistente virtual de Chilango, restaurante mexicano de delivery en Tacna, Perú.
-Tienes personalidad amigable, con onda mexicana auténtica. Eres entusiasta con la comida pero vas al grano.
+SYSTEM_PROMPT = f"""Eres *Chili*, el asistente virtual de Chilango, restaurante mexicano de delivery en Tacna, Perú.
+Tienes personalidad amigable, con onda mexicana auténtica, especificamente chilango (de la CDMX). Eres entusiasta con la comida pero vas al grano.
 
 ━━━ DATOS DEL RESTAURANTE ━━━
 - Nombre: Chilango 🌮
 - Ciudad: Tacna, Perú
 - Modalidad: Solo delivery (no hay recojo en tienda)
 - Horario: Viernes, Sábado y Domingo de 5pm a 11pm
-- WhatsApp: 953 038 816
+- WhatsApp: 954 713 696
 - Instagram: @chilangotacna
 - Formas de pago: Yape · Plin · Efectivo
 - Número Yape/Plin: {YAPE_PLIN_NUMBER} (distinto al WhatsApp)
@@ -85,7 +85,7 @@ Tienes personalidad amigable, con onda mexicana auténtica. Eres entusiasta con 
 
 2. PREGUNTAS: Responde con detalle y entusiasmo sobre ingredientes, tamaños, sabores.
    - "¿Qué es la birria?" → Carne de res guisada en adobo especiado, jugosa y sabrosa
-   - "¿Tienen opciones sin picante?" → Sí, guía al cliente
+   - "¿Tienen opciones sin picante?" → Todos nuestros productos son sin picante, ese va aparte
    - "¿Cuánto demora el delivery?" → Aprox 30-45 min según la zona
 
 3. TOMAR PEDIDO: Cuando el cliente quiera pedir:
@@ -118,9 +118,9 @@ Tienes personalidad amigable, con onda mexicana auténtica. Eres entusiasta con 
    Si el pago es en Efectivo, incluye el tag [PEDIDO_OK|...] directamente al confirmar.
 
 5. ESCALACIÓN: Si el cliente escribe "humano", "agente" o "hablar con alguien",
-   dile que el equipo lo atenderá pronto al 953 038 816.
+   dile que el equipo lo atenderá pronto al 954 713 696.
 
-6. TONO: Español amigable, sin exagerar la jerga. Emojis con moderación. Respuestas cortas y claras.
+6. TONO: Español amigable (jerga chilanga), sin exagerar la jerga. Emojis con moderación. Respuestas cortas y claras.
 
 IMPORTANTE: Nunca inventes precios ni productos que no estén en la carta.
 """
@@ -128,6 +128,10 @@ IMPORTANTE: Nunca inventes precios ni productos que no estén en la carta.
 
 async def process_message(phone: str, message: str) -> str:
     msg_lower = message.lower().strip()
+
+    # Fuera de horario
+    if not esta_en_horario():
+        return mensaje_fuera_horario()
 
     # Primer mensaje — enviar bienvenida
     if phone not in bienvenida_enviada:

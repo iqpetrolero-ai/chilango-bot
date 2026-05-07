@@ -9,7 +9,7 @@ from fastapi import FastAPI, Request, Query
 from fastapi.responses import HTMLResponse, PlainTextResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from bot import process_message, reset_conversation
+from bot import process_message, process_message_with_image, reset_conversation
 from orders import get_orders_count
 from menu import MENU_TEXTO
 
@@ -68,6 +68,26 @@ async def send_whatsapp_document(to: str, caption: str, doc_url: str, phone_numb
         resp = await client.post(url, json=payload, headers=headers)
         if resp.status_code != 200:
             print(f"[ERROR META DOC] {resp.status_code} {resp.text}")
+
+
+async def download_meta_image(media_id: str) -> tuple:
+    """Descarga imagen de Meta y retorna (bytes, mime_type) o (None, None)."""
+    headers = {"Authorization": f"Bearer {META_ACCESS_TOKEN}"}
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(f"https://graph.facebook.com/v19.0/{media_id}", headers=headers)
+        if resp.status_code != 200:
+            print(f"[ERROR IMAGEN] No se pudo obtener URL: {resp.text}")
+            return None, None
+        data = resp.json()
+        media_url = data.get("url")
+        mime_type = data.get("mime_type", "image/jpeg")
+        if not media_url:
+            return None, None
+        resp2 = await client.get(media_url, headers=headers)
+        if resp2.status_code != 200:
+            print(f"[ERROR IMAGEN] No se pudo descargar: {resp2.status_code}")
+            return None, None
+        return resp2.content, mime_type
 
 
 async def handle_message(phone: str, message: str, phone_number_id: str = None):
@@ -138,6 +158,14 @@ async def receive_message(request: Request):
         if msg_type == "text":
             text = message_data["text"]["body"]
             await handle_message(phone, text, phone_number_id)
+        elif msg_type == "image":
+            media_id = message_data["image"]["id"]
+            image_bytes, mime_type = await download_meta_image(media_id)
+            if image_bytes:
+                reply = await process_message_with_image(phone, image_bytes, mime_type)
+                await send_whatsapp_message(phone, reply, phone_number_id)
+            else:
+                await send_whatsapp_message(phone, "No pude leer la imagen, ¿puedes enviarla de nuevo? 📸", phone_number_id)
         else:
             await send_whatsapp_message(phone, "Por favor envía un mensaje de texto 😊", phone_number_id)
 

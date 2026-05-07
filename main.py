@@ -246,6 +246,7 @@ async def admin(credentials: HTTPBasicCredentials = Depends(verificar_admin)):
     <head>
         <title>Admin — Chilango Bot</title>
         <meta charset="utf-8">
+        <meta http-equiv="refresh" content="15">
         <style>
             body {{ font-family: Arial, sans-serif; max-width: 800px; margin: 40px auto; padding: 0 20px; }}
             h1 {{ color: #2D5016; }}

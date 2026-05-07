@@ -9,7 +9,7 @@ from openpyxl.styles import Font, PatternFill, Alignment
 EXCEL_FILE = "pedidos_chilango.xlsx"
 PERU_TZ = timezone(timedelta(hours=-5))
 
-OWNER_PHONE = "51953038816"
+OWNER_PHONE = "51954713696"
 
 
 def _init_excel():

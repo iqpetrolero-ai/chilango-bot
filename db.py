@@ -41,11 +41,16 @@ def init_db():
                 metodo_pago TEXT DEFAULT 'Efectivo'
             )
         """)
-        # Migración: agregar columna metodo_pago si la BD ya existía sin ella
-        try:
-            c.execute("ALTER TABLE orders ADD COLUMN metodo_pago TEXT DEFAULT 'Efectivo'")
-        except Exception:
-            pass  # La columna ya existe
+        # Migraciones: agregar columnas nuevas si la BD ya existía sin ellas
+        for migration in [
+            "ALTER TABLE orders ADD COLUMN metodo_pago TEXT DEFAULT 'Efectivo'",
+            "ALTER TABLE orders ADD COLUMN modificado INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE orders ADD COLUMN direccion TEXT DEFAULT ''",
+        ]:
+            try:
+                c.execute(migration)
+            except Exception:
+                pass  # La columna ya existe
 
 
 # ── Conversations ─────────────────────────────────────────────
@@ -133,12 +138,12 @@ def append_message(phone: str, role: str, content: str):
 
 # ── Orders ────────────────────────────────────────────────────
 
-def save_order_db(phone: str, items: str, total: str, metodo_pago: str = "Efectivo"):
+def save_order_db(phone: str, items: str, total: str, metodo_pago: str = "Efectivo", direccion: str = ""):
     now = datetime.now(PERU_TZ)
     with _conn() as c:
         c.execute(
-            "INSERT INTO orders (fecha, hora, phone, items, total, metodo_pago) VALUES (?,?,?,?,?,?)",
-            (now.strftime("%d/%m/%Y"), now.strftime("%H:%M"), phone, items, total, metodo_pago),
+            "INSERT INTO orders (fecha, hora, phone, items, total, metodo_pago, direccion) VALUES (?,?,?,?,?,?,?)",
+            (now.strftime("%d/%m/%Y"), now.strftime("%H:%M"), phone, items, total, metodo_pago, direccion),
         )
 
 
@@ -153,7 +158,7 @@ def get_orders_today() -> list:
     today = now.strftime("%d/%m/%Y")
     with _conn() as c:
         rows = c.execute(
-            "SELECT id, fecha, hora, phone, items, total, estado, metodo_pago FROM orders WHERE fecha=? ORDER BY id DESC",
+            "SELECT id, fecha, hora, phone, items, total, estado, metodo_pago, modificado, direccion FROM orders WHERE fecha=? ORDER BY id DESC",
             (today,)
         ).fetchall()
         return [dict(r) for r in rows]
@@ -162,3 +167,20 @@ def get_orders_today() -> list:
 def update_order_estado(order_id: int, estado: str):
     with _conn() as c:
         c.execute("UPDATE orders SET estado=? WHERE id=?", (estado, order_id))
+
+
+def update_latest_order(phone: str, items: str, total: str, metodo_pago: str, direccion: str = "") -> bool:
+    """Actualiza el pedido más reciente del cliente que no esté entregado.
+    Retorna True si se encontró y actualizó, False si no había pedido activo."""
+    with _conn() as c:
+        row = c.execute(
+            "SELECT id FROM orders WHERE phone=? AND estado != 'Entregado ✅' ORDER BY id DESC LIMIT 1",
+            (phone,)
+        ).fetchone()
+        if not row:
+            return False
+        c.execute(
+            "UPDATE orders SET items=?, total=?, metodo_pago=?, modificado=1, direccion=CASE WHEN ?!='' THEN ? ELSE direccion END WHERE id=?",
+            (items, total, metodo_pago, direccion, direccion, row["id"]),
+        )
+        return True

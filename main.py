@@ -264,6 +264,16 @@ ESTADO_BADGE = {
 }
 
 
+@app.post("/admin/test-notify")
+async def test_notify(credentials: HTTPBasicCredentials = Depends(verificar_admin)):
+    from orders import _notify_owner
+    from datetime import datetime, timezone, timedelta
+    PERU_TZ = timezone(timedelta(hours=-5))
+    now = datetime.now(PERU_TZ)
+    await _notify_owner("TEST", "Mensaje de prueba 🌮", "S/ 0.00", "Efectivo", now)
+    return JSONResponse({"status": "ok", "mensaje": "Notificación enviada — revisa los logs de Railway para ver si hubo error"})
+
+
 @app.get("/pedidos", response_class=HTMLResponse)
 async def pedidos_panel(credentials: HTTPBasicCredentials = Depends(verificar_admin)):
     pedidos = db.get_orders_today()
@@ -291,6 +301,10 @@ async def pedidos_panel(credentials: HTTPBasicCredentials = Depends(verificar_ad
                 <button type="submit" class="btn-next">→ {siguiente}</button>
             </form>""" if siguiente else '<span class="done">Completado ✅</span>'
 
+        metodo = p.get("metodo_pago") or "Efectivo"
+        pago_color = {"Yape": "#6c3d98", "Plin": "#0066cc", "Efectivo": "#2D5016"}.get(metodo, "#555")
+        pago_emoji = {"Yape": "💜", "Plin": "💙", "Efectivo": "💵"}.get(metodo, "💳")
+
         cards += f"""
         <div class="card" style="background:{color}">
             <div class="card-header">
@@ -301,6 +315,7 @@ async def pedidos_panel(credentials: HTTPBasicCredentials = Depends(verificar_ad
             <div class="card-items">{html.escape(p['items'])}</div>
             <div class="card-footer">
                 <span class="card-total">{html.escape(p['total'])}</span>
+                <span class="pago-badge" style="background:{pago_color}">{pago_emoji} {html.escape(metodo)}</span>
                 {btn_siguiente}
             </div>
         </div>"""
@@ -337,6 +352,7 @@ async def pedidos_panel(credentials: HTTPBasicCredentials = Depends(verificar_ad
         .card-items {{ font-size: 13px; color: #333; background: rgba(0,0,0,.04); padding: 8px 10px; border-radius: 8px; margin-bottom: 10px; white-space: pre-wrap; }}
         .card-footer {{ display: flex; align-items: center; justify-content: space-between; }}
         .card-total {{ font-size: 16px; font-weight: 700; color: #2D5016; }}
+        .pago-badge {{ font-size: 12px; color: white; padding: 4px 10px; border-radius: 20px; font-weight: 600; }}
         .btn-next {{ background: #2D5016; color: white; border: none; padding: 8px 16px; border-radius: 20px; cursor: pointer; font-size: 13px; font-weight: 600; }}
         .btn-next:hover {{ background: #3a6b1e; }}
         .done {{ font-size: 13px; color: #2e7d32; font-weight: 600; }}
@@ -359,12 +375,21 @@ async def pedidos_panel(credentials: HTTPBasicCredentials = Depends(verificar_ad
     </div>
     <div class="toolbar">
         <span>📅 {hoy} &nbsp;|&nbsp; <strong>{len(pedidos)}</strong> pedidos</span>
+        <button onclick="probarNotif()" style="margin-left:auto;background:#6c3d98;color:white;border:none;padding:6px 14px;border-radius:20px;cursor:pointer;font-size:13px;">🔔 Probar notificación</button>
     </div>
     <div class="content">
         {cards}
     </div>
     <div class="refresh-note">🔄 Actualización automática cada 20 segundos</div>
-    <script>setTimeout(() => location.reload(), 20000);</script>
+    <script>
+        setTimeout(() => location.reload(), 20000);
+        function probarNotif() {{
+            fetch('/admin/test-notify', {{method:'POST', credentials:'same-origin'}})
+                .then(r => r.json())
+                .then(d => alert('✅ Solicitud enviada. Revisa los logs de Railway para ver si llegó o hubo error.'))
+                .catch(e => alert('Error: ' + e));
+        }}
+    </script>
 </body>
 </html>"""
 

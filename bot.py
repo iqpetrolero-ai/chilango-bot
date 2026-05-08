@@ -3,7 +3,7 @@ import base64
 from datetime import datetime, timezone, timedelta
 from anthropic import AsyncAnthropic
 from menu import MENU_TEXTO
-from orders import save_order
+from orders import save_order, update_order
 import db
 
 db.init_db()
@@ -102,8 +102,8 @@ Tienes personalidad amigable, con onda mexicana auténtica. Eres entusiasta con 
      Empaque: S/ 2.00
      *TOTAL: S/ XX.XX*
    - Pregunta cómo va a pagar (Yape, Plin o Efectivo)
-   - Pregunta la dirección de entrega
-   - Confirma el pedido mostrando el resumen final
+   - Pregunta la dirección de entrega (calle, número y referencia si la da)
+   - Confirma el pedido mostrando el resumen final con la dirección
 
 4. CONFIRMAR PEDIDO: Cuando el cliente confirme (diga "sí", "correcto", "dale", etc.),
    muestra el resumen final y si el pago es por Yape o Plin:
@@ -115,36 +115,68 @@ Tienes personalidad amigable, con onda mexicana auténtica. Eres entusiasta con 
      * Si no se puede leer el monto claramente: pide una captura más nítida
    Si el pago es en Efectivo, incluye el tag de pedido directamente al confirmar.
 
-   FORMATO EXACTO DEL TAG — inclúyelo siempre al final de tu respuesta, sin modificar la estructura:
-   [PEDIDO_OK|items: <descripción breve del pedido>|total: S/ XX.XX|pago: <Yape|Plin|Efectivo>]
-   Ejemplos correctos:
-   [PEDIDO_OK|items: 2x Taco Suadero, 1x Agua Jamaica|total: S/ 15.00|pago: Yape]
-   [PEDIDO_OK|items: 1x Quesabirria, 1x Esquites|total: S/ 20.00|pago: Efectivo]
+   FORMATO EXACTO DEL TAG NUEVO PEDIDO (4 campos obligatorios):
+   [PEDIDO_OK|items: <descripción>|total: S/ XX.XX|pago: <Yape|Plin|Efectivo>|dir: <dirección completa>]
+   Ejemplos:
+   [PEDIDO_OK|items: 2x Taco Suadero, 1x Agua Jamaica|total: S/ 15.00|pago: Yape|dir: Av. Bolognesi 456, frente al parque]
+   [PEDIDO_OK|items: 1x Quesabirria, 1x Esquites|total: S/ 20.00|pago: Efectivo|dir: Calle Lima 123]
 
-5. ESCALACIÓN: Si el cliente escribe "humano", "agente" o "hablar con alguien",
+5. MODIFICACIONES: Si el cliente ya tiene un pedido confirmado y quiere cambiarlo:
+   - Escucha qué quiere modificar (agregar, quitar o cambiar ítems)
+   - Muestra el nuevo resumen completo con el total recalculado y la dirección confirmada
+   - Pide confirmación ("¿Confirmas el cambio?")
+   - Cuando confirme, incluye el tag de modificación al final de tu respuesta:
+
+   FORMATO EXACTO DEL TAG MODIFICACIÓN (4 campos obligatorios):
+   [PEDIDO_MOD|items: <pedido completo actualizado>|total: S/ XX.XX|pago: <Yape|Plin|Efectivo>|dir: <dirección>]
+   Ejemplo:
+   [PEDIDO_MOD|items: 3x Taco Suadero, 1x Agua Jamaica|total: S/ 21.50|pago: Yape|dir: Av. Bolognesi 456, frente al parque]
+
+   REGLA: usa [PEDIDO_OK|...] solo para pedidos nuevos y [PEDIDO_MOD|...] solo para modificaciones.
+
+6. ESCALACIÓN: Si el cliente escribe "humano", "agente" o "hablar con alguien",
    dile que el equipo lo atenderá pronto al 954 713 696.
 
-6. TONO: Español amigable, sin exagerar la jerga. Emojis con moderación. Respuestas cortas y claras.
+7. TONO: Español amigable, sin exagerar la jerga. Emojis con moderación. Respuestas cortas y claras.
 
 IMPORTANTE: Nunca inventes precios ni productos que no estén en la carta.
 """
 
 
-async def _parse_and_save_order(phone: str, reply: str) -> str:
-    if "[PEDIDO_OK|" not in reply:
-        return reply
+def _extract_tag(reply: str, tag_name: str) -> tuple[dict | None, str]:
+    """Extrae un tag del reply y devuelve (campos, reply_limpio)."""
+    marker = f"[{tag_name}|"
+    if marker not in reply:
+        return None, reply
     try:
-        start = reply.index("[PEDIDO_OK|")
+        start = reply.index(marker)
         end = reply.index("]", start)
         tag = reply[start: end + 1]
-        parts = tag[len("[PEDIDO_OK|"):-1].split("|")
-        items = parts[0].replace("items: ", "").strip()
-        total = parts[1].replace("total: ", "").strip()
-        metodo_pago = parts[2].replace("pago: ", "").strip() if len(parts) > 2 else "Efectivo"
-        await save_order(phone, items, total, metodo_pago)
-        reply = (reply[:start] + reply[end + 1:]).strip()
+        parts = tag[len(marker):-1].split("|")
+        fields = {
+            "items": parts[0].replace("items: ", "").strip(),
+            "total": parts[1].replace("total: ", "").strip(),
+            "pago":  parts[2].replace("pago: ", "").strip() if len(parts) > 2 else "Efectivo",
+            "dir":   parts[3].replace("dir: ", "").strip()  if len(parts) > 3 else "",
+        }
+        reply_clean = (reply[:start] + reply[end + 1:]).strip()
+        return fields, reply_clean
     except Exception as e:
-        print(f"[ERROR] No se pudo parsear el pedido: {e}")
+        print(f"[ERROR] No se pudo parsear [{tag_name}]: {e}")
+        return None, reply
+
+
+async def _parse_and_save_order(phone: str, reply: str) -> str:
+    # Pedido nuevo
+    fields, reply = _extract_tag(reply, "PEDIDO_OK")
+    if fields:
+        await save_order(phone, fields["items"], fields["total"], fields["pago"], fields["dir"])
+
+    # Modificación de pedido existente
+    fields, reply = _extract_tag(reply, "PEDIDO_MOD")
+    if fields:
+        await update_order(phone, fields["items"], fields["total"], fields["pago"], fields["dir"])
+
     return reply
 
 

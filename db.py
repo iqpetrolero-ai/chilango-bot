@@ -109,3 +109,19 @@ def get_orders_count() -> int:
     with _conn() as c:
         row = c.execute("SELECT COUNT(*) AS n FROM orders").fetchone()
         return row["n"] if row else 0
+
+
+def get_orders_today() -> list:
+    now = datetime.now(PERU_TZ)
+    today = now.strftime("%d/%m/%Y")
+    with _conn() as c:
+        rows = c.execute(
+            "SELECT id, fecha, hora, phone, items, total, estado FROM orders WHERE fecha=? ORDER BY id DESC",
+            (today,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def update_order_estado(order_id: int, estado: str):
+    with _conn() as c:
+        c.execute("UPDATE orders SET estado=? WHERE id=?", (estado, order_id))

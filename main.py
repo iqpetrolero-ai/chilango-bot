@@ -245,6 +245,140 @@ async def health():
     return {"status": "ok", "bot": "Chilango 🌮"}
 
 
+ESTADOS = ["Nuevo 🆕", "En preparación 👨‍🍳", "En camino 🛵", "Entregado ✅"]
+ESTADO_COLORS = {
+    "Nuevo 🆕": "#e3f2fd",
+    "En preparación 👨‍🍳": "#fff8e1",
+    "En camino 🛵": "#fff3e0",
+    "Entregado ✅": "#e8f5e9",
+}
+ESTADO_BADGE = {
+    "Nuevo 🆕": "#1976d2",
+    "En preparación 👨‍🍳": "#f57f17",
+    "En camino 🛵": "#e65100",
+    "Entregado ✅": "#2e7d32",
+}
+
+
+@app.get("/pedidos", response_class=HTMLResponse)
+async def pedidos_panel(credentials: HTTPBasicCredentials = Depends(verificar_admin)):
+    pedidos = db.get_orders_today()
+    from datetime import datetime, timezone, timedelta
+    PERU_TZ = timezone(timedelta(hours=-5))
+    hoy = datetime.now(PERU_TZ).strftime("%d/%m/%Y")
+
+    total_dia = sum(
+        float(p["total"].replace("S/", "").replace(",", ".").strip())
+        for p in pedidos if p["estado"] != "Entregado ✅"
+        if p["total"]
+    ) if pedidos else 0
+
+    cards = ""
+    for p in pedidos:
+        estado = p["estado"] or "Nuevo 🆕"
+        color = ESTADO_COLORS.get(estado, "#f5f5f5")
+        badge_color = ESTADO_BADGE.get(estado, "#666")
+        idx = ESTADOS.index(estado) if estado in ESTADOS else 0
+        siguiente = ESTADOS[idx + 1] if idx < len(ESTADOS) - 1 else None
+        btn_siguiente = f"""
+            <form method="post" action="/pedidos/estado" style="display:inline">
+                <input type="hidden" name="order_id" value="{p['id']}">
+                <input type="hidden" name="estado" value="{siguiente}">
+                <button type="submit" class="btn-next">→ {siguiente}</button>
+            </form>""" if siguiente else '<span class="done">Completado ✅</span>'
+
+        cards += f"""
+        <div class="card" style="background:{color}">
+            <div class="card-header">
+                <span class="card-time">🕒 {p['hora']}</span>
+                <span class="card-phone">📱 +{html.escape(p['phone'])}</span>
+                <span class="card-badge" style="background:{badge_color}">{html.escape(estado)}</span>
+            </div>
+            <div class="card-items">{html.escape(p['items'])}</div>
+            <div class="card-footer">
+                <span class="card-total">{html.escape(p['total'])}</span>
+                {btn_siguiente}
+            </div>
+        </div>"""
+
+    if not cards:
+        cards = "<div class='empty'>No hay pedidos hoy todavía 🌮</div>"
+
+    return f"""<!DOCTYPE html>
+<html>
+<head>
+    <title>Pedidos del día — Chilango</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f0f2f5; min-height: 100vh; }}
+        .header {{ background: #2D5016; color: white; padding: 12px 20px; display: flex; align-items: center; gap: 12px; position: sticky; top: 0; z-index: 10; }}
+        .header img {{ height: 40px; border-radius: 8px; }}
+        .header h1 {{ font-size: 17px; }}
+        .header .sub {{ font-size: 12px; opacity: 0.7; }}
+        .header .total-dia {{ margin-left: auto; font-size: 15px; font-weight: 700; background: rgba(255,255,255,.15); padding: 6px 14px; border-radius: 20px; }}
+        .nav {{ background: #1b3a0e; display: flex; gap: 0; }}
+        .nav a {{ color: rgba(255,255,255,.7); text-decoration: none; padding: 10px 20px; font-size: 14px; }}
+        .nav a:hover, .nav a.active {{ color: white; background: rgba(255,255,255,.1); }}
+        .toolbar {{ padding: 12px 16px; display: flex; align-items: center; gap: 10px; background: white; border-bottom: 1px solid #e0e0e0; }}
+        .toolbar span {{ font-size: 14px; color: #555; }}
+        .toolbar strong {{ color: #2D5016; }}
+        .content {{ padding: 16px; max-width: 700px; margin: 0 auto; }}
+        .card {{ border-radius: 12px; padding: 14px; margin-bottom: 12px; box-shadow: 0 1px 4px rgba(0,0,0,.1); }}
+        .card-header {{ display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }}
+        .card-time {{ font-size: 13px; color: #555; }}
+        .card-phone {{ font-size: 13px; color: #333; font-weight: 600; }}
+        .card-badge {{ font-size: 11px; color: white; padding: 3px 10px; border-radius: 20px; margin-left: auto; font-weight: 600; }}
+        .card-items {{ font-size: 13px; color: #333; background: rgba(0,0,0,.04); padding: 8px 10px; border-radius: 8px; margin-bottom: 10px; white-space: pre-wrap; }}
+        .card-footer {{ display: flex; align-items: center; justify-content: space-between; }}
+        .card-total {{ font-size: 16px; font-weight: 700; color: #2D5016; }}
+        .btn-next {{ background: #2D5016; color: white; border: none; padding: 8px 16px; border-radius: 20px; cursor: pointer; font-size: 13px; font-weight: 600; }}
+        .btn-next:hover {{ background: #3a6b1e; }}
+        .done {{ font-size: 13px; color: #2e7d32; font-weight: 600; }}
+        .empty {{ text-align: center; padding: 60px 20px; color: #888; font-size: 16px; }}
+        .refresh-note {{ text-align: center; font-size: 11px; color: #aaa; padding: 12px; }}
+    </style>
+</head>
+<body>
+    <div class="header">
+        <img src="/static/logo.png" alt="Chilango">
+        <div>
+            <h1>Chilango Bot</h1>
+            <div class="sub">Panel de pedidos</div>
+        </div>
+        <div class="total-dia">💰 S/ {total_dia:.2f} hoy</div>
+    </div>
+    <div class="nav">
+        <a href="/pedidos" class="active">📦 Pedidos del día</a>
+        <a href="/admin">💬 Conversaciones</a>
+    </div>
+    <div class="toolbar">
+        <span>📅 {hoy} &nbsp;|&nbsp; <strong>{len(pedidos)}</strong> pedidos</span>
+    </div>
+    <div class="content">
+        {cards}
+    </div>
+    <div class="refresh-note">🔄 Actualización automática cada 20 segundos</div>
+    <script>setTimeout(() => location.reload(), 20000);</script>
+</body>
+</html>"""
+
+
+@app.post("/pedidos/estado")
+async def actualizar_estado(
+    request: Request,
+    credentials: HTTPBasicCredentials = Depends(verificar_admin)
+):
+    from fastapi.responses import RedirectResponse
+    form = await request.form()
+    order_id = int(form.get("order_id", 0))
+    estado = form.get("estado", "")
+    if order_id and estado in ESTADOS:
+        db.update_order_estado(order_id, estado)
+    return RedirectResponse(url="/pedidos", status_code=303)
+
+
 @app.get("/admin", response_class=HTMLResponse)
 async def admin(credentials: HTTPBasicCredentials = Depends(verificar_admin)):
     conversaciones = db.get_all_conversations()
@@ -341,6 +475,10 @@ async def admin(credentials: HTTPBasicCredentials = Depends(verificar_admin)):
             👥 {len(conversaciones)} conversaciones<br>
             📦 {num_orders} pedidos registrados
         </div>
+    </div>
+    <div style="background:#1b3a0e;display:flex;">
+        <a href="/pedidos" style="color:rgba(255,255,255,.7);text-decoration:none;padding:10px 20px;font-size:14px;">📦 Pedidos del día</a>
+        <a href="/admin" style="color:white;text-decoration:none;padding:10px 20px;font-size:14px;background:rgba(255,255,255,.1);">💬 Conversaciones</a>
     </div>
     <div class="container">
         <div class="sidebar">

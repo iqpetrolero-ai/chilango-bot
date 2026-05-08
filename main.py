@@ -154,15 +154,19 @@ async def handle_message(phone: str, message: str, phone_number_id: str = None):
     if not db.is_welcomed(phone):
         db.mark_welcomed(phone)
         bienvenida = mensaje_bienvenida()
-        db.append_message(phone, "user", message)
-        db.append_message(phone, "assistant", bienvenida)
         await send_whatsapp_message(phone, bienvenida, sending_id)
-        # Si el primer mensaje ya es un pedido o pregunta real, procesarlo también
         if msg_lower not in SALUDOS_GENERICOS and message.strip():
+            # process_message se encarga de guardar el historial
             reply = await process_message(phone, message)
             await _send_reply(phone, reply, sending_id)
+        else:
+            # Saludo genérico: guardar el intercambio manualmente
+            db.append_message(phone, "user", message)
+            db.append_message(phone, "assistant", bienvenida)
+        db.mark_unread(phone)
         return
 
+    db.mark_unread(phone)
     reply = await process_message(phone, message)
     await _send_reply(phone, reply, sending_id)
 
@@ -379,14 +383,22 @@ async def actualizar_estado(
     return RedirectResponse(url="/pedidos", status_code=303)
 
 
+@app.post("/admin/mark-read/{phone}")
+async def mark_read(phone: str, credentials: HTTPBasicCredentials = Depends(verificar_admin)):
+    db.mark_read(phone)
+    return JSONResponse({"status": "ok"})
+
+
 @app.get("/admin", response_class=HTMLResponse)
 async def admin(credentials: HTTPBasicCredentials = Depends(verificar_admin)):
-    conversaciones = db.get_all_conversations()
+    conversaciones_raw = db.get_conversations_with_status()
     num_orders = get_orders_count()
 
     # Sidebar de contactos
     contacts_html = ""
-    for phone, mensajes in conversaciones.items():
+    for phone, data in conversaciones_raw.items():
+        mensajes = data["messages"]
+        leida = data["leida"]
         if not mensajes:
             continue
         ultimo = mensajes[-1]
@@ -396,14 +408,16 @@ async def admin(credentials: HTTPBasicCredentials = Depends(verificar_admin)):
         else:
             preview = contenido
         preview = html.escape(str(preview)[:50])
+        badge = "" if leida else f'<div class="contact-unread">{sum(1 for m in mensajes if m["role"] == "user")}</div>'
+        unread_class = "" if leida else " unread"
         contacts_html += f"""
-        <div class="contact" id="c_{html.escape(phone)}" onclick="showChat('{html.escape(phone)}')">
+        <div class="contact{unread_class}" id="c_{html.escape(phone)}" onclick="showChat('{html.escape(phone)}')">
             <div class="avatar">👤</div>
             <div class="contact-info">
                 <div class="contact-name">+{html.escape(phone)}</div>
                 <div class="contact-preview">{preview}</div>
             </div>
-            <div class="contact-count">{len(mensajes)}</div>
+            {badge}
         </div>"""
 
     if not contacts_html:
@@ -411,9 +425,9 @@ async def admin(credentials: HTTPBasicCredentials = Depends(verificar_admin)):
 
     # Serializar conversaciones para JS (imágenes excluidas por tamaño)
     conv_clean = {}
-    for phone, msgs in conversaciones.items():
+    for phone, data in conversaciones_raw.items():
         conv_clean[phone] = []
-        for m in msgs:
+        for m in data["messages"]:
             c = m["content"]
             if isinstance(c, list):
                 texto = next((b["text"] for b in c if b.get("type") == "text"), "[imagen 📷]")
@@ -447,7 +461,9 @@ async def admin(credentials: HTTPBasicCredentials = Depends(verificar_admin)):
         .contact-info {{ flex: 1; min-width: 0; }}
         .contact-name {{ font-weight: 600; font-size: 14px; color: #111; }}
         .contact-preview {{ font-size: 13px; color: #667781; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }}
-        .contact-count {{ font-size: 11px; background: #25d366; color: white; border-radius: 50%; width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-weight: 600; }}
+        .contact-unread {{ font-size: 11px; background: #25d366; color: white; border-radius: 50%; width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-weight: 600; }}
+        .contact.unread {{ background: #f0fdf4; }}
+        .contact.unread .contact-name {{ color: #111; font-weight: 700; }}
         .chat-panel {{ flex: 1; display: flex; flex-direction: column; background: #efeae2; overflow: hidden; }}
         .chat-header {{ background: #f0f2f5; padding: 10px 16px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid #e0e0e0; flex-shrink: 0; }}
         .chat-header .avatar {{ width: 38px; height: 38px; font-size: 16px; }}
@@ -472,7 +488,7 @@ async def admin(credentials: HTTPBasicCredentials = Depends(verificar_admin)):
             <div class="sub">Panel de conversaciones</div>
         </div>
         <div class="stats">
-            👥 {len(conversaciones)} conversaciones<br>
+            👥 {len(conversaciones_raw)} conversaciones<br>
             📦 {num_orders} pedidos registrados
         </div>
     </div>
@@ -504,7 +520,19 @@ async def admin(credentials: HTTPBasicCredentials = Depends(verificar_admin)):
         function showChat(phone) {{
             document.querySelectorAll('.contact').forEach(c => c.classList.remove('active'));
             const el = document.getElementById('c_' + phone);
-            if (el) el.classList.add('active');
+            if (el) {{
+                el.classList.add('active');
+                // Marcar como leída: quitar bolita verde y fondo destacado
+                el.classList.remove('unread');
+                const badge = el.querySelector('.contact-unread');
+                if (badge) badge.remove();
+            }}
+
+            // Notificar al servidor
+            fetch(`/admin/mark-read/${{encodeURIComponent(phone)}}`, {{
+                method: 'POST',
+                headers: {{'Authorization': 'Basic ' + btoa(sessionStorage.getItem('adminAuth') || '')}}
+            }});
 
             const msgs = convs[phone] || [];
             const bubbles = msgs.map(m => {{

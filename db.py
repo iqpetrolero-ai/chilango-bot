@@ -20,9 +20,15 @@ def init_db():
             CREATE TABLE IF NOT EXISTS conversations (
                 phone TEXT PRIMARY KEY,
                 messages TEXT NOT NULL DEFAULT '[]',
-                welcomed INTEGER NOT NULL DEFAULT 0
+                welcomed INTEGER NOT NULL DEFAULT 0,
+                leida INTEGER NOT NULL DEFAULT 0
             )
         """)
+        # Migración: agregar columna leida si la BD ya existía sin ella
+        try:
+            c.execute("ALTER TABLE conversations ADD COLUMN leida INTEGER NOT NULL DEFAULT 0")
+        except Exception:
+            pass  # La columna ya existe
         c.execute("""
             CREATE TABLE IF NOT EXISTS orders (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -73,12 +79,37 @@ def reset_conv(phone: str):
         c.execute("DELETE FROM conversations WHERE phone=?", (phone,))
 
 
+def mark_read(phone: str):
+    with _conn() as c:
+        c.execute("UPDATE conversations SET leida=1 WHERE phone=?", (phone,))
+
+
+def mark_unread(phone: str):
+    with _conn() as c:
+        c.execute("UPDATE conversations SET leida=0 WHERE phone=?", (phone,))
+
+
 def get_all_conversations() -> dict[str, list]:
     with _conn() as c:
         rows = c.execute(
-            "SELECT phone, messages FROM conversations WHERE welcomed=1"
+            "SELECT phone, messages FROM conversations WHERE welcomed=1 AND messages != '[]'"
         ).fetchall()
         return {r["phone"]: json.loads(r["messages"]) for r in rows}
+
+
+def get_conversations_with_status() -> dict[str, dict]:
+    """Retorna {phone: {messages: [...], leida: bool}} para el panel admin."""
+    with _conn() as c:
+        rows = c.execute(
+            "SELECT phone, messages, leida FROM conversations WHERE welcomed=1 AND messages != '[]'"
+        ).fetchall()
+        return {
+            r["phone"]: {
+                "messages": json.loads(r["messages"]),
+                "leida": bool(r["leida"]),
+            }
+            for r in rows
+        }
 
 
 def append_message(phone: str, role: str, content: str):

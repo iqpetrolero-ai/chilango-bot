@@ -39,18 +39,20 @@ def _init_excel():
         wb.save(EXCEL_FILE)
 
 
-async def _notify_owner(phone_clean: str, items: str, total: str, now: datetime):
+async def _notify_owner(phone_clean: str, items: str, total: str, metodo_pago: str, now: datetime):
     try:
         token = os.environ.get("META_ACCESS_TOKEN", "").strip()
         phone_number_id = os.environ.get("META_PHONE_NUMBER_ID", "").strip()
         if not token or not phone_number_id:
             print("[NOTIFICACIÓN] META_ACCESS_TOKEN o META_PHONE_NUMBER_ID no configurados")
             return
+        pago_emoji = {"Yape": "💜 Yape", "Plin": "💙 Plin", "Efectivo": "💵 Efectivo"}.get(metodo_pago, metodo_pago)
         mensaje = (
             f"🆕 *NUEVO PEDIDO — Chilango*\n"
             f"👤 Cliente: +{phone_clean}\n"
             f"🛒 {items}\n"
             f"💰 {total}\n"
+            f"💳 {pago_emoji}\n"
             f"🕒 {now.strftime('%d/%m · %I:%M %p')}"
         )
         url = f"https://graph.facebook.com/v19.0/{phone_number_id}/messages"
@@ -67,20 +69,24 @@ async def _notify_owner(phone_clean: str, items: str, total: str, now: datetime)
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.post(url, json=payload, headers=headers)
             if resp.status_code == 200:
-                print("[NOTIFICACIÓN] Enviada al dueño")
+                print(f"[NOTIFICACIÓN] ✅ Enviada al dueño ({OWNER_PHONE})")
             else:
-                print(f"[ERROR NOTIFICACIÓN] {resp.status_code} {resp.text}")
+                data = resp.json()
+                error_msg = data.get("error", {}).get("message", resp.text)
+                error_code = data.get("error", {}).get("code", resp.status_code)
+                print(f"[ERROR NOTIFICACIÓN] Código {error_code}: {error_msg}")
+                print(f"[ERROR NOTIFICACIÓN] Respuesta completa: {resp.text}")
     except Exception as e:
-        print(f"[ERROR NOTIFICACIÓN] {e}")
+        print(f"[ERROR NOTIFICACIÓN] Excepción: {e}")
 
 
-async def save_order(phone: str, items: str, total: str):
+async def save_order(phone: str, items: str, total: str, metodo_pago: str = "Efectivo"):
     now = datetime.now(PERU_TZ)
     phone_clean = phone.replace("whatsapp:", "").replace("+", "")
 
     # Persistencia confiable en SQLite
-    db.save_order_db(phone_clean, items, total)
-    print(f"[PEDIDO GUARDADO] {now.strftime('%d/%m %H:%M')} | {phone_clean} | {total}")
+    db.save_order_db(phone_clean, items, total, metodo_pago)
+    print(f"[PEDIDO GUARDADO] {now.strftime('%d/%m %H:%M')} | {phone_clean} | {total} | {metodo_pago}")
 
     # Excel como backup (se pierde en reinicios sin Railway Volume)
     try:
@@ -94,6 +100,7 @@ async def save_order(phone: str, items: str, total: str):
             items,
             total,
             "Nuevo 🆕",
+            metodo_pago,
         ]
         ws.append(row)
         last_row = ws.max_row
@@ -105,7 +112,7 @@ async def save_order(phone: str, items: str, total: str):
     except Exception as e:
         print(f"[EXCEL] No se pudo guardar en Excel: {e}")
 
-    await _notify_owner(phone_clean, items, total, now)
+    await _notify_owner(phone_clean, items, total, metodo_pago, now)
 
 
 def get_orders_count() -> int:

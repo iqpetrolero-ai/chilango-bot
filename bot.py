@@ -116,8 +116,10 @@ Tienes personalidad amigable, con onda mexicana auténtica. Eres entusiasta con 
    Si el pago es en Efectivo, incluye el tag de pedido directamente al confirmar.
 
    FORMATO EXACTO DEL TAG — inclúyelo siempre al final de tu respuesta, sin modificar la estructura:
-   [PEDIDO_OK|items: <descripción breve del pedido>|total: S/ XX.XX]
-   Ejemplo correcto: [PEDIDO_OK|items: 2x Taco Suadero, 1x Agua Jamaica|total: S/ 15.00]
+   [PEDIDO_OK|items: <descripción breve del pedido>|total: S/ XX.XX|pago: <Yape|Plin|Efectivo>]
+   Ejemplos correctos:
+   [PEDIDO_OK|items: 2x Taco Suadero, 1x Agua Jamaica|total: S/ 15.00|pago: Yape]
+   [PEDIDO_OK|items: 1x Quesabirria, 1x Esquites|total: S/ 20.00|pago: Efectivo]
 
 5. ESCALACIÓN: Si el cliente escribe "humano", "agente" o "hablar con alguien",
    dile que el equipo lo atenderá pronto al 954 713 696.
@@ -138,7 +140,8 @@ async def _parse_and_save_order(phone: str, reply: str) -> str:
         parts = tag[len("[PEDIDO_OK|"):-1].split("|")
         items = parts[0].replace("items: ", "").strip()
         total = parts[1].replace("total: ", "").strip()
-        await save_order(phone, items, total)
+        metodo_pago = parts[2].replace("pago: ", "").strip() if len(parts) > 2 else "Efectivo"
+        await save_order(phone, items, total, metodo_pago)
         reply = (reply[:start] + reply[end + 1:]).strip()
     except Exception as e:
         print(f"[ERROR] No se pudo parsear el pedido: {e}")

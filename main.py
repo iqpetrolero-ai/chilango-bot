@@ -528,10 +528,10 @@ async def admin(credentials: HTTPBasicCredentials = Depends(verificar_admin)):
                 if (badge) badge.remove();
             }}
 
-            // Notificar al servidor
+            // Notificar al servidor (credentials: 'same-origin' reutiliza las credenciales ya autenticadas)
             fetch(`/admin/mark-read/${{encodeURIComponent(phone)}}`, {{
                 method: 'POST',
-                headers: {{'Authorization': 'Basic ' + btoa(sessionStorage.getItem('adminAuth') || '')}}
+                credentials: 'same-origin'
             }});
 
             const msgs = convs[phone] || [];

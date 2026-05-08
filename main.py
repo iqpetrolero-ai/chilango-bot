@@ -304,15 +304,20 @@ async def pedidos_panel(credentials: HTTPBasicCredentials = Depends(verificar_ad
         metodo = p.get("metodo_pago") or "Efectivo"
         pago_color = {"Yape": "#6c3d98", "Plin": "#0066cc", "Efectivo": "#2D5016"}.get(metodo, "#555")
         pago_emoji = {"Yape": "💜", "Plin": "💙", "Efectivo": "💵"}.get(metodo, "💳")
+        direccion = p.get("direccion") or ""
+        dir_html = f'<div class="card-dir">📍 {html.escape(direccion)}</div>' if direccion else '<div class="card-dir sin-dir">📍 Sin dirección registrada</div>'
+        mod_badge = '<span class="mod-badge">✏️ Modificado</span>' if p.get("modificado") else ""
 
         cards += f"""
         <div class="card" style="background:{color}">
             <div class="card-header">
                 <span class="card-time">🕒 {p['hora']}</span>
                 <span class="card-phone">📱 +{html.escape(p['phone'])}</span>
+                {mod_badge}
                 <span class="card-badge" style="background:{badge_color}">{html.escape(estado)}</span>
             </div>
             <div class="card-items">{html.escape(p['items'])}</div>
+            {dir_html}
             <div class="card-footer">
                 <span class="card-total">{html.escape(p['total'])}</span>
                 <span class="pago-badge" style="background:{pago_color}">{pago_emoji} {html.escape(metodo)}</span>
@@ -353,6 +358,9 @@ async def pedidos_panel(credentials: HTTPBasicCredentials = Depends(verificar_ad
         .card-footer {{ display: flex; align-items: center; justify-content: space-between; }}
         .card-total {{ font-size: 16px; font-weight: 700; color: #2D5016; }}
         .pago-badge {{ font-size: 12px; color: white; padding: 4px 10px; border-radius: 20px; font-weight: 600; }}
+        .card-dir {{ font-size: 13px; color: #444; background: rgba(0,0,0,.04); padding: 6px 10px; border-radius: 8px; margin-bottom: 10px; }}
+        .card-dir.sin-dir {{ color: #aaa; font-style: italic; }}
+        .mod-badge {{ font-size: 11px; background: #e65100; color: white; padding: 2px 8px; border-radius: 20px; font-weight: 600; }}
         .btn-next {{ background: #2D5016; color: white; border: none; padding: 8px 16px; border-radius: 20px; cursor: pointer; font-size: 13px; font-weight: 600; }}
         .btn-next:hover {{ background: #3a6b1e; }}
         .done {{ font-size: 13px; color: #2e7d32; font-weight: 600; }}

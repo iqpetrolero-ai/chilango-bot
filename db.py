@@ -76,9 +76,22 @@ def reset_conv(phone: str):
 def get_all_conversations() -> dict[str, list]:
     with _conn() as c:
         rows = c.execute(
-            "SELECT phone, messages FROM conversations WHERE welcomed=1 AND messages != '[]'"
+            "SELECT phone, messages FROM conversations WHERE welcomed=1"
         ).fetchall()
         return {r["phone"]: json.loads(r["messages"]) for r in rows}
+
+
+def append_message(phone: str, role: str, content: str):
+    """Agrega un mensaje al historial sin reemplazarlo (para mensajes no procesados por Claude)."""
+    with _conn() as c:
+        row = c.execute("SELECT messages FROM conversations WHERE phone=?", (phone,)).fetchone()
+        msgs = json.loads(row["messages"]) if row else []
+        msgs.append({"role": role, "content": content})
+        c.execute("""
+            INSERT INTO conversations (phone, messages, welcomed)
+            VALUES (?, ?, 1)
+            ON CONFLICT(phone) DO UPDATE SET messages=excluded.messages
+        """, (phone, json.dumps(msgs, ensure_ascii=False)))
 
 
 # ── Orders ────────────────────────────────────────────────────

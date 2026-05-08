@@ -131,6 +131,9 @@ async def handle_message(phone: str, message: str, phone_number_id: str = None):
 
     # Enviar carta como PDF o texto
     if message.strip() == "1" or any(p in msg_lower for p in PALABRAS_CARTA):
+        db.append_message(phone, "user", message)
+        respuesta_carta = "📄 [Carta enviada como PDF]" if PDF_URL else "[Carta enviada como texto]"
+        db.append_message(phone, "assistant", respuesta_carta)
         if PDF_URL:
             await send_whatsapp_document(phone, "¡Aquí está nuestra carta! 🌮", PDF_URL, sending_id)
         else:
@@ -150,7 +153,10 @@ async def handle_message(phone: str, message: str, phone_number_id: str = None):
     # Nuevo usuario: enviar bienvenida primero
     if not db.is_welcomed(phone):
         db.mark_welcomed(phone)
-        await send_whatsapp_message(phone, mensaje_bienvenida(), sending_id)
+        bienvenida = mensaje_bienvenida()
+        db.append_message(phone, "user", message)
+        db.append_message(phone, "assistant", bienvenida)
+        await send_whatsapp_message(phone, bienvenida, sending_id)
         # Si el primer mensaje ya es un pedido o pregunta real, procesarlo también
         if msg_lower not in SALUDOS_GENERICOS and message.strip():
             reply = await process_message(phone, message)

@@ -307,25 +307,34 @@ async def _parse_and_save_order(phone: str, reply: str) -> str:
     # Capturar nombre si el bot lo detectó
     nombre, reply = _extract_save_name(reply)
     if nombre:
-        db.save_customer_profile(phone_clean, nombre=nombre)
+        try:
+            db.save_customer_profile(phone_clean, nombre=nombre)
+        except Exception as e:
+            print(f"[PERFIL] Error al guardar nombre: {e}")
 
     # Pedido nuevo
     fields, reply = _extract_tag(reply, "PEDIDO_OK")
     if fields:
         await save_order(phone, fields["items"], fields["total"], fields["pago"], fields["dir"])
-        db.save_customer_profile(phone_clean,
-                                  ultima_dir=fields["dir"],
-                                  ultimo_pedido=fields["items"],
-                                  ultimo_pago=fields["pago"])
+        try:
+            db.save_customer_profile(phone_clean,
+                                     ultima_dir=fields["dir"],
+                                     ultimo_pedido=fields["items"],
+                                     ultimo_pago=fields["pago"])
+        except Exception as e:
+            print(f"[PERFIL] Error al guardar perfil tras PEDIDO_OK: {e}")
 
     # Modificación de pedido existente
     fields, reply = _extract_tag(reply, "PEDIDO_MOD")
     if fields:
         await update_order(phone, fields["items"], fields["total"], fields["pago"], fields["dir"])
-        db.save_customer_profile(phone_clean,
-                                  ultima_dir=fields["dir"],
-                                  ultimo_pedido=fields["items"],
-                                  ultimo_pago=fields["pago"])
+        try:
+            db.save_customer_profile(phone_clean,
+                                     ultima_dir=fields["dir"],
+                                     ultimo_pedido=fields["items"],
+                                     ultimo_pago=fields["pago"])
+        except Exception as e:
+            print(f"[PERFIL] Error al guardar perfil tras PEDIDO_MOD: {e}")
 
     # Cancelación de pedido
     if "[PEDIDO_CANCEL]" in reply:
@@ -349,39 +358,46 @@ def _estimar_espera(pedidos_activos: int) -> str:
 async def _call_claude(phone: str, messages: list) -> str:
     history = messages[-30:]
     hora_tacna = datetime.now(PERU_TZ).strftime("%H:%M")
-
-    # Inyectar perfil del cliente si existe
     phone_clean = phone.replace("whatsapp:", "").replace("+", "")
-    profile = db.get_customer_profile(phone_clean)
-    profile_ctx = ""
-    if profile:
-        parts = []
-        if profile.get("nombre"):
-            parts.append(f"Nombre: {profile['nombre']}")
-        if profile.get("ultima_dir"):
-            parts.append(f"Última dirección de entrega: {profile['ultima_dir']}")
-        if profile.get("ultimo_pedido"):
-            parts.append(f"Último pedido: {profile['ultimo_pedido']}")
-        if profile.get("ultimo_pago"):
-            parts.append(f"Método de pago habitual: {profile['ultimo_pago']}")
-        if parts:
-            profile_ctx = (
-                "\n\n━━━ PERFIL DEL CLIENTE (memoria de sesiones anteriores) ━━━\n"
-                + "\n".join(f"- {p}" for p in parts)
-                + "\nUsa estos datos para personalizar la atención de forma natural."
-            )
 
-    # Tiempo estimado dinámico basado en pedidos activos
-    activos = db.get_active_orders_count()
-    espera = _estimar_espera(activos)
+    # Perfil del cliente — try/except para que un error de BD no bloquee la respuesta
+    profile_ctx = ""
+    try:
+        profile = db.get_customer_profile(phone_clean)
+        if profile:
+            parts = []
+            if profile.get("nombre"):
+                parts.append(f"Nombre: {profile['nombre']}")
+            if profile.get("ultima_dir"):
+                parts.append(f"Última dirección de entrega: {profile['ultima_dir']}")
+            if profile.get("ultimo_pedido"):
+                parts.append(f"Último pedido: {profile['ultimo_pedido']}")
+            if profile.get("ultimo_pago"):
+                parts.append(f"Método de pago habitual: {profile['ultimo_pago']}")
+            if parts:
+                profile_ctx = (
+                    "\n\n━━━ PERFIL DEL CLIENTE (memoria de sesiones anteriores) ━━━\n"
+                    + "\n".join(f"- {p}" for p in parts)
+                    + "\nUsa estos datos para personalizar la atención de forma natural."
+                )
+    except Exception as e:
+        print(f"[PERFIL] Error al obtener perfil de {phone_clean}: {e}")
+
+    # Tiempo estimado — try/except por si la BD falla
+    tiempo_ctx = "\nTiempo estimado de preparación: 35-40 minutos"
+    try:
+        activos = db.get_active_orders_count()
+        espera = _estimar_espera(activos)
+        tiempo_ctx = f"\nPedidos activos ahora: {activos}\nTiempo estimado de preparación: {espera}"
+    except Exception as e:
+        print(f"[ESPERA] Error al calcular tiempo estimado: {e}")
 
     system = (
         SYSTEM_PROMPT
         + profile_ctx
         + f"\n\n━━━ CONTEXTO ACTUAL ━━━"
         + f"\nHora actual en Tacna: {hora_tacna}"
-        + f"\nPedidos activos ahora: {activos}"
-        + f"\nTiempo estimado de preparación: {espera}"
+        + tiempo_ctx
     )
     response = await get_client().messages.create(
         model="claude-haiku-4-5-20251001",

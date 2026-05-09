@@ -172,7 +172,7 @@ def update_order_estado(order_id: int, estado: str):
 def get_order_by_id(order_id: int) -> dict | None:
     with _conn() as c:
         row = c.execute(
-            "SELECT id, phone, items, total, estado FROM orders WHERE id=?", (order_id,)
+            "SELECT id, phone, items, total, estado, direccion FROM orders WHERE id=?", (order_id,)
         ).fetchone()
         return dict(row) if row else None
 

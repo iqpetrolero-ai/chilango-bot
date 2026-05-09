@@ -383,10 +383,22 @@ async def _call_claude(phone: str, messages: list) -> str:
     except Exception as e:
         print(f"[PERFIL] Error al obtener perfil de {phone_clean}: {e}")
 
-    # Tiempo estimado — try/except por si la BD falla
+    # Tiempo estimado — con fallback directo a SQLite si db.py es versión antigua
     tiempo_ctx = "\nTiempo estimado de preparación: 35-40 minutos"
     try:
-        activos = db.get_active_orders_count()
+        if hasattr(db, "get_active_orders_count"):
+            activos = db.get_active_orders_count()
+        else:
+            # Fallback: consulta directa sin depender de la función
+            import sqlite3 as _sqlite3
+            _today = datetime.now(PERU_TZ).strftime("%d/%m/%Y")
+            _db_path = db.DB_PATH
+            with _sqlite3.connect(_db_path) as _c:
+                _row = _c.execute(
+                    "SELECT COUNT(*) FROM orders WHERE fecha=? AND estado IN ('Nuevo 🆕','En preparación 👨‍🍳')",
+                    (_today,)
+                ).fetchone()
+            activos = _row[0] if _row else 0
         espera = _estimar_espera(activos)
         tiempo_ctx = f"\nPedidos activos ahora: {activos}\nTiempo estimado de preparación: {espera}"
     except Exception as e:

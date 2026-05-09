@@ -726,15 +726,6 @@ async function refreshOrders() {{
     }}
     knownIds = new Set(pedidos.map(p => p.id));
 
-    // Burbuja en nav: cantidad de pedidos con estado "Nuevo"
-    const nuevosCount = pedidos.filter(p => !p.siguiente_estado || p.siguiente_estado === 'En preparación 👨‍🍳').length;
-    const countNuevos = pedidos.filter(p => (p.estado||'').startsWith('Nuevo')).length;
-    const navBadge = document.getElementById('navBadge');
-    if (navBadge) {{
-      navBadge.textContent = countNuevos;
-      navBadge.style.display = countNuevos > 0 ? 'inline-flex' : 'none';
-    }}
-
     // Re-renderizar tarjetas
     const grid = document.getElementById('ordersGrid');
     if (pedidos.length === 0) {{
@@ -742,6 +733,16 @@ async function refreshOrders() {{
     }} else {{
       grid.innerHTML = pedidos.map(buildCard).join('');
     }}
+
+    // Mientras estamos en la página de Pedidos, todos los "Nuevo" se marcan como vistos
+    const nuevoIds = pedidos.filter(p => (p.estado||'').startsWith('Nuevo')).map(p => p.id);
+    const seen = new Set(JSON.parse(localStorage.getItem('seenNuevoIds') || '[]'));
+    nuevoIds.forEach(id => seen.add(id));
+    localStorage.setItem('seenNuevoIds', JSON.stringify([...seen]));
+
+    // Ocultar burbuja mientras estamos en esta página
+    const navBadge = document.getElementById('navBadge');
+    if (navBadge) navBadge.style.display = 'none';
 
     // Re-aplicar filtro activo
     filterCards(curFilter, document.querySelector('.tab.active'));
@@ -777,6 +778,20 @@ function probarNotif() {{
 
 // Iniciar polling cada 10 segundos
 setInterval(refreshOrders, 10000);
+
+// Al abrir la página marcar todos los "Nuevo" actuales como vistos
+(function markNuevosAsSeen() {{
+  const cards = document.querySelectorAll('.card[data-estado]');
+  const ids = Array.from(cards)
+    .filter(c => (c.dataset.estado||'').startsWith('Nuevo'))
+    .map(c => parseInt(c.id.replace('card-', '')))
+    .filter(id => !isNaN(id));
+  const seen = new Set(JSON.parse(localStorage.getItem('seenNuevoIds') || '[]'));
+  ids.forEach(id => seen.add(id));
+  localStorage.setItem('seenNuevoIds', JSON.stringify([...seen]));
+  const nb = document.getElementById('navBadge');
+  if (nb) nb.style.display = 'none';
+}})();
 </script>
 </body></html>"""
 
@@ -788,8 +803,17 @@ async def api_pedidos_json(credentials: HTTPBasicCredentials = Depends(verificar
     de emojis en JS (que pueden fallar por diferencias de encoding).
     """
     pedidos = db.get_orders_today()
+    # Normalizar estados sin emoji (DEFAULT antiguo de BD) antes de procesar
+    _norm = {
+        "Nuevo": "Nuevo 🆕",
+        "En preparación": "En preparación 👨‍🍳",
+        "En camino": "En camino 🛵",
+        "Entregado": "Entregado ✅",
+    }
     for p in pedidos:
         estado = p.get("estado") or "Nuevo 🆕"
+        estado = _norm.get(estado, estado)
+        p["estado"] = estado
         es_cancel = estado == "Cancelado ❌"
         idx = ESTADOS.index(estado) if estado in ESTADOS else -1
         p["siguiente_estado"] = (
@@ -1044,7 +1068,8 @@ async def admin(credentials: HTTPBasicCredentials = Depends(verificar_admin)):
                 const r = await fetch('/api/pedidos', {{credentials:'same-origin'}});
                 if (!r.ok) return;
                 const data = await r.json();
-                const n = data.pedidos.filter(p => (p.estado||'').startsWith('Nuevo')).length;
+                const seenIds = new Set(JSON.parse(localStorage.getItem('seenNuevoIds') || '[]'));
+                const n = data.pedidos.filter(p => (p.estado||'').startsWith('Nuevo') && !seenIds.has(p.id)).length;
                 const badge = document.getElementById('adminNavBadge');
                 if (badge) {{
                     badge.textContent = n;

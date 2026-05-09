@@ -25,6 +25,7 @@ def get_client() -> AsyncAnthropic:
 
 
 def esta_en_horario() -> bool:
+    return True  # ⚠️ MODO PRUEBA — quitar para producción
     ahora = datetime.now(PERU_TZ)
     if ahora.weekday() not in (4, 5, 6):
         return False

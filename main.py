@@ -167,8 +167,13 @@ async def handle_message(phone: str, message: str, phone_number_id: str = None):
         return
 
     db.mark_unread(phone)
-    reply = await process_message(phone, message)
-    await _send_reply(phone, reply, sending_id)
+    try:
+        reply = await process_message(phone, message)
+        await _send_reply(phone, reply, sending_id)
+    except Exception as e:
+        import traceback
+        print(f"[ERROR PROCESO] {phone}: {e}")
+        traceback.print_exc()
 
 
 # ── Webhook Meta ──────────────────────────────────────────────

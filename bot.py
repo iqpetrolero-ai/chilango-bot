@@ -140,8 +140,13 @@ Si es de las incluidas → no la cobres por separado. Si es adicional → agrég
      * Si es recojo: indica la dirección "Asoc. Ricardo Odonovan Mz H-5, calle Las Poncianas, atrás del Terminal Flores" y registra "Recojo" como dirección
    - Pregunta cómo va a pagar (Yape, Plin o Efectivo)
    - Confirma el pedido mostrando el resumen final con la modalidad elegida
-   - Si el pedido es por recojo, al confirmar di únicamente: "¡Tu pedido está confirmado! Te avisaremos cuando esté listo 🌮"
-     NUNCA menciones horarios de recojo ni frases como "pasa a recogerlo en horario..."
+   - Al confirmar el pedido (justo después del resumen final), informa el tiempo estimado
+     de preparación de forma natural, usando el dato del CONTEXTO ACTUAL. Ejemplos:
+     Delivery: "¡Pedido confirmado! 🌮 El tiempo estimado es de unos {espera}. ¡Te avisamos cuando salga!"
+     Recojo:   "¡Tu pedido está confirmado! El tiempo estimado es de unos {espera}. Te avisaremos cuando esté listo 🌮"
+     (Reemplaza {espera} con el valor real del contexto, ej. "35 minutos")
+   - NUNCA menciones horarios de recojo ni frases como "pasa a recogerlo en horario..."
+   - Si el cliente pregunta cuánto falta ANTES de pedir, usa el mismo tiempo estimado del CONTEXTO ACTUAL.
 
 4. CONFIRMAR PEDIDO — sigue este flujo según el método de pago:
 
@@ -330,6 +335,17 @@ async def _parse_and_save_order(phone: str, reply: str) -> str:
     return reply
 
 
+def _estimar_espera(pedidos_activos: int) -> str:
+    if pedidos_activos <= 2:
+        return "35 minutos"
+    elif pedidos_activos <= 4:
+        return "40 minutos"
+    elif pedidos_activos <= 6:
+        return "45 minutos"
+    else:
+        return "50 minutos o más"
+
+
 async def _call_claude(phone: str, messages: list) -> str:
     history = messages[-30:]
     hora_tacna = datetime.now(PERU_TZ).strftime("%H:%M")
@@ -355,7 +371,18 @@ async def _call_claude(phone: str, messages: list) -> str:
                 + "\nUsa estos datos para personalizar la atención de forma natural."
             )
 
-    system = SYSTEM_PROMPT + profile_ctx + f"\n\n━━━ CONTEXTO ACTUAL ━━━\nHora actual en Tacna: {hora_tacna}"
+    # Tiempo estimado dinámico basado en pedidos activos
+    activos = db.get_active_orders_count()
+    espera = _estimar_espera(activos)
+
+    system = (
+        SYSTEM_PROMPT
+        + profile_ctx
+        + f"\n\n━━━ CONTEXTO ACTUAL ━━━"
+        + f"\nHora actual en Tacna: {hora_tacna}"
+        + f"\nPedidos activos ahora: {activos}"
+        + f"\nTiempo estimado de preparación: {espera}"
+    )
     response = await get_client().messages.create(
         model="claude-haiku-4-5-20251001",
         max_tokens=1024,

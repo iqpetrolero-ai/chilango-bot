@@ -353,6 +353,14 @@ def _render_card(p: dict) -> str:
 
     mod_badge = '<span class="mod-badge">✏️ Mod</span>' if p.get("modificado") else ""
 
+    # Bullets para múltiples productos
+    items_raw = p.get("items") or ""
+    items_list = [i.strip() for i in items_raw.split(",") if i.strip()]
+    if len(items_list) > 1:
+        items_inner = "".join(f'<div class="item-line">• {html.escape(i)}</div>' for i in items_list)
+    else:
+        items_inner = html.escape(items_raw)
+
     return f"""<div class="card" id="card-{p['id']}" data-estado="{html.escape(estado)}"
      style="border-left:4px solid {badge_color};background:{bg}">
   <div class="card-top">
@@ -363,7 +371,7 @@ def _render_card(p: dict) -> str:
     <span class="badge" style="background:{badge_color}">{html.escape(estado)}</span>
   </div>
   <div class="progress-row">{steps_html}</div>
-  <div class="card-items">{html.escape(p['items'])}</div>
+  <div class="card-items">{items_inner}</div>
   {dir_html}
   <div class="card-foot">
     <div class="foot-left">
@@ -400,10 +408,11 @@ async def pedidos_panel(credentials: HTTPBasicCredentials = Depends(verificar_ad
     count_cancel   = _cnt("Cancelado ❌")
     total_activos  = len(pedidos) - count_entregado - count_cancel
 
+    # Total acumulado del día: todo menos cancelados (incluye entregados)
     total_dia = sum(
         float(p["total"].replace("S/", "").replace(",", ".").strip())
         for p in pedidos
-        if p.get("estado") not in ("Entregado ✅", "Cancelado ❌") and p.get("total")
+        if p.get("estado") != "Cancelado ❌" and p.get("total")
     ) if pedidos else 0
 
     cnt_yape = sum(1 for p in pedidos if p.get("metodo_pago") == "Yape")
@@ -485,7 +494,8 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgro
 .line-done{{background:#2D5016}}
 
 /* ── Items / Dir ── */
-.card-items{{font-size:13px;color:#333;background:rgba(0,0,0,.04);padding:8px 10px;border-radius:8px;margin-bottom:8px;white-space:pre-wrap;word-break:break-word}}
+.card-items{{font-size:13px;color:#333;background:rgba(0,0,0,.04);padding:8px 10px;border-radius:8px;margin-bottom:8px;word-break:break-word}}
+.item-line{{padding:2px 0;line-height:1.4}}
 .card-dir{{font-size:12px;color:#555;background:rgba(0,0,0,.04);padding:6px 10px;border-radius:8px;margin-bottom:10px}}
 .card-dir.sin-dir{{color:#bbb;font-style:italic}}
 
@@ -518,7 +528,7 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgro
   <img src="/static/logo.png" alt="Chilango">
   <div class="hdr-title"><h1>Chilango</h1><small>Panel de operaciones</small></div>
   <div class="hdr-right">
-    <span class="chip">💰 S/ {total_dia:.2f}</span>
+    <span class="chip" id="chipTotal">💰 S/ {total_dia:.2f}</span>
     <span class="chip yape" id="cntYape">💜 {cnt_yape} Yape</span>
     <span class="chip plin" id="cntPlin">💙 {cnt_plin} Plin</span>
     <span class="chip efec" id="cntEfec">💵 {cnt_efec} Efectivo</span>
@@ -662,6 +672,12 @@ function buildCard(p) {{
     : `<div class="card-dir sin-dir">📍 Sin dirección</div>`;
   const modBadge  = p.modificado ? `<span class="mod-badge">✏️ Mod</span>` : '';
 
+  // Bullets para múltiples productos
+  const itemsList = (p.items || '').split(',').map(s => s.trim()).filter(Boolean);
+  const itemsHtml = itemsList.length > 1
+    ? itemsList.map(i => `<div class="item-line">• ${{esc(i)}}</div>`).join('')
+    : esc(p.items || '');
+
   return `<div class="card" id="card-${{p.id}}" data-estado="${{esc(estado)}}"
     style="border-left:4px solid ${{badgeClr}};background:${{bg}}">
   <div class="card-top">
@@ -672,7 +688,7 @@ function buildCard(p) {{
     <span class="badge" style="background:${{badgeClr}}">${{esc(estado)}}</span>
   </div>
   <div class="progress-row">${{steps}}</div>
-  <div class="card-items">${{esc(p.items)}}</div>
+  <div class="card-items">${{itemsHtml}}</div>
   ${{dirHtml}}
   <div class="card-foot">
     <div class="foot-left">
@@ -720,11 +736,20 @@ async function refreshOrders() {{
     // Re-aplicar filtro activo
     filterCards(curFilter, document.querySelector('.tab.active'));
 
-    // Actualizar contadores en tabs
-    const cnt = e => pedidos.filter(p => (p.estado||'Nuevo 🆕')===e).length;
+    // Actualizar contadores
     document.getElementById('totalCount').textContent = pedidos.length;
     const activos = pedidos.filter(p => !['Entregado ✅','Cancelado ❌'].includes(p.estado)).length;
     document.getElementById('activosCount').textContent = activos;
+
+    // Actualizar total acumulado (todos menos cancelados)
+    const totalDia = pedidos
+      .filter(p => (p.estado || '') !== 'Cancelado ❌')
+      .reduce((sum, p) => {{
+        const t = parseFloat((p.total || '0').replace('S/', '').replace(',','.').trim()) || 0;
+        return sum + t;
+      }}, 0);
+    const chipTotal = document.getElementById('chipTotal');
+    if (chipTotal) chipTotal.textContent = `💰 S/ ${{totalDia.toFixed(2)}}`;
 
     const now = new Date().toLocaleTimeString('es-PE',{{hour:'2-digit',minute:'2-digit'}});
     document.getElementById('lastRefresh').textContent = `🔄 Actualizado ${{now}}`;

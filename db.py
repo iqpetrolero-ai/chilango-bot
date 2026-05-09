@@ -206,6 +206,17 @@ def get_orders_count() -> int:
         return row["n"] if row else 0
 
 
+def get_active_orders_count() -> int:
+    """Cuenta pedidos en preparación ahora mismo (Nuevo + En preparación)."""
+    today = datetime.now(PERU_TZ).strftime("%d/%m/%Y")
+    with _conn() as c:
+        row = c.execute(
+            "SELECT COUNT(*) AS n FROM orders WHERE fecha=? AND estado IN ('Nuevo 🆕','En preparación 👨‍🍳')",
+            (today,)
+        ).fetchone()
+        return row["n"] if row else 0
+
+
 def get_orders_today() -> list:
     now = datetime.now(PERU_TZ)
     today = now.strftime("%d/%m/%Y")

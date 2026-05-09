@@ -8,7 +8,7 @@ _Solo Viernes, Sábado y Domingo · 5pm a 11pm · Tacna_
 • Quesadilla — S/ 6.50
   _Tortilla de harina, queso derretido + guacamole y totopos_
 • Quesabirria — S/ 10.00
-  _Queso derretido + birria jugosita_
+  _Queso derretido + birria jugosita · incluye consomé 🍲_
 • Taco de Suadero — S/ 6.50
   _Corte entre costilla y piel de res_
 • Taco Campechano — S/ 6.50
@@ -19,7 +19,7 @@ _Solo Viernes, Sábado y Domingo · 5pm a 11pm · Tacna_
   _Chorizo de cerdo con queso fundido_
 • Gringa de Pastor — S/ 14.00
   _Tortilla de harina, pastor y queso derretido_
-  _(+ queso extra S/ 1.50)_
+  _(+ queso extra S/ 2.00)_
 
 ━━━━━━━━━━━━━━━━━━━━
 🌽 *UNA BOTANITA*
@@ -33,8 +33,6 @@ _Solo Viernes, Sábado y Domingo · 5pm a 11pm · Tacna_
 • Orden Quesadillas (3 und) — S/ 17.00
 • Nachos Chilangos — S/ 28.00
   _Birria, salsa de queso cheddar sobre cama de mozzarella_
-• Plato Chingón — S/ 69.50
-  _2 Quesabirrias + 1 Gringa + 2 Tacos a elegir + ½ Nachos + Guacamole_
 • Orden Guacamole c/ Totopos — S/ 4.00
 
 ━━━━━━━━━━━━━━━━━━━━
@@ -70,7 +68,7 @@ _Solo Viernes, Sábado y Domingo · 5pm a 11pm · Tacna_
 • Salsa adicional — +S/ 1.50
 
 📦 _Empaque eco resistente: S/ 2.00 por pedido_
-💳 _Pagos: Yape · Plin · Efectivo · Tarjeta_
+💳 _Pagos: Yape/Plin · Efectivo_
 """
 
 PRECIOS = {

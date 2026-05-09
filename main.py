@@ -265,6 +265,110 @@ ESTADO_BADGE = {
     "Cancelado ❌":         "#c62828",
 }
 
+# Paso de "En camino" → notificación WhatsApp al cliente
+STEP_LABELS = ["Nuevo", "Preparación", "En camino", "Entregado"]
+STEP_IDX = {"Nuevo 🆕": 0, "En preparación 👨‍🍳": 1, "En camino 🛵": 2, "Entregado ✅": 3}
+
+
+async def _notify_order_camino(order: dict):
+    """Envía WhatsApp al cliente cuando su pedido pasa a 'En camino'."""
+    if not order:
+        return
+    phone = order["phone"]
+    es_recojo = (order.get("direccion") or "").strip().lower() == "recojo"
+    if es_recojo:
+        mensaje = (
+            "✅ *¡Tu pedido está listo para recoger!*\n\n"
+            f"🛒 {order['items']}\n"
+            f"💰 {order['total']}\n\n"
+            "📍 Asoc. Ricardo Odonovan Mz H-5, calle Las Poncianas,\n"
+            "atrás del Terminal Flores\n\n"
+            "¡Te esperamos! 🌮"
+        )
+    else:
+        mensaje = (
+            "🛵 *¡Tu pedido está en camino!*\n\n"
+            f"🛒 {order['items']}\n"
+            f"💰 {order['total']}\n\n"
+            "¡Gracias por elegir Chilango! 🌮"
+        )
+    await send_whatsapp_message(phone, mensaje)
+
+
+def _render_card(p: dict) -> str:
+    """Renderiza una tarjeta de pedido como HTML."""
+    estado = p.get("estado") or "Nuevo 🆕"
+    bg = ESTADO_COLORS.get(estado, "#f5f5f5")
+    badge_color = ESTADO_BADGE.get(estado, "#666")
+
+    # Progress steps
+    step_idx = STEP_IDX.get(estado, -1)
+    steps_parts = []
+    for i, label in enumerate(STEP_LABELS):
+        if i < step_idx:
+            cls = "s-done"
+        elif i == step_idx:
+            cls = "s-active"
+        else:
+            cls = "s-pending"
+        steps_parts.append(f'<div class="step {cls}"><div class="sdot"></div><span>{label}</span></div>')
+        if i < len(STEP_LABELS) - 1:
+            line_cls = "line-done" if i < step_idx else "line-pending"
+            steps_parts.append(f'<div class="sline {line_cls}"></div>')
+    steps_html = "".join(steps_parts)
+
+    # Botón siguiente estado
+    pid = p["id"]
+    es_cancelado = estado == "Cancelado ❌"
+    idx = ESTADOS.index(estado) if estado in ESTADOS else 0
+    siguiente = ESTADOS[idx + 1] if (idx < len(ESTADOS) - 1 and not es_cancelado) else None
+    if siguiente:
+        sig_label = html.escape(siguiente)
+        sig_js = siguiente.replace("'", "\\'")
+        btn_sig = f"<button class='btn-next' onclick=\"cambiarEstado({pid},'{sig_js}')\">→ {sig_label}</button>"
+    elif es_cancelado:
+        btn_sig = '<span class="lbl-done" style="color:#c62828">Cancelado</span>'
+    else:
+        btn_sig = '<span class="lbl-done">✅ Completado</span>'
+
+    btn_del = f'<button class="btn-del" onclick="eliminarPedido({pid},this)" title="Eliminar">🗑️</button>'
+
+    # Pago
+    metodo = p.get("metodo_pago") or "Efectivo"
+    pago_color = {"Yape": "#6c3d98", "Plin": "#0066cc", "Efectivo": "#2D5016"}.get(metodo, "#555")
+    pago_emoji = {"Yape": "💜", "Plin": "💙", "Efectivo": "💵"}.get(metodo, "💳")
+
+    # Dirección
+    direccion = p.get("direccion") or ""
+    dir_html = (
+        f'<div class="card-dir">📍 {html.escape(direccion)}</div>'
+        if direccion else
+        '<div class="card-dir sin-dir">📍 Sin dirección</div>'
+    )
+
+    mod_badge = '<span class="mod-badge">✏️ Mod</span>' if p.get("modificado") else ""
+
+    return f"""<div class="card" id="card-{p['id']}" data-estado="{html.escape(estado)}"
+     style="border-left:4px solid {badge_color};background:{bg}">
+  <div class="card-top">
+    <span class="card-id">#{p['id']}</span>
+    <span class="card-time">🕒 {p['hora']}</span>
+    <span class="card-phone">+{html.escape(p['phone'])}</span>
+    {mod_badge}
+    <span class="badge" style="background:{badge_color}">{html.escape(estado)}</span>
+  </div>
+  <div class="progress-row">{steps_html}</div>
+  <div class="card-items">{html.escape(p['items'])}</div>
+  {dir_html}
+  <div class="card-foot">
+    <div class="foot-left">
+      <span class="card-total">{html.escape(p['total'])}</span>
+      <span class="pago-badge" style="background:{pago_color}">{pago_emoji} {html.escape(metodo)}</span>
+    </div>
+    <div class="foot-right">{btn_sig}{btn_del}</div>
+  </div>
+</div>"""
+
 
 @app.post("/admin/test-notify")
 async def test_notify(credentials: HTTPBasicCredentials = Depends(verificar_admin)):
@@ -278,141 +382,401 @@ async def test_notify(credentials: HTTPBasicCredentials = Depends(verificar_admi
 
 @app.get("/pedidos", response_class=HTMLResponse)
 async def pedidos_panel(credentials: HTTPBasicCredentials = Depends(verificar_admin)):
-    pedidos = db.get_orders_today()
     from datetime import datetime, timezone, timedelta
     PERU_TZ = timezone(timedelta(hours=-5))
+    pedidos = db.get_orders_today()
     hoy = datetime.now(PERU_TZ).strftime("%d/%m/%Y")
+
+    def _cnt(e): return sum(1 for p in pedidos if (p.get("estado") or "Nuevo 🆕") == e)
+    count_nuevos   = _cnt("Nuevo 🆕")
+    count_prep     = _cnt("En preparación 👨‍🍳")
+    count_camino   = _cnt("En camino 🛵")
+    count_entregado = _cnt("Entregado ✅")
+    count_cancel   = _cnt("Cancelado ❌")
+    total_activos  = len(pedidos) - count_entregado - count_cancel
 
     total_dia = sum(
         float(p["total"].replace("S/", "").replace(",", ".").strip())
         for p in pedidos
-        if p["estado"] not in ("Entregado ✅", "Cancelado ❌") and p["total"]
+        if p.get("estado") not in ("Entregado ✅", "Cancelado ❌") and p.get("total")
     ) if pedidos else 0
 
-    cards = ""
-    for p in pedidos:
-        estado = p["estado"] or "Nuevo 🆕"
-        color = ESTADO_COLORS.get(estado, "#f5f5f5")
-        badge_color = ESTADO_BADGE.get(estado, "#666")
-        es_cancelado = estado == "Cancelado ❌"
-        idx = ESTADOS.index(estado) if estado in ESTADOS else 0
-        siguiente = ESTADOS[idx + 1] if (idx < len(ESTADOS) - 1 and not es_cancelado) else None
-        btn_siguiente = f"""
-            <form method="post" action="/pedidos/estado" style="display:inline">
-                <input type="hidden" name="order_id" value="{p['id']}">
-                <input type="hidden" name="estado" value="{siguiente}">
-                <button type="submit" class="btn-next">→ {siguiente}</button>
-            </form>""" if siguiente else ('<span class="done">Cancelado</span>' if es_cancelado else '<span class="done">Completado ✅</span>')
+    cnt_yape = sum(1 for p in pedidos if p.get("metodo_pago") == "Yape")
+    cnt_plin = sum(1 for p in pedidos if p.get("metodo_pago") == "Plin")
+    cnt_efec = sum(1 for p in pedidos if p.get("metodo_pago") not in ("Yape", "Plin") and p.get("estado") != "Cancelado ❌")
 
-        btn_eliminar = f"""
-            <form method="post" action="/pedidos/eliminar" style="display:inline"
-                  onsubmit="return confirm('¿Eliminar este pedido? Esta acción no se puede deshacer.')">
-                <input type="hidden" name="order_id" value="{p['id']}">
-                <button type="submit" class="btn-del" title="Eliminar pedido">🗑️</button>
-            </form>"""
+    cards = "".join(_render_card(p) for p in pedidos) if pedidos else '<div class="empty">No hay pedidos hoy todavía 🌮</div>'
 
-        metodo = p.get("metodo_pago") or "Efectivo"
-        pago_color = {"Yape": "#6c3d98", "Plin": "#0066cc", "Efectivo": "#2D5016"}.get(metodo, "#555")
-        pago_emoji = {"Yape": "💜", "Plin": "💙", "Efectivo": "💵"}.get(metodo, "💳")
-        direccion = p.get("direccion") or ""
-        dir_html = f'<div class="card-dir">📍 {html.escape(direccion)}</div>' if direccion else '<div class="card-dir sin-dir">📍 Sin dirección registrada</div>'
-        mod_badge = '<span class="mod-badge">✏️ Modificado</span>' if p.get("modificado") else ""
-
-        cards += f"""
-        <div class="card" style="background:{color}">
-            <div class="card-header">
-                <span class="card-time">🕒 {p['hora']}</span>
-                <span class="card-phone">📱 +{html.escape(p['phone'])}</span>
-                {mod_badge}
-                <span class="card-badge" style="background:{badge_color}">{html.escape(estado)}</span>
-            </div>
-            <div class="card-items">{html.escape(p['items'])}</div>
-            {dir_html}
-            <div class="card-footer">
-                <span class="card-total">{html.escape(p['total'])}</span>
-                <span class="pago-badge" style="background:{pago_color}">{pago_emoji} {html.escape(metodo)}</span>
-                {btn_siguiente}
-                {btn_eliminar}
-            </div>
-        </div>"""
-
-    if not cards:
-        cards = "<div class='empty'>No hay pedidos hoy todavía 🌮</div>"
+    # Inject Python data as JS constants
+    estados_js   = json.dumps(ESTADOS)
+    badge_js     = json.dumps(ESTADO_BADGE)
+    bg_js        = json.dumps(ESTADO_COLORS)
+    step_idx_js  = json.dumps(STEP_IDX)
+    step_lbl_js  = json.dumps(STEP_LABELS)
 
     return f"""<!DOCTYPE html>
-<html>
+<html lang="es">
 <head>
-    <title>Pedidos del día — Chilango</title>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <style>
-        * {{ box-sizing: border-box; margin: 0; padding: 0; }}
-        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f0f2f5; min-height: 100vh; }}
-        .header {{ background: #2D5016; color: white; padding: 12px 20px; display: flex; align-items: center; gap: 12px; position: sticky; top: 0; z-index: 10; }}
-        .header img {{ height: 40px; border-radius: 8px; }}
-        .header h1 {{ font-size: 17px; }}
-        .header .sub {{ font-size: 12px; opacity: 0.7; }}
-        .header .total-dia {{ margin-left: auto; font-size: 15px; font-weight: 700; background: rgba(255,255,255,.15); padding: 6px 14px; border-radius: 20px; }}
-        .nav {{ background: #1b3a0e; display: flex; gap: 0; }}
-        .nav a {{ color: rgba(255,255,255,.7); text-decoration: none; padding: 10px 20px; font-size: 14px; }}
-        .nav a:hover, .nav a.active {{ color: white; background: rgba(255,255,255,.1); }}
-        .toolbar {{ padding: 12px 16px; display: flex; align-items: center; gap: 10px; background: white; border-bottom: 1px solid #e0e0e0; }}
-        .toolbar span {{ font-size: 14px; color: #555; }}
-        .toolbar strong {{ color: #2D5016; }}
-        .content {{ padding: 16px; max-width: 700px; margin: 0 auto; }}
-        .card {{ border-radius: 12px; padding: 14px; margin-bottom: 12px; box-shadow: 0 1px 4px rgba(0,0,0,.1); }}
-        .card-header {{ display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }}
-        .card-time {{ font-size: 13px; color: #555; }}
-        .card-phone {{ font-size: 13px; color: #333; font-weight: 600; }}
-        .card-badge {{ font-size: 11px; color: white; padding: 3px 10px; border-radius: 20px; margin-left: auto; font-weight: 600; }}
-        .card-items {{ font-size: 13px; color: #333; background: rgba(0,0,0,.04); padding: 8px 10px; border-radius: 8px; margin-bottom: 10px; white-space: pre-wrap; }}
-        .card-footer {{ display: flex; align-items: center; justify-content: space-between; }}
-        .card-total {{ font-size: 16px; font-weight: 700; color: #2D5016; }}
-        .pago-badge {{ font-size: 12px; color: white; padding: 4px 10px; border-radius: 20px; font-weight: 600; }}
-        .card-dir {{ font-size: 13px; color: #444; background: rgba(0,0,0,.04); padding: 6px 10px; border-radius: 8px; margin-bottom: 10px; }}
-        .card-dir.sin-dir {{ color: #aaa; font-style: italic; }}
-        .mod-badge {{ font-size: 11px; background: #e65100; color: white; padding: 2px 8px; border-radius: 20px; font-weight: 600; }}
-        .btn-next {{ background: #2D5016; color: white; border: none; padding: 8px 16px; border-radius: 20px; cursor: pointer; font-size: 13px; font-weight: 600; }}
-        .btn-next:hover {{ background: #3a6b1e; }}
-        .btn-del {{ background: transparent; border: 1px solid #e0e0e0; padding: 6px 10px; border-radius: 8px; cursor: pointer; font-size: 15px; color: #c62828; }}
-        .btn-del:hover {{ background: #fce4ec; border-color: #c62828; }}
-        .done {{ font-size: 13px; color: #2e7d32; font-weight: 600; }}
-        .empty {{ text-align: center; padding: 60px 20px; color: #888; font-size: 16px; }}
-        .refresh-note {{ text-align: center; font-size: 11px; color: #aaa; padding: 12px; }}
-    </style>
+<title>Pedidos — Chilango</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+*{{box-sizing:border-box;margin:0;padding:0}}
+body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f0f2f5;min-height:100vh}}
+
+/* ── Header ── */
+.hdr{{background:#2D5016;color:white;padding:10px 18px;display:flex;align-items:center;gap:12px;position:sticky;top:0;z-index:50;box-shadow:0 2px 8px rgba(0,0,0,.25)}}
+.hdr img{{height:38px;border-radius:8px}}
+.hdr-title{{flex:1}}
+.hdr-title h1{{font-size:16px;font-weight:700}}
+.hdr-title small{{font-size:11px;opacity:.7}}
+.hdr-right{{display:flex;align-items:center;gap:10px;flex-wrap:wrap}}
+.chip{{background:rgba(255,255,255,.18);border-radius:20px;padding:5px 13px;font-size:13px;font-weight:700;white-space:nowrap}}
+.chip.yape{{background:#6c3d98}}
+.chip.plin{{background:#0066cc}}
+.chip.efec{{background:#2D5016;border:1px solid rgba(255,255,255,.3)}}
+
+/* ── Nav ── */
+.nav{{background:#1b3a0e;display:flex}}
+.nav a{{color:rgba(255,255,255,.7);text-decoration:none;padding:9px 18px;font-size:13px;transition:background .15s}}
+.nav a:hover,.nav a.active{{color:#fff;background:rgba(255,255,255,.12)}}
+
+/* ── Toolbar ── */
+.toolbar{{background:#fff;padding:10px 16px;display:flex;align-items:center;gap:10px;border-bottom:1px solid #e0e0e0;flex-wrap:wrap}}
+.toolbar-info{{font-size:13px;color:#555;flex:1}}
+.toolbar-info strong{{color:#2D5016}}
+.btn-test{{background:#6c3d98;color:#fff;border:none;padding:7px 16px;border-radius:20px;cursor:pointer;font-size:12px;font-weight:600}}
+.btn-test:hover{{background:#5a3180}}
+
+/* ── Filtros ── */
+.filters{{background:#fff;padding:8px 16px;border-bottom:1px solid #e0e0e0;display:flex;gap:6px;overflow-x:auto;-webkit-overflow-scrolling:touch}}
+.tab{{border:none;background:#f0f2f5;color:#555;padding:6px 14px;border-radius:20px;cursor:pointer;font-size:12px;font-weight:600;white-space:nowrap;transition:all .15s}}
+.tab:hover{{background:#e0e0e0}}
+.tab.active{{background:#2D5016;color:#fff}}
+
+/* ── Grid de tarjetas ── */
+.grid{{padding:14px;display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:12px;max-width:1100px;margin:0 auto}}
+
+/* ── Tarjeta ── */
+.card{{border-radius:12px;padding:14px;box-shadow:0 2px 8px rgba(0,0,0,.08);transition:box-shadow .2s,opacity .3s}}
+.card:hover{{box-shadow:0 4px 16px rgba(0,0,0,.13)}}
+.card.hidden{{display:none}}
+.card-top{{display:flex;align-items:center;gap:6px;margin-bottom:10px;flex-wrap:wrap}}
+.card-id{{font-size:11px;color:#aaa;font-weight:600}}
+.card-time{{font-size:12px;color:#666}}
+.card-phone{{font-size:13px;color:#111;font-weight:700}}
+.badge{{font-size:11px;color:#fff;padding:3px 10px;border-radius:20px;font-weight:700;margin-left:auto;white-space:nowrap}}
+.mod-badge{{font-size:10px;background:#e65100;color:#fff;padding:2px 7px;border-radius:20px;font-weight:700}}
+
+/* ── Progress ── */
+.progress-row{{display:flex;align-items:center;margin-bottom:10px}}
+.step{{display:flex;flex-direction:column;align-items:center;font-size:9px;color:#bbb;gap:3px;min-width:0}}
+.step span{{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:52px}}
+.sdot{{width:10px;height:10px;border-radius:50%;background:#ddd;transition:background .3s}}
+.s-done .sdot{{background:#2D5016}}
+.s-active .sdot{{background:#f57f17;box-shadow:0 0 0 3px rgba(245,127,23,.25)}}
+.s-done span,.s-active span{{color:#333;font-weight:600}}
+.sline{{flex:1;height:2px;background:#ddd;margin:0 2px;margin-bottom:12px}}
+.line-done{{background:#2D5016}}
+
+/* ── Items / Dir ── */
+.card-items{{font-size:13px;color:#333;background:rgba(0,0,0,.04);padding:8px 10px;border-radius:8px;margin-bottom:8px;white-space:pre-wrap;word-break:break-word}}
+.card-dir{{font-size:12px;color:#555;background:rgba(0,0,0,.04);padding:6px 10px;border-radius:8px;margin-bottom:10px}}
+.card-dir.sin-dir{{color:#bbb;font-style:italic}}
+
+/* ── Footer ── */
+.card-foot{{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}}
+.foot-left{{display:flex;align-items:center;gap:8px}}
+.card-total{{font-size:16px;font-weight:800;color:#2D5016}}
+.pago-badge{{font-size:11px;color:#fff;padding:3px 10px;border-radius:20px;font-weight:700}}
+.foot-right{{display:flex;align-items:center;gap:6px}}
+.btn-next{{background:#2D5016;color:#fff;border:none;padding:8px 16px;border-radius:20px;cursor:pointer;font-size:12px;font-weight:700;transition:background .15s,transform .1s}}
+.btn-next:hover{{background:#3a6b1e}}
+.btn-next:active{{transform:scale(.96)}}
+.btn-next:disabled{{background:#aaa;cursor:not-allowed}}
+.btn-del{{background:transparent;border:1px solid #e0e0e0;padding:6px 9px;border-radius:8px;cursor:pointer;font-size:14px;color:#c62828;transition:background .15s}}
+.btn-del:hover{{background:#fce4ec;border-color:#c62828}}
+.lbl-done{{font-size:12px;color:#666;font-weight:600}}
+
+/* ── Misc ── */
+.empty{{text-align:center;padding:60px 20px;color:#aaa;font-size:15px;grid-column:1/-1}}
+.footer-note{{text-align:center;font-size:11px;color:#bbb;padding:12px}}
+
+/* ── Toast ── */
+.toast{{position:fixed;bottom:24px;right:24px;background:#2D5016;color:#fff;padding:12px 22px;border-radius:30px;font-size:14px;font-weight:700;box-shadow:0 4px 20px rgba(0,0,0,.3);z-index:200;transform:translateY(80px);opacity:0;transition:all .35s cubic-bezier(.34,1.56,.64,1)}}
+.toast.show{{transform:translateY(0);opacity:1}}
+</style>
 </head>
 <body>
-    <div class="header">
-        <img src="/static/logo.png" alt="Chilango">
-        <div>
-            <h1>Chilango Bot</h1>
-            <div class="sub">Panel de pedidos</div>
-        </div>
-        <div class="total-dia">💰 S/ {total_dia:.2f} hoy</div>
+
+<div class="hdr">
+  <img src="/static/logo.png" alt="Chilango">
+  <div class="hdr-title"><h1>Chilango</h1><small>Panel de operaciones</small></div>
+  <div class="hdr-right">
+    <span class="chip">💰 S/ {total_dia:.2f}</span>
+    <span class="chip yape" id="cntYape">💜 {cnt_yape} Yape</span>
+    <span class="chip plin" id="cntPlin">💙 {cnt_plin} Plin</span>
+    <span class="chip efec" id="cntEfec">💵 {cnt_efec} Efectivo</span>
+  </div>
+</div>
+
+<nav class="nav">
+  <a href="/pedidos" class="active">📦 Pedidos</a>
+  <a href="/admin">💬 Conversaciones</a>
+</nav>
+
+<div class="toolbar">
+  <span class="toolbar-info">📅 {hoy} &nbsp;·&nbsp; <strong id="totalCount">{len(pedidos)}</strong> pedidos &nbsp;·&nbsp; <span id="activosCount">{total_activos}</span> activos</span>
+  <button class="btn-test" onclick="probarNotif()">🔔 Probar notificación</button>
+</div>
+
+<div class="filters">
+  <button class="tab active" onclick="filterCards('all',this)">Todos ({len(pedidos)})</button>
+  <button class="tab" onclick="filterCards('Nuevo 🆕',this)" id="tabNuevo">🆕 Nuevos ({count_nuevos})</button>
+  <button class="tab" onclick="filterCards('En preparación 👨‍🍳',this)">👨‍🍳 Preparación ({count_prep})</button>
+  <button class="tab" onclick="filterCards('En camino 🛵',this)">🛵 En camino ({count_camino})</button>
+  <button class="tab" onclick="filterCards('Entregado ✅',this)">✅ Entregados ({count_entregado})</button>
+  <button class="tab" onclick="filterCards('Cancelado ❌',this)">❌ Cancelados ({count_cancel})</button>
+</div>
+
+<div class="grid" id="ordersGrid">{cards}</div>
+<div class="footer-note" id="lastRefresh">🔄 Actualización automática cada 10 s</div>
+<div class="toast" id="toast">🔔 Nuevo pedido llegó</div>
+
+<script>
+const ESTADOS   = {estados_js};
+const BADGE_CLR = {badge_js};
+const BG_CLR    = {bg_js};
+const STEP_IDX  = {step_idx_js};
+const STEP_LBL  = {step_lbl_js};
+
+let knownIds  = new Set(Array.from(document.querySelectorAll('.card')).map(c => +c.id.replace('card-','')));
+let curFilter = 'all';
+let audioCtx  = null;
+
+/* ── Sonido ── */
+function playBeep() {{
+  try {{
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    [880, 1100, 1320].forEach((f, i) => {{
+      const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.connect(g); g.connect(audioCtx.destination);
+      o.type = 'sine';
+      o.frequency.value = f;
+      g.gain.setValueAtTime(0.25, audioCtx.currentTime + i*0.12);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + i*0.12 + 0.25);
+      o.start(audioCtx.currentTime + i*0.12);
+      o.stop(audioCtx.currentTime + i*0.12 + 0.3);
+    }});
+  }} catch(e) {{}}
+}}
+
+/* ── Toast ── */
+function showToast(msg) {{
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 3500);
+}}
+
+/* ── Filtro ── */
+function filterCards(estado, btn) {{
+  curFilter = estado;
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  document.querySelectorAll('.card').forEach(c => {{
+    const e = c.dataset.estado;
+    c.classList.toggle('hidden', estado !== 'all' && e !== estado);
+  }});
+}}
+
+/* ── Cambiar estado (AJAX) ── */
+async function cambiarEstado(id, nuevoEstado) {{
+  const card = document.getElementById('card-' + id);
+  const btn  = card ? card.querySelector('.btn-next') : null;
+  if (btn) {{ btn.disabled = true; btn.textContent = '⏳'; }}
+  try {{
+    const r = await fetch('/api/pedidos/estado', {{
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {{'Content-Type':'application/json'}},
+      body: JSON.stringify({{order_id: id, estado: nuevoEstado}})
+    }});
+    if (r.status === 401) {{ location.reload(); return; }}
+    if (!r.ok) throw new Error(await r.text());
+    await refreshOrders();
+  }} catch(e) {{
+    alert('Error al actualizar: ' + e.message);
+    if (btn) {{ btn.disabled = false; btn.textContent = '→ ' + nuevoEstado; }}
+  }}
+}}
+
+/* ── Eliminar (AJAX) ── */
+async function eliminarPedido(id, btnEl) {{
+  if (!confirm('¿Eliminar este pedido? No se puede deshacer.')) return;
+  try {{
+    const r = await fetch('/api/pedidos/eliminar', {{
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {{'Content-Type':'application/json'}},
+      body: JSON.stringify({{order_id: id}})
+    }});
+    if (r.status === 401) {{ location.reload(); return; }}
+    const card = document.getElementById('card-' + id);
+    if (card) {{ card.style.opacity='0'; card.style.transform='scale(.95)'; setTimeout(()=>card.remove(),300); }}
+    knownIds.delete(id);
+  }} catch(e) {{ alert('Error al eliminar: ' + e.message); }}
+}}
+
+/* ── Construir tarjeta desde JSON ── */
+function buildCard(p) {{
+  const estado   = p.estado || 'Nuevo 🆕';
+  const bg       = BG_CLR[estado]    || '#f5f5f5';
+  const badgeClr = BADGE_CLR[estado] || '#666';
+  const sIdx     = STEP_IDX[estado] !== undefined ? STEP_IDX[estado] : -1;
+
+  const steps = STEP_LBL.map((lbl, i) => {{
+    const cls = i < sIdx ? 's-done' : (i === sIdx ? 's-active' : 's-pending');
+    const line = i < STEP_LBL.length-1
+      ? `<div class="sline ${{i < sIdx ? 'line-done' : 'line-pending'}}"></div>`
+      : '';
+    return `<div class="step ${{cls}}"><div class="sdot"></div><span>${{lbl}}</span></div>${{line}}`;
+  }}).join('');
+
+  const es_cancel  = estado === 'Cancelado ❌';
+  const idx        = ESTADOS.indexOf(estado);
+  const siguiente  = (!es_cancel && idx >= 0 && idx < ESTADOS.length-1) ? ESTADOS[idx+1] : null;
+  const btnSig     = siguiente
+    ? `<button class="btn-next" onclick="cambiarEstado(${{p.id}},decodeURIComponent('${{encodeURIComponent(siguiente)}}'))">→ ${{siguiente}}</button>`
+    : (es_cancel ? `<span class="lbl-done" style="color:#c62828">Cancelado</span>` : `<span class="lbl-done">✅ Completado</span>`);
+
+  const metodo    = p.metodo_pago || 'Efectivo';
+  const pagoClr   = {{Yape:'#6c3d98',Plin:'#0066cc',Efectivo:'#2D5016'}}[metodo] || '#555';
+  const pagoEmoji = {{Yape:'💜',Plin:'💙',Efectivo:'💵'}}[metodo] || '💳';
+  const dirHtml   = p.direccion
+    ? `<div class="card-dir">📍 ${{esc(p.direccion)}}</div>`
+    : `<div class="card-dir sin-dir">📍 Sin dirección</div>`;
+  const modBadge  = p.modificado ? `<span class="mod-badge">✏️ Mod</span>` : '';
+
+  return `<div class="card" id="card-${{p.id}}" data-estado="${{esc(estado)}}"
+    style="border-left:4px solid ${{badgeClr}};background:${{bg}}">
+  <div class="card-top">
+    <span class="card-id">#${{p.id}}</span>
+    <span class="card-time">🕒 ${{esc(p.hora)}}</span>
+    <span class="card-phone">+${{esc(p.phone)}}</span>
+    ${{modBadge}}
+    <span class="badge" style="background:${{badgeClr}}">${{esc(estado)}}</span>
+  </div>
+  <div class="progress-row">${{steps}}</div>
+  <div class="card-items">${{esc(p.items)}}</div>
+  ${{dirHtml}}
+  <div class="card-foot">
+    <div class="foot-left">
+      <span class="card-total">${{esc(p.total)}}</span>
+      <span class="pago-badge" style="background:${{pagoClr}}">${{pagoEmoji}} ${{esc(metodo)}}</span>
     </div>
-    <div class="nav">
-        <a href="/pedidos" class="active">📦 Pedidos del día</a>
-        <a href="/admin">💬 Conversaciones</a>
+    <div class="foot-right">
+      ${{btnSig}}
+      <button class="btn-del" onclick="eliminarPedido(${{p.id}},this)" title="Eliminar">🗑️</button>
     </div>
-    <div class="toolbar">
-        <span>📅 {hoy} &nbsp;|&nbsp; <strong>{len(pedidos)}</strong> pedidos</span>
-        <button onclick="probarNotif()" style="margin-left:auto;background:#6c3d98;color:white;border:none;padding:6px 14px;border-radius:20px;cursor:pointer;font-size:13px;">🔔 Probar notificación</button>
-    </div>
-    <div class="content">
-        {cards}
-    </div>
-    <div class="refresh-note">🔄 Actualización automática cada 20 segundos</div>
-    <script>
-        setTimeout(() => location.reload(), 20000);
-        function probarNotif() {{
-            fetch('/admin/test-notify', {{method:'POST', credentials:'same-origin'}})
-                .then(r => r.json())
-                .then(d => alert('✅ Solicitud enviada. Revisa los logs de Railway para ver si llegó o hubo error.'))
-                .catch(e => alert('Error: ' + e));
-        }}
-    </script>
-</body>
-</html>"""
+  </div>
+</div>`;
+}}
+
+function esc(s) {{
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}}
+
+/* ── Refresh automático ── */
+async function refreshOrders() {{
+  try {{
+    const r = await fetch('/api/pedidos', {{credentials:'same-origin'}});
+    if (r.status === 401) {{ location.reload(); return; }}
+    const data = await r.json();
+    const pedidos = data.pedidos;
+
+    // Detectar nuevos pedidos
+    const newOnes = pedidos.filter(p => !knownIds.has(p.id));
+    if (newOnes.length > 0 && knownIds.size > 0) {{
+      playBeep();
+      showToast(`🔔 ${{newOnes.length === 1 ? 'Nuevo pedido llegó' : newOnes.length + ' nuevos pedidos'}}`);
+      document.title = '🔔 Nuevo pedido — Chilango';
+      setTimeout(() => {{ document.title = 'Pedidos — Chilango'; }}, 5000);
+    }}
+    knownIds = new Set(pedidos.map(p => p.id));
+
+    // Re-renderizar tarjetas
+    const grid = document.getElementById('ordersGrid');
+    if (pedidos.length === 0) {{
+      grid.innerHTML = '<div class="empty">No hay pedidos hoy todavía 🌮</div>';
+    }} else {{
+      grid.innerHTML = pedidos.map(buildCard).join('');
+    }}
+
+    // Re-aplicar filtro activo
+    filterCards(curFilter, document.querySelector('.tab.active'));
+
+    // Actualizar contadores en tabs
+    const cnt = e => pedidos.filter(p => (p.estado||'Nuevo 🆕')===e).length;
+    document.getElementById('totalCount').textContent = pedidos.length;
+    const activos = pedidos.filter(p => !['Entregado ✅','Cancelado ❌'].includes(p.estado)).length;
+    document.getElementById('activosCount').textContent = activos;
+
+    const now = new Date().toLocaleTimeString('es-PE',{{hour:'2-digit',minute:'2-digit'}});
+    document.getElementById('lastRefresh').textContent = `🔄 Actualizado ${{now}}`;
+  }} catch(e) {{
+    console.warn('Refresh error:', e);
+  }}
+}}
+
+function probarNotif() {{
+  fetch('/admin/test-notify', {{method:'POST',credentials:'same-origin'}})
+    .then(r=>r.json())
+    .then(()=>alert('✅ Solicitud enviada — revisa logs de Railway'))
+    .catch(e=>alert('Error: '+e));
+}}
+
+// Iniciar polling cada 10 segundos
+setInterval(refreshOrders, 10000);
+</script>
+</body></html>"""
+
+
+@app.get("/api/pedidos")
+async def api_pedidos_json(credentials: HTTPBasicCredentials = Depends(verificar_admin)):
+    """Endpoint JSON para polling del frontend."""
+    return JSONResponse({"pedidos": db.get_orders_today()})
+
+
+@app.post("/api/pedidos/estado")
+async def api_actualizar_estado(
+    request: Request,
+    credentials: HTTPBasicCredentials = Depends(verificar_admin)
+):
+    """Cambia el estado de un pedido — responde JSON para AJAX."""
+    data = await request.json()
+    order_id = int(data.get("order_id", 0))
+    estado   = data.get("estado", "")
+    if not order_id or estado not in ESTADOS + ["Cancelado ❌"]:
+        return JSONResponse({"status": "error", "msg": "Datos inválidos"}, status_code=400)
+    order = db.get_order_by_id(order_id)
+    db.update_order_estado(order_id, estado)
+    if estado == "En camino 🛵":
+        await _notify_order_camino(order)
+    return JSONResponse({"status": "ok", "estado": estado})
+
+
+@app.post("/api/pedidos/eliminar")
+async def api_eliminar_pedido(
+    request: Request,
+    credentials: HTTPBasicCredentials = Depends(verificar_admin)
+):
+    """Elimina un pedido — responde JSON para AJAX."""
+    data = await request.json()
+    order_id = int(data.get("order_id", 0))
+    if order_id:
+        db.delete_order(order_id)
+        return JSONResponse({"status": "ok"})
+    return JSONResponse({"status": "error"}, status_code=400)
 
 
 @app.post("/pedidos/estado")
@@ -420,38 +784,16 @@ async def actualizar_estado(
     request: Request,
     credentials: HTTPBasicCredentials = Depends(verificar_admin)
 ):
+    """Fallback form-POST (por si acaso)."""
     from fastapi.responses import RedirectResponse
     form = await request.form()
     order_id = int(form.get("order_id", 0))
-    estado = form.get("estado", "")
-    estados_validos = ESTADOS + ["Cancelado ❌"]
-
-    if order_id and estado in estados_validos:
+    estado   = form.get("estado", "")
+    if order_id and estado in ESTADOS + ["Cancelado ❌"]:
         order = db.get_order_by_id(order_id)
         db.update_order_estado(order_id, estado)
-
-        # Notificar al cliente cuando su pedido está en camino o listo para recojo
-        if estado == "En camino 🛵" and order:
-            phone = order["phone"]
-            es_recojo = (order.get("direccion") or "").strip().lower() == "recojo"
-            if es_recojo:
-                mensaje = (
-                    "✅ *¡Tu pedido está listo para recoger!*\n\n"
-                    f"🛒 {order['items']}\n"
-                    f"💰 {order['total']}\n\n"
-                    "📍 Asoc. Ricardo Odonovan Mz H-5, calle Las Poncianas,\n"
-                    "atrás del Terminal Flores\n\n"
-                    "¡Te esperamos! 🌮"
-                )
-            else:
-                mensaje = (
-                    "🛵 *¡Tu pedido está en camino!*\n\n"
-                    f"🛒 {order['items']}\n"
-                    f"💰 {order['total']}\n\n"
-                    "¡Gracias por elegir Chilango! 🌮"
-                )
-            await send_whatsapp_message(phone, mensaje)
-
+        if estado == "En camino 🛵":
+            await _notify_order_camino(order)
     return RedirectResponse(url="/pedidos", status_code=303)
 
 
@@ -460,6 +802,7 @@ async def eliminar_pedido(
     request: Request,
     credentials: HTTPBasicCredentials = Depends(verificar_admin)
 ):
+    """Fallback form-POST (por si acaso)."""
     from fastapi.responses import RedirectResponse
     form = await request.form()
     order_id = int(form.get("order_id", 0))

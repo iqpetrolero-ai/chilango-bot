@@ -481,6 +481,7 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgro
 .card-phone{{font-size:13px;color:#111;font-weight:700}}
 .badge{{font-size:11px;color:#fff;padding:3px 10px;border-radius:20px;font-weight:700;margin-left:auto;white-space:nowrap}}
 .mod-badge{{font-size:10px;background:#e65100;color:#fff;padding:2px 7px;border-radius:20px;font-weight:700}}
+.nav-badge{{background:#e53935;color:#fff;border-radius:10px;min-width:18px;height:18px;font-size:10px;font-weight:700;display:none;align-items:center;justify-content:center;padding:0 5px;margin-left:5px;vertical-align:middle;line-height:18px}}
 
 /* ── Progress ── */
 .progress-row{{display:flex;align-items:center;margin-bottom:10px}}
@@ -536,7 +537,7 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgro
 </div>
 
 <nav class="nav">
-  <a href="/pedidos" class="active">📦 Pedidos</a>
+  <a href="/pedidos" class="active">📦 Pedidos <span class="nav-badge" id="navBadge" style="display:none">0</span></a>
   <a href="/admin">💬 Conversaciones</a>
 </nav>
 
@@ -657,11 +658,11 @@ function buildCard(p) {{
     return `<div class="step ${{cls}}"><div class="sdot"></div><span>${{lbl}}</span></div>${{line}}`;
   }}).join('');
 
+  // siguiente_estado viene calculado por el servidor (evita bug de emoji encoding en JS)
+  const siguiente  = p.siguiente_estado || null;
   const es_cancel  = estado === 'Cancelado ❌';
-  const idx        = ESTADOS.indexOf(estado);
-  const siguiente  = (!es_cancel && idx >= 0 && idx < ESTADOS.length-1) ? ESTADOS[idx+1] : null;
   const btnSig     = siguiente
-    ? `<button class="btn-next" onclick="cambiarEstado(${{p.id}},decodeURIComponent('${{encodeURIComponent(siguiente)}}'))">→ ${{siguiente}}</button>`
+    ? `<button class="btn-next" data-next="${{esc(siguiente)}}" onclick="cambiarEstado(${{p.id}},this.dataset.next)">→ ${{esc(siguiente)}}</button>`
     : (es_cancel ? `<span class="lbl-done" style="color:#c62828">Cancelado</span>` : `<span class="lbl-done">✅ Completado</span>`);
 
   const metodo    = p.metodo_pago || 'Efectivo';
@@ -715,7 +716,7 @@ async function refreshOrders() {{
     const data = await r.json();
     const pedidos = data.pedidos;
 
-    // Detectar nuevos pedidos
+    // Detectar pedidos nuevos
     const newOnes = pedidos.filter(p => !knownIds.has(p.id));
     if (newOnes.length > 0 && knownIds.size > 0) {{
       playBeep();
@@ -724,6 +725,15 @@ async function refreshOrders() {{
       setTimeout(() => {{ document.title = 'Pedidos — Chilango'; }}, 5000);
     }}
     knownIds = new Set(pedidos.map(p => p.id));
+
+    // Burbuja en nav: cantidad de pedidos con estado "Nuevo"
+    const nuevosCount = pedidos.filter(p => !p.siguiente_estado || p.siguiente_estado === 'En preparación 👨‍🍳').length;
+    const countNuevos = pedidos.filter(p => (p.estado||'').startsWith('Nuevo')).length;
+    const navBadge = document.getElementById('navBadge');
+    if (navBadge) {{
+      navBadge.textContent = countNuevos;
+      navBadge.style.display = countNuevos > 0 ? 'inline-flex' : 'none';
+    }}
 
     // Re-renderizar tarjetas
     const grid = document.getElementById('ordersGrid');
@@ -773,8 +783,19 @@ setInterval(refreshOrders, 10000);
 
 @app.get("/api/pedidos")
 async def api_pedidos_json(credentials: HTTPBasicCredentials = Depends(verificar_admin)):
-    """Endpoint JSON para polling del frontend."""
-    return JSONResponse({"pedidos": db.get_orders_today()})
+    """Endpoint JSON para polling del frontend.
+    Incluye 'siguiente_estado' calculado server-side para evitar comparaciones
+    de emojis en JS (que pueden fallar por diferencias de encoding).
+    """
+    pedidos = db.get_orders_today()
+    for p in pedidos:
+        estado = p.get("estado") or "Nuevo 🆕"
+        es_cancel = estado == "Cancelado ❌"
+        idx = ESTADOS.index(estado) if estado in ESTADOS else -1
+        p["siguiente_estado"] = (
+            ESTADOS[idx + 1] if (not es_cancel and 0 <= idx < len(ESTADOS) - 1) else None
+        )
+    return JSONResponse({"pedidos": pedidos})
 
 
 @app.post("/api/pedidos/estado")
@@ -951,7 +972,7 @@ async def admin(credentials: HTTPBasicCredentials = Depends(verificar_admin)):
         </div>
     </div>
     <div style="background:#1b3a0e;display:flex;">
-        <a href="/pedidos" style="color:rgba(255,255,255,.7);text-decoration:none;padding:10px 20px;font-size:14px;">📦 Pedidos del día</a>
+        <a href="/pedidos" style="color:rgba(255,255,255,.7);text-decoration:none;padding:10px 20px;font-size:14px;">📦 Pedidos <span id="adminNavBadge" style="background:#e53935;color:#fff;border-radius:10px;min-width:18px;height:18px;font-size:10px;font-weight:700;display:none;align-items:center;justify-content:center;padding:0 5px;margin-left:4px;vertical-align:middle;line-height:18px">0</span></a>
         <a href="/admin" style="color:white;text-decoration:none;padding:10px 20px;font-size:14px;background:rgba(255,255,255,.1);">💬 Conversaciones</a>
     </div>
     <div class="container">
@@ -1016,6 +1037,23 @@ async def admin(credentials: HTTPBasicCredentials = Depends(verificar_admin)):
         if (saved && convs[saved]) showChat(saved);
 
         setTimeout(() => location.reload(), 20000);
+
+        // Burbuja de nuevos pedidos en el nav
+        async function checkPedidosNuevos() {{
+            try {{
+                const r = await fetch('/api/pedidos', {{credentials:'same-origin'}});
+                if (!r.ok) return;
+                const data = await r.json();
+                const n = data.pedidos.filter(p => (p.estado||'').startsWith('Nuevo')).length;
+                const badge = document.getElementById('adminNavBadge');
+                if (badge) {{
+                    badge.textContent = n;
+                    badge.style.display = n > 0 ? 'inline-flex' : 'none';
+                }}
+            }} catch(e) {{}}
+        }}
+        checkPedidosNuevos();
+        setInterval(checkPedidosNuevos, 15000);
     </script>
 </body>
 </html>"""

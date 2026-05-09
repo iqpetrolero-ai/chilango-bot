@@ -16,6 +16,17 @@ def _conn() -> sqlite3.Connection:
 
 def init_db():
     with _conn() as c:
+        # ── Perfiles de clientes (memoria cross-sesión) ────────────────
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS customer_profiles (
+                phone TEXT PRIMARY KEY,
+                nombre TEXT DEFAULT '',
+                ultima_dir TEXT DEFAULT '',
+                ultimo_pedido TEXT DEFAULT '',
+                ultimo_pago TEXT DEFAULT '',
+                updated_at TEXT DEFAULT ''
+            )
+        """)
         c.execute("""
             CREATE TABLE IF NOT EXISTS conversations (
                 phone TEXT PRIMARY KEY,
@@ -51,6 +62,48 @@ def init_db():
                 c.execute(migration)
             except Exception:
                 pass  # La columna ya existe
+
+
+# ── Customer profiles ─────────────────────────────────────────
+
+def get_customer_profile(phone: str) -> dict:
+    with _conn() as c:
+        row = c.execute("SELECT * FROM customer_profiles WHERE phone=?", (phone,)).fetchone()
+        return dict(row) if row else {}
+
+
+def save_customer_profile(phone: str, nombre: str = None, ultima_dir: str = None,
+                           ultimo_pedido: str = None, ultimo_pago: str = None):
+    """Actualiza solo los campos que se pasen (no-None). La dirección 'Recojo' no se guarda."""
+    now = datetime.now(PERU_TZ).strftime("%d/%m/%Y %H:%M")
+    # No guardar "Recojo" como dirección permanente
+    if ultima_dir and ultima_dir.strip().lower() == "recojo":
+        ultima_dir = None
+    with _conn() as c:
+        exists = c.execute("SELECT 1 FROM customer_profiles WHERE phone=?", (phone,)).fetchone()
+        if exists:
+            updates, vals = [], []
+            if nombre is not None and nombre.strip():
+                updates.append("nombre=?"); vals.append(nombre.strip())
+            if ultima_dir is not None and ultima_dir.strip():
+                updates.append("ultima_dir=?"); vals.append(ultima_dir.strip())
+            if ultimo_pedido is not None:
+                updates.append("ultimo_pedido=?"); vals.append(ultimo_pedido)
+            if ultimo_pago is not None:
+                updates.append("ultimo_pago=?"); vals.append(ultimo_pago)
+            if updates:
+                updates.append("updated_at=?"); vals.append(now); vals.append(phone)
+                c.execute(f"UPDATE customer_profiles SET {', '.join(updates)} WHERE phone=?", vals)
+        else:
+            c.execute(
+                "INSERT INTO customer_profiles (phone, nombre, ultima_dir, ultimo_pedido, ultimo_pago, updated_at) VALUES (?,?,?,?,?,?)",
+                (phone,
+                 nombre.strip() if nombre else "",
+                 ultima_dir.strip() if ultima_dir else "",
+                 ultimo_pedido or "",
+                 ultimo_pago or "",
+                 now),
+            )
 
 
 # ── Conversations ─────────────────────────────────────────────

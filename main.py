@@ -430,15 +430,26 @@ async def actualizar_estado(
         order = db.get_order_by_id(order_id)
         db.update_order_estado(order_id, estado)
 
-        # Notificar al cliente cuando su pedido está en camino
+        # Notificar al cliente cuando su pedido está en camino o listo para recojo
         if estado == "En camino 🛵" and order:
             phone = order["phone"]
-            mensaje = (
-                "🛵 *¡Tu pedido está en camino!*\n\n"
-                f"🛒 {order['items']}\n"
-                f"💰 {order['total']}\n\n"
-                "¡Gracias por elegir Chilango! 🌮"
-            )
+            es_recojo = (order.get("direccion") or "").strip().lower() == "recojo"
+            if es_recojo:
+                mensaje = (
+                    "✅ *¡Tu pedido está listo para recoger!*\n\n"
+                    f"🛒 {order['items']}\n"
+                    f"💰 {order['total']}\n\n"
+                    "📍 Asoc. Ricardo Odonovan Mz H-5, calle Las Poncianas,\n"
+                    "atrás del Terminal Flores\n\n"
+                    "¡Te esperamos! 🌮"
+                )
+            else:
+                mensaje = (
+                    "🛵 *¡Tu pedido está en camino!*\n\n"
+                    f"🛒 {order['items']}\n"
+                    f"💰 {order['total']}\n\n"
+                    "¡Gracias por elegir Chilango! 🌮"
+                )
             await send_whatsapp_message(phone, mensaje)
 
     return RedirectResponse(url="/pedidos", status_code=303)

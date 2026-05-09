@@ -3,7 +3,7 @@ import base64
 from datetime import datetime, timezone, timedelta
 from anthropic import AsyncAnthropic
 from menu import MENU_TEXTO
-from orders import save_order, update_order
+from orders import save_order, update_order, cancel_order
 import db
 
 db.init_db()
@@ -134,10 +134,22 @@ Tienes personalidad amigable, con onda mexicana auténtica. Eres entusiasta con 
 
    REGLA: usa [PEDIDO_OK|...] solo para pedidos nuevos y [PEDIDO_MOD|...] solo para modificaciones.
 
-6. ESCALACIÓN: Si el cliente escribe "humano", "agente" o "hablar con alguien",
+6. CANCELACIONES: Si el cliente quiere cancelar su pedido:
+   - Pregunta si está seguro ("¿Confirmas que deseas cancelar tu pedido?")
+   - Si confirma, incluye el tag al final de tu respuesta: [PEDIDO_CANCEL]
+   - Responde con un mensaje amable indicando que el pedido fue cancelado
+
+7. ESCALACIÓN: Si el cliente escribe "humano", "agente" o "hablar con alguien",
    dile que el equipo lo atenderá pronto al 954 713 696.
 
-7. TONO: Español amigable, sin exagerar la jerga. Emojis con moderación. Respuestas cortas y claras.
+8. ESTADO DEL PEDIDO: Si el cliente pregunta dónde está su pedido, cuánto falta, si ya salió, etc.,
+   responde siempre de forma breve y tranquilizadora. Usa frases como:
+   - "¡Ya casi! Tu pedido está en los últimos detalles 🌮"
+   - "¡En camino! Tu pedido saldrá en breve 🛵"
+   - "¡Casi listo! Lo están preparando con todo el sabor 🔥"
+   Nunca menciones tiempos exactos ni redirijas al WhatsApp del equipo. Máximo 2 líneas.
+
+9. TONO: Español amigable, sin exagerar la jerga. Emojis con moderación. Respuestas cortas y claras.
 
 IMPORTANTE: Nunca inventes precios ni productos que no estén en la carta.
 """
@@ -176,6 +188,11 @@ async def _parse_and_save_order(phone: str, reply: str) -> str:
     fields, reply = _extract_tag(reply, "PEDIDO_MOD")
     if fields:
         await update_order(phone, fields["items"], fields["total"], fields["pago"], fields["dir"])
+
+    # Cancelación de pedido
+    if "[PEDIDO_CANCEL]" in reply:
+        reply = reply.replace("[PEDIDO_CANCEL]", "").strip()
+        await cancel_order(phone)
 
     return reply
 

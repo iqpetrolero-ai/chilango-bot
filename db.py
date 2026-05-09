@@ -169,6 +169,32 @@ def update_order_estado(order_id: int, estado: str):
         c.execute("UPDATE orders SET estado=? WHERE id=?", (estado, order_id))
 
 
+def get_order_by_id(order_id: int) -> dict | None:
+    with _conn() as c:
+        row = c.execute(
+            "SELECT id, phone, items, total, estado FROM orders WHERE id=?", (order_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def cancel_latest_order(phone: str) -> bool:
+    """Marca el pedido más reciente del cliente como Cancelado. Retorna True si lo encontró."""
+    with _conn() as c:
+        row = c.execute(
+            "SELECT id FROM orders WHERE phone=? AND estado NOT IN ('Entregado ✅','Cancelado ❌') ORDER BY id DESC LIMIT 1",
+            (phone,)
+        ).fetchone()
+        if not row:
+            return False
+        c.execute("UPDATE orders SET estado='Cancelado ❌' WHERE id=?", (row["id"],))
+        return True
+
+
+def delete_order(order_id: int):
+    with _conn() as c:
+        c.execute("DELETE FROM orders WHERE id=?", (order_id,))
+
+
 def update_latest_order(phone: str, items: str, total: str, metodo_pago: str, direccion: str = "") -> bool:
     """Actualiza el pedido más reciente del cliente que no esté entregado.
     Retorna True si se encontró y actualizó, False si no había pedido activo."""

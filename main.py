@@ -251,16 +251,18 @@ async def health():
 
 ESTADOS = ["Nuevo 🆕", "En preparación 👨‍🍳", "En camino 🛵", "Entregado ✅"]
 ESTADO_COLORS = {
-    "Nuevo 🆕": "#e3f2fd",
-    "En preparación 👨‍🍳": "#fff8e1",
-    "En camino 🛵": "#fff3e0",
-    "Entregado ✅": "#e8f5e9",
+    "Nuevo 🆕":             "#e3f2fd",
+    "En preparación 👨‍🍳":  "#fff8e1",
+    "En camino 🛵":         "#fff3e0",
+    "Entregado ✅":         "#e8f5e9",
+    "Cancelado ❌":         "#fce4ec",
 }
 ESTADO_BADGE = {
-    "Nuevo 🆕": "#1976d2",
-    "En preparación 👨‍🍳": "#f57f17",
-    "En camino 🛵": "#e65100",
-    "Entregado ✅": "#2e7d32",
+    "Nuevo 🆕":             "#1976d2",
+    "En preparación 👨‍🍳":  "#f57f17",
+    "En camino 🛵":         "#e65100",
+    "Entregado ✅":         "#2e7d32",
+    "Cancelado ❌":         "#c62828",
 }
 
 
@@ -283,8 +285,8 @@ async def pedidos_panel(credentials: HTTPBasicCredentials = Depends(verificar_ad
 
     total_dia = sum(
         float(p["total"].replace("S/", "").replace(",", ".").strip())
-        for p in pedidos if p["estado"] != "Entregado ✅"
-        if p["total"]
+        for p in pedidos
+        if p["estado"] not in ("Entregado ✅", "Cancelado ❌") and p["total"]
     ) if pedidos else 0
 
     cards = ""
@@ -292,14 +294,22 @@ async def pedidos_panel(credentials: HTTPBasicCredentials = Depends(verificar_ad
         estado = p["estado"] or "Nuevo 🆕"
         color = ESTADO_COLORS.get(estado, "#f5f5f5")
         badge_color = ESTADO_BADGE.get(estado, "#666")
+        es_cancelado = estado == "Cancelado ❌"
         idx = ESTADOS.index(estado) if estado in ESTADOS else 0
-        siguiente = ESTADOS[idx + 1] if idx < len(ESTADOS) - 1 else None
+        siguiente = ESTADOS[idx + 1] if (idx < len(ESTADOS) - 1 and not es_cancelado) else None
         btn_siguiente = f"""
             <form method="post" action="/pedidos/estado" style="display:inline">
                 <input type="hidden" name="order_id" value="{p['id']}">
                 <input type="hidden" name="estado" value="{siguiente}">
                 <button type="submit" class="btn-next">→ {siguiente}</button>
-            </form>""" if siguiente else '<span class="done">Completado ✅</span>'
+            </form>""" if siguiente else ('<span class="done">Cancelado</span>' if es_cancelado else '<span class="done">Completado ✅</span>')
+
+        btn_eliminar = f"""
+            <form method="post" action="/pedidos/eliminar" style="display:inline"
+                  onsubmit="return confirm('¿Eliminar este pedido? Esta acción no se puede deshacer.')">
+                <input type="hidden" name="order_id" value="{p['id']}">
+                <button type="submit" class="btn-del" title="Eliminar pedido">🗑️</button>
+            </form>"""
 
         metodo = p.get("metodo_pago") or "Efectivo"
         pago_color = {"Yape": "#6c3d98", "Plin": "#0066cc", "Efectivo": "#2D5016"}.get(metodo, "#555")
@@ -322,6 +332,7 @@ async def pedidos_panel(credentials: HTTPBasicCredentials = Depends(verificar_ad
                 <span class="card-total">{html.escape(p['total'])}</span>
                 <span class="pago-badge" style="background:{pago_color}">{pago_emoji} {html.escape(metodo)}</span>
                 {btn_siguiente}
+                {btn_eliminar}
             </div>
         </div>"""
 
@@ -363,6 +374,8 @@ async def pedidos_panel(credentials: HTTPBasicCredentials = Depends(verificar_ad
         .mod-badge {{ font-size: 11px; background: #e65100; color: white; padding: 2px 8px; border-radius: 20px; font-weight: 600; }}
         .btn-next {{ background: #2D5016; color: white; border: none; padding: 8px 16px; border-radius: 20px; cursor: pointer; font-size: 13px; font-weight: 600; }}
         .btn-next:hover {{ background: #3a6b1e; }}
+        .btn-del {{ background: transparent; border: 1px solid #e0e0e0; padding: 6px 10px; border-radius: 8px; cursor: pointer; font-size: 15px; color: #c62828; }}
+        .btn-del:hover {{ background: #fce4ec; border-color: #c62828; }}
         .done {{ font-size: 13px; color: #2e7d32; font-weight: 600; }}
         .empty {{ text-align: center; padding: 60px 20px; color: #888; font-size: 16px; }}
         .refresh-note {{ text-align: center; font-size: 11px; color: #aaa; padding: 12px; }}
@@ -411,8 +424,36 @@ async def actualizar_estado(
     form = await request.form()
     order_id = int(form.get("order_id", 0))
     estado = form.get("estado", "")
-    if order_id and estado in ESTADOS:
+    estados_validos = ESTADOS + ["Cancelado ❌"]
+
+    if order_id and estado in estados_validos:
+        order = db.get_order_by_id(order_id)
         db.update_order_estado(order_id, estado)
+
+        # Notificar al cliente cuando su pedido está en camino
+        if estado == "En camino 🛵" and order:
+            phone = order["phone"]
+            mensaje = (
+                "🛵 *¡Tu pedido está en camino!*\n\n"
+                f"🛒 {order['items']}\n"
+                f"💰 {order['total']}\n\n"
+                "¡Gracias por elegir Chilango! 🌮"
+            )
+            await send_whatsapp_message(phone, mensaje)
+
+    return RedirectResponse(url="/pedidos", status_code=303)
+
+
+@app.post("/pedidos/eliminar")
+async def eliminar_pedido(
+    request: Request,
+    credentials: HTTPBasicCredentials = Depends(verificar_admin)
+):
+    from fastapi.responses import RedirectResponse
+    form = await request.form()
+    order_id = int(form.get("order_id", 0))
+    if order_id:
+        db.delete_order(order_id)
     return RedirectResponse(url="/pedidos", status_code=303)
 
 

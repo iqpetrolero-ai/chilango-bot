@@ -340,8 +340,8 @@ def _render_card(p: dict) -> str:
 
     # Pago
     metodo = p.get("metodo_pago") or "Efectivo"
-    pago_color = {"Yape": "#6c3d98", "Plin": "#0066cc", "Efectivo": "#2D5016"}.get(metodo, "#555")
-    pago_emoji = {"Yape": "💜", "Plin": "💙", "Efectivo": "💵"}.get(metodo, "💳")
+    pago_color = {"Yape/Plin": "#6c3d98", "Yape": "#6c3d98", "Plin": "#6c3d98", "Efectivo": "#2D5016"}.get(metodo, "#555")
+    pago_emoji = {"Yape/Plin": "💜", "Yape": "💜", "Plin": "💜", "Efectivo": "💵"}.get(metodo, "💳")
 
     # Dirección
     direccion = p.get("direccion") or ""
@@ -415,9 +415,8 @@ async def pedidos_panel(credentials: HTTPBasicCredentials = Depends(verificar_ad
         if p.get("estado") != "Cancelado ❌" and p.get("total")
     ) if pedidos else 0
 
-    cnt_yape = sum(1 for p in pedidos if p.get("metodo_pago") == "Yape")
-    cnt_plin = sum(1 for p in pedidos if p.get("metodo_pago") == "Plin")
-    cnt_efec = sum(1 for p in pedidos if p.get("metodo_pago") not in ("Yape", "Plin") and p.get("estado") != "Cancelado ❌")
+    cnt_yapeplin = sum(1 for p in pedidos if p.get("metodo_pago") in ("Yape/Plin", "Yape", "Plin") and p.get("estado") != "Cancelado ❌")
+    cnt_efec = sum(1 for p in pedidos if p.get("metodo_pago") not in ("Yape/Plin", "Yape", "Plin") and p.get("estado") != "Cancelado ❌")
 
     cards = "".join(_render_card(p) for p in pedidos) if pedidos else '<div class="empty">No hay pedidos hoy todavía 🌮</div>'
 
@@ -530,8 +529,7 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgro
   <div class="hdr-title"><h1>Chilango</h1><small>Panel de operaciones</small></div>
   <div class="hdr-right">
     <span class="chip" id="chipTotal">💰 S/ {total_dia:.2f}</span>
-    <span class="chip yape" id="cntYape">💜 {cnt_yape} Yape</span>
-    <span class="chip plin" id="cntPlin">💙 {cnt_plin} Plin</span>
+    <span class="chip yape" id="cntYapePlin">💜 {cnt_yapeplin} Yape/Plin</span>
     <span class="chip efec" id="cntEfec">💵 {cnt_efec} Efectivo</span>
   </div>
 </div>
@@ -666,8 +664,8 @@ function buildCard(p) {{
     : (es_cancel ? `<span class="lbl-done" style="color:#c62828">Cancelado</span>` : `<span class="lbl-done">✅ Completado</span>`);
 
   const metodo    = p.metodo_pago || 'Efectivo';
-  const pagoClr   = {{Yape:'#6c3d98',Plin:'#0066cc',Efectivo:'#2D5016'}}[metodo] || '#555';
-  const pagoEmoji = {{Yape:'💜',Plin:'💙',Efectivo:'💵'}}[metodo] || '💳';
+  const pagoClr   = {{'Yape/Plin':'#6c3d98',Yape:'#6c3d98',Plin:'#6c3d98',Efectivo:'#2D5016'}}[metodo] || '#555';
+  const pagoEmoji = {{'Yape/Plin':'💜',Yape:'💜',Plin:'💜',Efectivo:'💵'}}[metodo] || '💳';
   const dirHtml   = p.direccion
     ? `<div class="card-dir">📍 ${{esc(p.direccion)}}</div>`
     : `<div class="card-dir sin-dir">📍 Sin dirección</div>`;
@@ -753,14 +751,21 @@ async function refreshOrders() {{
     document.getElementById('activosCount').textContent = activos;
 
     // Actualizar total acumulado (todos menos cancelados)
-    const totalDia = pedidos
-      .filter(p => (p.estado || '') !== 'Cancelado ❌')
-      .reduce((sum, p) => {{
-        const t = parseFloat((p.total || '0').replace('S/', '').replace(',','.').trim()) || 0;
-        return sum + t;
-      }}, 0);
+    const noCancel = pedidos.filter(p => (p.estado || '') !== 'Cancelado ❌');
+    const totalDia = noCancel.reduce((sum, p) => {{
+      const t = parseFloat((p.total || '0').replace('S/', '').replace(',','.').trim()) || 0;
+      return sum + t;
+    }}, 0);
     const chipTotal = document.getElementById('chipTotal');
     if (chipTotal) chipTotal.textContent = `💰 S/ ${{totalDia.toFixed(2)}}`;
+
+    // Actualizar chips de método de pago
+    const cntYP = noCancel.filter(p => ['Yape/Plin','Yape','Plin'].includes(p.metodo_pago)).length;
+    const cntEf = noCancel.filter(p => !['Yape/Plin','Yape','Plin'].includes(p.metodo_pago)).length;
+    const chipYP = document.getElementById('cntYapePlin');
+    const chipEf = document.getElementById('cntEfec');
+    if (chipYP) chipYP.textContent = `💜 ${{cntYP}} Yape/Plin`;
+    if (chipEf) chipEf.textContent = `💵 ${{cntEf}} Efectivo`;
 
     const now = new Date().toLocaleTimeString('es-PE',{{hour:'2-digit',minute:'2-digit'}});
     document.getElementById('lastRefresh').textContent = `🔄 Actualizado ${{now}}`;

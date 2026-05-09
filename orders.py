@@ -77,7 +77,7 @@ async def _notify_owner(phone_clean: str, items: str, total: str, metodo_pago: s
             modo = "template"
         else:
             # ── Modo texto (requiere que el dueño haya escrito al bot hoy) ───
-            pago_emoji = {"Yape": "💜 Yape", "Plin": "💙 Plin", "Efectivo": "💵 Efectivo"}.get(metodo_pago, metodo_pago)
+            pago_emoji = {"Yape/Plin": "💜 Yape/Plin", "Yape": "💜 Yape", "Plin": "💜 Plin", "Efectivo": "💵 Efectivo"}.get(metodo_pago, metodo_pago)
             dir_linea = f"\n📍 {direccion}" if direccion else ""
             mensaje = (
                 f"{titulo}\n"

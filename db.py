@@ -63,6 +63,12 @@ def init_db():
             except Exception:
                 pass  # La columna ya existe
 
+        # Normalizar estados sin emoji que quedaron por el DEFAULT antiguo
+        c.execute("UPDATE orders SET estado='Nuevo 🆕' WHERE estado='Nuevo' OR estado IS NULL OR estado=''")
+        c.execute("UPDATE orders SET estado='En preparación 👨‍🍳' WHERE estado='En preparación'")
+        c.execute("UPDATE orders SET estado='En camino 🛵' WHERE estado='En camino'")
+        c.execute("UPDATE orders SET estado='Entregado ✅' WHERE estado='Entregado'")
+
 
 # ── Customer profiles ─────────────────────────────────────────
 
@@ -195,8 +201,8 @@ def save_order_db(phone: str, items: str, total: str, metodo_pago: str = "Efecti
     now = datetime.now(PERU_TZ)
     with _conn() as c:
         c.execute(
-            "INSERT INTO orders (fecha, hora, phone, items, total, metodo_pago, direccion) VALUES (?,?,?,?,?,?,?)",
-            (now.strftime("%d/%m/%Y"), now.strftime("%H:%M"), phone, items, total, metodo_pago, direccion),
+            "INSERT INTO orders (fecha, hora, phone, items, total, estado, metodo_pago, direccion) VALUES (?,?,?,?,?,?,?,?)",
+            (now.strftime("%d/%m/%Y"), now.strftime("%H:%M"), phone, items, total, "Nuevo 🆕", metodo_pago, direccion),
         )
 
 

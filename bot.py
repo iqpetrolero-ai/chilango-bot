@@ -1,5 +1,6 @@
 import os
 import base64
+import httpx
 from datetime import datetime, timezone, timedelta
 from anthropic import AsyncAnthropic
 from menu import MENU_TEXTO
@@ -25,6 +26,7 @@ def get_client() -> AsyncAnthropic:
 
 
 def esta_en_horario() -> bool:
+    return True  # ⚠️ MODO PRUEBA — quitar para producción
     ahora = datetime.now(PERU_TZ)
     if ahora.weekday() not in (4, 5, 6):
         return False
@@ -108,9 +110,11 @@ Si es de las incluidas → no la cobres por separado. Si es adicional → agrég
    - "¿Cuánto demora el delivery?" → El tiempo varía según la zona; el repartidor te confirmará al salir
    - "¿Tienen cobertura en mi zona?" → Sí, llegamos a todo Tacna
    - "¿Cuánto cuesta el delivery?" → El costo varía según tu zona; el repartidor te lo informa al entregar
+   - "¿Puedo pagar el delivery incluido en el pedido?" → Sí. Dime cuánto es el delivery
+     y lo sumamos al total para que hagas un solo pago.
    - "¿La quesabirria incluye algo más?" → Sí, viene con consomé para dipping 🍲
    - "¿Puedo personalizar mi pedido?" → Sí: sin cebolla, sin cilantro o todo aparte
-   - Quejas o problemas con el pedido → pide al cliente que contacte directamente al 954 713 696
+   - Quejas de sabor, temperatura o producto incorrecto → ver punto 11
 
 3. TOMAR PEDIDO: Cuando el cliente quiera pedir:
    - Anota cada item con cantidad
@@ -142,7 +146,7 @@ Si es de las incluidas → no la cobres por separado. Si es adicional → agrég
 
    YAPE/PLIN:
    Paso 1 — Una vez que tienes dirección y el cliente eligió Yape/Plin: indica
-             "📲 Yapea o Plina al *{YAPE_PLIN_NUMBER}*" y pide la captura. NO incluyas ningún tag aún.
+             "📲 Yapea o Plina al *{YAPE_PLIN_NUMBER}* a nombre de *Karla Saldaña*" y pide la captura. NO incluyas ningún tag aún.
    Paso 2 — Cliente envía la captura: verifica el monto en la imagen.
              * Monto correcto → confirma, informa tiempo estimado (CONTEXTO ACTUAL) y agrega [PEDIDO_OK|...]
              * Monto menor    → indica la diferencia y pide que complete
@@ -241,17 +245,67 @@ Si es de las incluidas → no la cobres por separado. Si es adicional → agrég
 
    IDIOMA: Español cálido y directo. Sin exagerar la jerga mexicana. Respuestas cortas al punto.
 
+11. DELIVERY INCLUIDO EN EL PAGO:
+    Si el cliente quiere pagar el delivery junto con el pedido:
+    - Pregunta cuánto es el costo de delivery (si no lo sabe, dile que pregunte al repartidor)
+    - Agrega la línea "Delivery: S/ X.XX" a los ítems del pedido
+    - Recalcula el total sumando el delivery
+    - Incluye "Delivery: S/X.XX" en el campo items del tag [PEDIDO_OK|...]
+
+12. QUEJAS (sabor, temperatura, falta de producto, orden incorrecta):
+    - Responde con ownership inmediato y empatía real. Sin excusas.
+    - Pregunta brevemente qué estuvo mal para entender el problema.
+    - Indica que el equipo lo va a resolver: "Escríbenos al 954 713 696 para resolverlo ahora mismo."
+    - Al final de tu respuesta, agrega el tag (sin mostrarlo al cliente):
+      [QUEJA|desc: <resumen del problema>|phone: <ya lo tienes>]
+    - Nunca ofrezcas descuentos ni devoluciones sin autorización del negocio.
+
 IMPORTANTE: Nunca inventes precios ni productos que no estén en la carta.
 
 ━━━ MEMORIA DE CLIENTES ━━━
-Si el cliente menciona su nombre en la conversación, guárdalo una sola vez con el tag:
+Si el cliente menciona EXPLÍCITAMENTE su propio nombre en la conversación
+(frases como "me llamo X", "soy X", "mi nombre es X"), guárdalo UNA SOLA VEZ con el tag:
 [SAVE_NAME|nombre: <nombre>]
 Ponlo al final de tu respuesta, sin mostrarlo al cliente. No lo repitas en mensajes siguientes.
+
+IMPORTANTE — NUNCA uses [SAVE_NAME] para:
+- El nombre "Karla Saldaña" (es la dueña del negocio, no el cliente)
+- Cualquier nombre proveniente del sistema (número de Yape, datos del restaurante, etc.)
+- Nombres que el cliente no haya dicho claramente que son suyos
+
 Si el perfil del cliente ya tiene nombre (ver PERFIL DEL CLIENTE más abajo), salúdalo por ese nombre
-al inicio de la conversación de forma natural.
+al inicio de la conversación de forma natural. NO uses "Karla" como apelativo genérico.
 Si el perfil ya tiene una dirección o método de pago habitual, sugiérelos cuando corresponda:
 "¿Pedimos a la misma dirección de siempre?" o "¿Pagamos igual que la vez anterior?"
 """
+
+
+async def _notify_queja(phone_clean: str, desc: str):
+    """Envía notificación al dueño cuando hay una queja de cliente."""
+    try:
+        token = os.environ.get("META_ACCESS_TOKEN", "").strip()
+        pid = os.environ.get("META_PHONE_NUMBER_ID", "").strip()
+        owner = "51954713696"
+        if not token or not pid:
+            print(f"[QUEJA] No se puede notificar: faltan vars de entorno")
+            return
+        mensaje = (
+            f"⚠️ *QUEJA DE CLIENTE — Chilango*\n"
+            f"👤 +{phone_clean}\n"
+            f"📝 {desc or 'Sin descripción'}\n"
+            f"🕒 {datetime.now(PERU_TZ).strftime('%d/%m · %I:%M %p')}"
+        )
+        url = f"https://graph.facebook.com/v19.0/{pid}/messages"
+        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+        payload = {"messaging_product": "whatsapp", "to": owner, "type": "text", "text": {"body": mensaje}}
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(url, json=payload, headers=headers)
+            if resp.status_code == 200:
+                print(f"[QUEJA] Notificación enviada al dueño")
+            else:
+                print(f"[QUEJA] Error al notificar: {resp.status_code} {resp.text}")
+    except Exception as e:
+        print(f"[QUEJA] Excepción: {e}")
 
 
 def _extract_save_name(reply: str) -> tuple[str | None, str]:
@@ -332,6 +386,22 @@ async def _parse_and_save_order(phone: str, reply: str) -> str:
         reply = reply.replace("[PEDIDO_CANCEL]", "").strip()
         await cancel_order(phone)
 
+    # Queja de cliente → notificar al dueño
+    if "[QUEJA|" in reply:
+        try:
+            start = reply.index("[QUEJA|")
+            end = reply.index("]", start)
+            tag_str = reply[start:end + 1]
+            inner = tag_str[len("[QUEJA|"):-1]
+            desc = ""
+            for part in inner.split("|"):
+                if part.startswith("desc:"):
+                    desc = part[5:].strip()
+            reply = (reply[:start] + reply[end + 1:]).strip()
+            await _notify_queja(phone_clean, desc)
+        except Exception as e:
+            print(f"[QUEJA] Error al procesar tag: {e}")
+
     return reply
 
 
@@ -347,7 +417,8 @@ def _estimar_espera(pedidos_activos: int) -> str:
 
 
 async def _call_claude(phone: str, messages: list) -> str:
-    history = messages[-30:]
+    # Filtrar campos extra (ts, etc.) que la API de Claude no acepta
+    history = [{"role": m["role"], "content": m["content"]} for m in messages[-30:]]
     hora_tacna = datetime.now(PERU_TZ).strftime("%H:%M")
     phone_clean = phone.replace("whatsapp:", "").replace("+", "")
 
@@ -415,13 +486,14 @@ async def process_message(phone: str, message: str) -> str:
     if not esta_en_horario():
         return mensaje_fuera_horario()
 
+    now_ts = datetime.now(PERU_TZ).strftime("%H:%M")
     messages = db.get_messages(phone)
-    messages.append({"role": "user", "content": message})
+    messages.append({"role": "user", "content": message, "ts": now_ts})
 
     reply = await _call_claude(phone, messages)
     reply = await _parse_and_save_order(phone, reply)
 
-    messages.append({"role": "assistant", "content": reply})
+    messages.append({"role": "assistant", "content": reply, "ts": now_ts})
     db.save_messages(phone, messages)
 
     return reply
@@ -431,11 +503,13 @@ async def process_message_with_image(phone: str, image_bytes: bytes, mime_type: 
     if not esta_en_horario():
         return mensaje_fuera_horario()
 
+    now_ts = datetime.now(PERU_TZ).strftime("%H:%M")
     image_b64 = base64.standard_b64encode(image_bytes).decode("utf-8")
 
     messages = db.get_messages(phone)
     messages.append({
         "role": "user",
+        "ts": now_ts,
         "content": [
             {
                 "type": "image",
@@ -452,7 +526,7 @@ async def process_message_with_image(phone: str, image_bytes: bytes, mime_type: 
     reply = await _call_claude(phone, messages)
     reply = await _parse_and_save_order(phone, reply)
 
-    messages.append({"role": "assistant", "content": reply})
+    messages.append({"role": "assistant", "content": reply, "ts": now_ts})
     db.save_messages(phone, messages)
 
     return reply

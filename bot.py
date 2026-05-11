@@ -186,12 +186,21 @@ Si es de las incluidas → no la cobres por separado. Si es adicional → agrég
    - Agrega al final de tu respuesta el tag: [ESCALATE]
    - NO menciones ningún número de teléfono.
 
-8. ESTADO DEL PEDIDO: SOLO si el cliente ya tiene un pedido confirmado previamente y en un mensaje
-   posterior pregunta explícitamente por él (ej: "¿ya salió?", "¿dónde está?", "¿cuánto falta?",
-   "¿ya lo mandaron?"), responde de forma breve y tranquilizadora. Ejemplos:
-   - "¡Ya casi! Tu pedido está en los últimos detalles 🌮"
-   - "¡Lo están preparando con todo el sabor! 🔥"
-   NUNCA uses estas frases al confirmar un pedido nuevo. Nunca menciones tiempos exactos. Máximo 2 líneas.
+8. ESTADO DEL PEDIDO:
+   ⛔ NUNCA digas frases como "ya está en camino", "ya salió", "ya lo mandamos", "ya está listo",
+   "en preparación" ni ninguna frase que indique el estado actual del pedido.
+   TÚ NO TIENES INFORMACIÓN del estado real — eso lo maneja el equipo en el panel interno.
+   Inventar el estado genera confusión y reclamos.
+
+   SOLO si el cliente pregunta EXPLÍCITAMENTE por su pedido (ej: "¿ya salió?", "¿dónde está?",
+   "¿cuánto falta?", "¿ya lo mandaron?"), responde de forma genérica y tranquilizadora:
+   - "¡El equipo ya está en ello! En cuanto salga te avisamos 🌮"
+   - "¡Lo están preparando con todo el sabor! Te notificamos cuando esté en camino 🔥"
+   Nunca menciones tiempos exactos. Máximo 2 líneas.
+
+   Si el cliente dice "gracias", "ok", "perfecto", "listo" u otras frases de cierre → responde
+   brevemente ("¡Con gusto! 😊") SIN mencionar nada del estado del pedido.
+
    Si el cliente tiene una queja o problema con su pedido (faltó algo, llegó frío, orden incorrecta),
    responde con empatía y usa [ESCALATE] para conectarlo con el equipo aquí mismo.
 
@@ -485,8 +494,9 @@ async def _call_claude(phone: str, messages: list) -> str:
                 "\n• Si el cliente EXPLÍCITAMENTE pide cambiar algo (agregar, quitar o cambiar ítems),"
                 " muestra el nuevo resumen completo con total recalculado, pide confirmación"
                 " y cuando confirme usa [PEDIDO_MOD|...] con el pedido completo actualizado."
-                "\n• Si dice 'gracias', 'ok', 'perfecto' u otras frases de cierre, responde brevemente"
-                " y amablemente sin ningún tag."
+                "\n• Si dice 'gracias', 'ok', 'perfecto' u otras frases de cierre, responde MUY brevemente"
+                " (ej: '¡Con gusto! 😊') sin ningún tag y SIN mencionar el estado del pedido —"
+                " nunca digas 'en camino', 'ya salió', 'en preparación' ni similares."
             )
     except Exception as e:
         print(f"[PEDIDO-CTX] Error: {e}")

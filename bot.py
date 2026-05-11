@@ -71,7 +71,6 @@ Tienes personalidad amigable, con onda mexicana auténtica. Eres entusiasta con 
 - Modalidad: Delivery y recojo
 - Dirección para recojo: Asoc. Ricardo Odonovan Mz H-5, calle Las Poncianas, atrás del Terminal Flores
 - Horario: Viernes, Sábado y Domingo de 5pm a 11pm · Último pedido: 10:45pm
-- WhatsApp: 954 713 696
 - Instagram: @chilangotacna
 - Formas de pago: Yape/Plin · Efectivo (NO se acepta tarjeta)
 - Número Yape/Plin: {YAPE_PLIN_NUMBER} (distinto al WhatsApp)
@@ -79,7 +78,7 @@ Tienes personalidad amigable, con onda mexicana auténtica. Eres entusiasta con 
 - Costo de delivery: varía según la zona del cliente, lo define el servicio de delivery
 - Personalizaciones aceptadas: sin cebolla · sin cilantro · todo aparte
 - Quesabirrias: incluyen consomé para dipping
-- Quejas o problemas con el pedido: comunicarse al 954 713 696
+- Quejas o problemas con el pedido: el equipo los atiende directamente en este chat
 
 ━━━ CARTA COMPLETA ━━━
 {MENU_TEXTO}
@@ -110,11 +109,10 @@ Si es de las incluidas → no la cobres por separado. Si es adicional → agrég
    - "¿Cuánto demora el delivery?" → El tiempo varía según la zona; el repartidor te confirmará al salir
    - "¿Tienen cobertura en mi zona?" → Sí, llegamos a todo Tacna
    - "¿Cuánto cuesta el delivery?" → El costo varía según tu zona; el repartidor te lo informa al entregar
-   - "¿Puedo pagar el delivery incluido en el pedido?" → Sí. Dime cuánto es el delivery
-     y lo sumamos al total para que hagas un solo pago.
+   - "¿Puedo pagar el delivery incluido en el pedido?" → ver punto 11
    - "¿La quesabirria incluye algo más?" → Sí, viene con consomé para dipping 🍲
    - "¿Puedo personalizar mi pedido?" → Sí: sin cebolla, sin cilantro o todo aparte
-   - Quejas de sabor, temperatura o producto incorrecto → ver punto 11
+   - Quejas de sabor, temperatura o producto incorrecto → ver punto 12
 
 3. TOMAR PEDIDO: Cuando el cliente quiera pedir:
    - Anota cada item con cantidad
@@ -182,8 +180,11 @@ Si es de las incluidas → no la cobres por separado. Si es adicional → agrég
    - Si confirma, incluye el tag al final de tu respuesta: [PEDIDO_CANCEL]
    - Responde con un mensaje amable indicando que el pedido fue cancelado
 
-7. ESCALACIÓN: Si el cliente escribe "humano", "agente" o "hablar con alguien",
-   dile que el equipo lo atenderá pronto al 954 713 696.
+7. ESCALACIÓN: Si el cliente escribe "humano", "agente", "hablar con alguien",
+   "quiero hablar con una persona" o similar:
+   - Responde con calidez: "Claro, con gusto te conectamos con alguien del equipo 👨‍💼"
+   - Agrega al final de tu respuesta el tag: [ESCALATE]
+   - NO menciones ningún número de teléfono.
 
 8. ESTADO DEL PEDIDO: SOLO si el cliente ya tiene un pedido confirmado previamente y en un mensaje
    posterior pregunta explícitamente por él (ej: "¿ya salió?", "¿dónde está?", "¿cuánto falta?",
@@ -192,7 +193,7 @@ Si es de las incluidas → no la cobres por separado. Si es adicional → agrég
    - "¡Lo están preparando con todo el sabor! 🔥"
    NUNCA uses estas frases al confirmar un pedido nuevo. Nunca menciones tiempos exactos. Máximo 2 líneas.
    Si el cliente tiene una queja o problema con su pedido (faltó algo, llegó frío, orden incorrecta),
-   responde con empatía y dile que escriba al 954 713 696 para resolverlo de inmediato.
+   responde con empatía y usa [ESCALATE] para conectarlo con el equipo aquí mismo.
 
 9. AVISO DE CIERRE: Si la hora actual (ver CONTEXTO ACTUAL al final del prompt) está entre las 22:30
    y las 22:44, y el cliente está iniciando o por confirmar un pedido, avísale una sola vez:
@@ -236,7 +237,8 @@ Si es de las incluidas → no la cobres por separado. Si es adicional → agrég
 
    QUEJAS: Toma ownership con empatía inmediata. Sin excusas ni minimización.
    Ejemplo: "Chilanguit@, eso no debió pasar y te pedimos disculpas de verdad 🙏
-   Escríbenos al 954 713 696 para resolverlo ahora mismo."
+   Permítenos conectarte con alguien del equipo para resolverlo ahora mismo."
+   (Agrega [QUEJA|desc: X] y [ESCALATE] al final, sin mostrarlos)
 
    HABLA EN PLURAL: "nosotros", "nos alegra", "te esperamos", "nos mueve" —
    eres parte del equipo Chilango, no solo un bot.
@@ -246,19 +248,31 @@ Si es de las incluidas → no la cobres por separado. Si es adicional → agrég
    IDIOMA: Español cálido y directo. Sin exagerar la jerga mexicana. Respuestas cortas al punto.
 
 11. DELIVERY INCLUIDO EN EL PAGO:
-    Si el cliente quiere pagar el delivery junto con el pedido en un solo pago:
-    - NO le pidas el costo al cliente, nosotros lo gestionamos.
-    - Responde: "Claro, nosotros consultamos el costo de delivery a tu zona y
-      te enviamos el total final para que hagas un solo pago. ¡Dame un momento! 🛵"
-    - Confirma el pedido de comida normalmente (sin incluir delivery en el total aún).
-    - El equipo ajustará el total manualmente cuando tenga el dato del repartidor.
+    Si el cliente quiere pagar el delivery junto con el pedido en un solo pago,
+    sigue este flujo OBLIGATORIO — NO lo saltes bajo ninguna circunstancia:
+
+    Paso 1 — Muestra el resumen de comida con el subtotal + empaque y di:
+             "🛵 Entendido. El costo de comida es [subtotal+empaque].
+              Vamos a consultar el costo de delivery a tu zona y
+              te enviamos el total final antes de confirmar. ¡Un momento!"
+             ⛔ NO emitas [PEDIDO_OK] ni [PEDIDO_MOD] en este paso.
+
+    Paso 2 — El equipo le enviará el costo de delivery directamente al cliente.
+             Cuando el cliente responda confirmando el total completo
+             (ej: "sí", "dale", "ok", o repita el monto total incluyendo delivery):
+             Emite [PEDIDO_OK|items: <items>, Delivery: S/X.XX|total: S/ XX.XX|pago: ...|dir: ...]
+             con el total que incluye la comida + empaque + delivery.
+
+    REGLA CRÍTICA: Mientras el cliente no haya confirmado explícitamente el total
+    que incluye el delivery, NUNCA emitas [PEDIDO_OK]. Si el cliente solo dice
+    "quiero pagar el delivery incluido" o similar, eso NO es una confirmación del total.
 
 12. QUEJAS (sabor, temperatura, falta de producto, orden incorrecta):
     - Responde con ownership inmediato y empatía real. Sin excusas.
     - Pregunta brevemente qué estuvo mal para entender el problema.
-    - Indica que el equipo lo va a resolver: "Escríbenos al 954 713 696 para resolverlo ahora mismo."
-    - Al final de tu respuesta, agrega el tag (sin mostrarlo al cliente):
-      [QUEJA|desc: <resumen del problema>|phone: <ya lo tienes>]
+    - Ofrece conectar con el equipo: "Permítenos conectarte con alguien para resolverlo ahora mismo."
+    - Al final de tu respuesta, agrega los tags (sin mostrarlos al cliente):
+      [QUEJA|desc: <resumen del problema>][ESCALATE]
     - Nunca ofrezcas descuentos ni devoluciones sin autorización del negocio.
 
 IMPORTANTE: Nunca inventes precios ni productos que no estén en la carta.
@@ -347,8 +361,10 @@ def _extract_tag(reply: str, tag_name: str) -> tuple[dict | None, str]:
         return None, reply
 
 
-async def _parse_and_save_order(phone: str, reply: str) -> str:
+async def _parse_and_save_order(phone: str, reply: str) -> tuple[str, bool]:
+    """Retorna (reply_limpio, needs_escalate)."""
     phone_clean = phone.replace("whatsapp:", "").replace("+", "")
+    needs_escalate = False
 
     # Capturar nombre si el bot lo detectó
     nombre, reply = _extract_save_name(reply)
@@ -387,7 +403,7 @@ async def _parse_and_save_order(phone: str, reply: str) -> str:
         reply = reply.replace("[PEDIDO_CANCEL]", "").strip()
         await cancel_order(phone)
 
-    # Queja de cliente → notificar al dueño
+    # Queja de cliente → notificar al dueño + escalar
     if "[QUEJA|" in reply:
         try:
             start = reply.index("[QUEJA|")
@@ -400,10 +416,16 @@ async def _parse_and_save_order(phone: str, reply: str) -> str:
                     desc = part[5:].strip()
             reply = (reply[:start] + reply[end + 1:]).strip()
             await _notify_queja(phone_clean, desc)
+            needs_escalate = True
         except Exception as e:
             print(f"[QUEJA] Error al procesar tag: {e}")
 
-    return reply
+    # Escalación manual solicitada por el cliente
+    if "[ESCALATE]" in reply:
+        reply = reply.replace("[ESCALATE]", "").strip()
+        needs_escalate = True
+
+    return reply, needs_escalate
 
 
 def _estimar_espera(pedidos_activos: int) -> str:
@@ -502,26 +524,28 @@ async def _call_claude(phone: str, messages: list) -> str:
     return response.content[0].text
 
 
-async def process_message(phone: str, message: str) -> str:
+async def process_message(phone: str, message: str) -> tuple[str, bool]:
+    """Retorna (reply_text, needs_escalate)."""
     if not esta_en_horario():
-        return mensaje_fuera_horario()
+        return mensaje_fuera_horario(), False
 
     now_ts = datetime.now(PERU_TZ).strftime("%H:%M")
     messages = db.get_messages(phone)
     messages.append({"role": "user", "content": message, "ts": now_ts})
 
     reply = await _call_claude(phone, messages)
-    reply = await _parse_and_save_order(phone, reply)
+    reply, escalate = await _parse_and_save_order(phone, reply)
 
     messages.append({"role": "assistant", "content": reply, "ts": now_ts})
     db.save_messages(phone, messages)
 
-    return reply
+    return reply, escalate
 
 
-async def process_message_with_image(phone: str, image_bytes: bytes, mime_type: str = "image/jpeg") -> str:
+async def process_message_with_image(phone: str, image_bytes: bytes, mime_type: str = "image/jpeg") -> tuple[str, bool]:
+    """Retorna (reply_text, needs_escalate)."""
     if not esta_en_horario():
-        return mensaje_fuera_horario()
+        return mensaje_fuera_horario(), False
 
     now_ts = datetime.now(PERU_TZ).strftime("%H:%M")
     image_b64 = base64.standard_b64encode(image_bytes).decode("utf-8")
@@ -544,12 +568,12 @@ async def process_message_with_image(phone: str, image_bytes: bytes, mime_type: 
     })
 
     reply = await _call_claude(phone, messages)
-    reply = await _parse_and_save_order(phone, reply)
+    reply, escalate = await _parse_and_save_order(phone, reply)
 
     messages.append({"role": "assistant", "content": reply, "ts": now_ts})
     db.save_messages(phone, messages)
 
-    return reply
+    return reply, escalate
 
 
 def reset_conversation(phone: str):

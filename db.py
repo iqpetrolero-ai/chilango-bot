@@ -182,12 +182,17 @@ def get_conversations_with_status() -> dict[str, dict]:
         }
 
 
-def append_message(phone: str, role: str, content: str):
+def append_message(phone: str, role: str, content: str, ts: str = "", manual: bool = False):
     """Agrega un mensaje al historial sin reemplazarlo (para mensajes no procesados por Claude)."""
     with _conn() as c:
         row = c.execute("SELECT messages FROM conversations WHERE phone=?", (phone,)).fetchone()
         msgs = json.loads(row["messages"]) if row else []
-        msgs.append({"role": role, "content": content})
+        entry: dict = {"role": role, "content": content}
+        if ts:
+            entry["ts"] = ts
+        if manual:
+            entry["manual"] = True
+        msgs.append(entry)
         c.execute("""
             INSERT INTO conversations (phone, messages, welcomed)
             VALUES (?, ?, 1)

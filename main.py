@@ -50,6 +50,11 @@ PALABRAS_CARTA = ["carta", "menu", "menú", "ver carta", "ver menu", "qué tiene
 SALUDOS_GENERICOS = {"hola", "buenas", "buenos días", "buenas tardes", "buenas noches",
                      "hi", "hello", "hey", "ola", "buenas noches", "2"}
 
+# ── Deduplicación de webhooks ─────────────────────────────────
+# Meta reenvía el mismo mensaje si no recibe respuesta rápida.
+# Guardamos los últimos 500 message IDs para evitar procesar dos veces.
+_processed_msg_ids: set[str] = set()
+
 
 async def send_whatsapp_message(to: str, text: str, phone_number_id: str = None):
     pid = phone_number_id or META_PHONE_NUMBER_ID
@@ -202,6 +207,17 @@ async def receive_message(request: Request):
 
         phone_number_id = changes.get("metadata", {}).get("phone_number_id", META_PHONE_NUMBER_ID)
         message_data = changes["messages"][0]
+
+        # Deduplicar: si ya procesamos este mensaje_id, ignorar
+        msg_id = message_data.get("id", "")
+        if msg_id:
+            if msg_id in _processed_msg_ids:
+                print(f"[WEBHOOK] Mensaje duplicado ignorado: {msg_id}")
+                return JSONResponse({"status": "ok"})
+            _processed_msg_ids.add(msg_id)
+            if len(_processed_msg_ids) > 500:
+                _processed_msg_ids.clear()
+
         phone = message_data["from"]
         msg_type = message_data.get("type", "")
 
@@ -342,13 +358,24 @@ def _render_card(p: dict) -> str:
     metodo = p.get("metodo_pago") or "Efectivo"
     pago_color = {"Yape/Plin": "#6c3d98", "Yape": "#6c3d98", "Plin": "#6c3d98", "Efectivo": "#2D5016"}.get(metodo, "#555")
     pago_emoji = {"Yape/Plin": "💜", "Yape": "💜", "Plin": "💜", "Efectivo": "💵"}.get(metodo, "💳")
+    es_digital = metodo in ("Yape/Plin", "Yape", "Plin")
+    pago_estado_html = (
+        '<span class="pago-estado pagado">✅ Pagado</span>' if es_digital
+        else '<span class="pago-estado pendiente">💵 Cobrar al entregar</span>'
+    )
 
-    # Dirección
+    # Dirección / tipo de entrega
     direccion = p.get("direccion") or ""
+    es_recojo = direccion.strip().lower() == "recojo"
+    entrega_badge = (
+        '<span class="entrega-badge recojo">🏪 Recojo</span>' if es_recojo
+        else '<span class="entrega-badge delivery">🏍️ Delivery</span>'
+    )
     dir_html = (
         f'<div class="card-dir">📍 {html.escape(direccion)}</div>'
-        if direccion else
-        '<div class="card-dir sin-dir">📍 Sin dirección</div>'
+        if direccion and not es_recojo else
+        ('<div class="card-dir">📍 Recojo en local</div>' if es_recojo else
+         '<div class="card-dir sin-dir">📍 Sin dirección</div>')
     )
 
     mod_badge = '<span class="mod-badge">✏️ Mod</span>' if p.get("modificado") else ""
@@ -361,12 +388,19 @@ def _render_card(p: dict) -> str:
     else:
         items_inner = html.escape(items_raw)
 
-    return f"""<div class="card" id="card-{p['id']}" data-estado="{html.escape(estado)}"
+    # Botón siguiente: para recojo en "En preparación" el siguiente es "Listo p/retirar"
+    if es_recojo and siguiente and siguiente == "En camino 🛵":
+        sig_label_display = "📦 Listo p/retirar"
+        sig_js_safe = siguiente.replace("'", "\\'")
+        btn_sig = f"<button class='btn-next recojo-next' onclick=\"cambiarEstado({pid},'{sig_js_safe}')\">{sig_label_display}</button>"
+
+    return f"""<div class="card" id="card-{p['id']}" data-estado="{html.escape(estado)}" data-recojo="{1 if es_recojo else 0}"
      style="border-left:4px solid {badge_color};background:{bg}">
   <div class="card-top">
     <span class="card-id">#{p['id']}</span>
     <span class="card-time">🕒 {p['hora']}</span>
     <span class="card-phone">+{html.escape(p['phone'])}</span>
+    {entrega_badge}
     {mod_badge}
     <span class="badge" style="background:{badge_color}">{html.escape(estado)}</span>
   </div>
@@ -377,6 +411,7 @@ def _render_card(p: dict) -> str:
     <div class="foot-left">
       <span class="card-total">{html.escape(p['total'])}</span>
       <span class="pago-badge" style="background:{pago_color}">{pago_emoji} {html.escape(metodo)}</span>
+      {pago_estado_html}
     </div>
     <div class="foot-right">{btn_sig}{btn_del}</div>
   </div>
@@ -394,11 +429,16 @@ async def test_notify(credentials: HTTPBasicCredentials = Depends(verificar_admi
 
 
 @app.get("/pedidos", response_class=HTMLResponse)
-async def pedidos_panel(credentials: HTTPBasicCredentials = Depends(verificar_admin)):
+async def pedidos_panel(
+    credentials: HTTPBasicCredentials = Depends(verificar_admin),
+    fecha: str = Query(None)          # ?fecha=DD/MM/YYYY para ver días anteriores
+):
     from datetime import datetime, timezone, timedelta
     PERU_TZ = timezone(timedelta(hours=-5))
-    pedidos = db.get_orders_today()
     hoy = datetime.now(PERU_TZ).strftime("%d/%m/%Y")
+    fecha_sel = fecha if fecha else hoy
+    pedidos = db.get_orders_for_date(fecha_sel) if hasattr(db, "get_orders_for_date") else db.get_orders_today()
+    fechas_disponibles = db.get_available_dates() if hasattr(db, "get_available_dates") else [hoy]
 
     def _cnt(e): return sum(1 for p in pedidos if (p.get("estado") or "Nuevo 🆕") == e)
     count_nuevos   = _cnt("Nuevo 🆕")
@@ -480,6 +520,13 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgro
 .card-phone{{font-size:13px;color:#111;font-weight:700}}
 .badge{{font-size:11px;color:#fff;padding:3px 10px;border-radius:20px;font-weight:700;margin-left:auto;white-space:nowrap}}
 .mod-badge{{font-size:10px;background:#e65100;color:#fff;padding:2px 7px;border-radius:20px;font-weight:700}}
+.entrega-badge{{font-size:10px;padding:2px 8px;border-radius:20px;font-weight:700;white-space:nowrap}}
+.entrega-badge.delivery{{background:#0277bd;color:#fff}}
+.entrega-badge.recojo{{background:#6a1b9a;color:#fff}}
+.pago-estado{{font-size:11px;padding:2px 8px;border-radius:20px;font-weight:700}}
+.pago-estado.pagado{{background:#e8f5e9;color:#2e7d32;border:1px solid #a5d6a7}}
+.pago-estado.pendiente{{background:#fff3e0;color:#e65100;border:1px solid #ffcc80}}
+.btn-next.recojo-next{{background:#6a1b9a}}
 .nav-badge{{background:#e53935;color:#fff;border-radius:10px;min-width:18px;height:18px;font-size:10px;font-weight:700;display:none;align-items:center;justify-content:center;padding:0 5px;margin-left:5px;vertical-align:middle;line-height:18px}}
 
 /* ── Progress ── */
@@ -540,7 +587,10 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgro
 </nav>
 
 <div class="toolbar">
-  <span class="toolbar-info">📅 {hoy} &nbsp;·&nbsp; <strong id="totalCount">{len(pedidos)}</strong> pedidos &nbsp;·&nbsp; <span id="activosCount">{total_activos}</span> activos</span>
+  <span class="toolbar-info">📅 <strong id="totalCount">{len(pedidos)}</strong> pedidos &nbsp;·&nbsp; <span id="activosCount">{total_activos}</span> activos</span>
+  <select id="fechaSelect" onchange="if(this.value)location.href='/pedidos?fecha='+encodeURIComponent(this.value)" style="border:1px solid #ccc;border-radius:8px;padding:5px 10px;font-size:13px;cursor:pointer">
+    {"".join(f'<option value="{f}" {"selected" if f == fecha_sel else ""}>{f}{" (hoy)" if f == hoy else ""}</option>' for f in fechas_disponibles)}
+  </select>
   <button class="btn-test" onclick="probarNotif()">🔔 Probar notificación</button>
 </div>
 
@@ -659,16 +709,36 @@ function buildCard(p) {{
   // siguiente_estado viene calculado por el servidor (evita bug de emoji encoding en JS)
   const siguiente  = p.siguiente_estado || null;
   const es_cancel  = estado === 'Cancelado ❌';
-  const btnSig     = siguiente
-    ? `<button class="btn-next" data-next="${{esc(siguiente)}}" onclick="cambiarEstado(${{p.id}},this.dataset.next)">→ ${{esc(siguiente)}}</button>`
-    : (es_cancel ? `<span class="lbl-done" style="color:#c62828">Cancelado</span>` : `<span class="lbl-done">✅ Completado</span>`);
+  const esRecojo   = (p.es_recojo === true || p.es_recojo === 1);
+
+  // Botón siguiente: para recojo en preparación el botón dice "Listo p/retirar"
+  let btnSig;
+  if (siguiente) {{
+    const esSiguienteCamino = p.siguiente_estado_raw === 'En camino 🛵';
+    const lblBtn = (esRecojo && esSiguienteCamino) ? '📦 Listo p/retirar' : `→ ${{esc(siguiente)}}`;
+    const clsBtn = (esRecojo && esSiguienteCamino) ? 'btn-next recojo-next' : 'btn-next';
+    btnSig = `<button class="${{clsBtn}}" data-next="${{esc(p.siguiente_estado_raw || siguiente)}}" onclick="cambiarEstado(${{p.id}},this.dataset.next)">${{lblBtn}}</button>`;
+  }} else {{
+    btnSig = es_cancel ? `<span class="lbl-done" style="color:#c62828">Cancelado</span>` : `<span class="lbl-done">✅ Completado</span>`;
+  }}
 
   const metodo    = p.metodo_pago || 'Efectivo';
   const pagoClr   = {{'Yape/Plin':'#6c3d98',Yape:'#6c3d98',Plin:'#6c3d98',Efectivo:'#2D5016'}}[metodo] || '#555';
   const pagoEmoji = {{'Yape/Plin':'💜',Yape:'💜',Plin:'💜',Efectivo:'💵'}}[metodo] || '💳';
-  const dirHtml   = p.direccion
-    ? `<div class="card-dir">📍 ${{esc(p.direccion)}}</div>`
+  const esDigital = ['Yape/Plin','Yape','Plin'].includes(metodo);
+  const pagoEstadoHtml = esDigital
+    ? `<span class="pago-estado pagado">✅ Pagado</span>`
+    : `<span class="pago-estado pendiente">💵 Cobrar al entregar</span>`;
+
+  const entregaBadge = esRecojo
+    ? `<span class="entrega-badge recojo">🏪 Recojo</span>`
+    : `<span class="entrega-badge delivery">🏍️ Delivery</span>`;
+
+  const dirTexto = esRecojo ? '📍 Recojo en local' : (p.direccion ? `📍 ${{esc(p.direccion)}}` : null);
+  const dirHtml  = dirTexto
+    ? `<div class="card-dir">${{dirTexto}}</div>`
     : `<div class="card-dir sin-dir">📍 Sin dirección</div>`;
+
   const modBadge  = p.modificado ? `<span class="mod-badge">✏️ Mod</span>` : '';
 
   // Bullets para múltiples productos
@@ -677,12 +747,13 @@ function buildCard(p) {{
     ? itemsList.map(i => `<div class="item-line">• ${{esc(i)}}</div>`).join('')
     : esc(p.items || '');
 
-  return `<div class="card" id="card-${{p.id}}" data-estado="${{esc(estado)}}"
+  return `<div class="card" id="card-${{p.id}}" data-estado="${{esc(estado)}}" data-recojo="${{esRecojo?1:0}}"
     style="border-left:4px solid ${{badgeClr}};background:${{bg}}">
   <div class="card-top">
     <span class="card-id">#${{p.id}}</span>
     <span class="card-time">🕒 ${{esc(p.hora)}}</span>
     <span class="card-phone">+${{esc(p.phone)}}</span>
+    ${{entregaBadge}}
     ${{modBadge}}
     <span class="badge" style="background:${{badgeClr}}">${{esc(estado)}}</span>
   </div>
@@ -693,6 +764,7 @@ function buildCard(p) {{
     <div class="foot-left">
       <span class="card-total">${{esc(p.total)}}</span>
       <span class="pago-badge" style="background:${{pagoClr}}">${{pagoEmoji}} ${{esc(metodo)}}</span>
+      ${{pagoEstadoHtml}}
     </div>
     <div class="foot-right">
       ${{btnSig}}
@@ -821,9 +893,10 @@ async def api_pedidos_json(credentials: HTTPBasicCredentials = Depends(verificar
         p["estado"] = estado
         es_cancel = estado == "Cancelado ❌"
         idx = ESTADOS.index(estado) if estado in ESTADOS else -1
-        p["siguiente_estado"] = (
-            ESTADOS[idx + 1] if (not es_cancel and 0 <= idx < len(ESTADOS) - 1) else None
-        )
+        sig = ESTADOS[idx + 1] if (not es_cancel and 0 <= idx < len(ESTADOS) - 1) else None
+        p["siguiente_estado"] = sig
+        p["siguiente_estado_raw"] = sig  # alias explícito para el JS
+        p["es_recojo"] = (p.get("direccion") or "").strip().lower() == "recojo"
     return JSONResponse({"pedidos": pedidos})
 
 
@@ -897,6 +970,46 @@ async def mark_read(phone: str, credentials: HTTPBasicCredentials = Depends(veri
     return JSONResponse({"status": "ok"})
 
 
+@app.get("/api/conversations")
+async def api_conversations(credentials: HTTPBasicCredentials = Depends(verificar_admin)):
+    """Endpoint JSON para polling del panel admin sin recargar la página."""
+    conversaciones_raw = db.get_conversations_with_status()
+    # Sidebar HTML (reproducir la misma lógica de /admin)
+    contacts_html = ""
+    for phone, data in conversaciones_raw.items():
+        mensajes = data["messages"]
+        leida = data["leida"]
+        if not mensajes:
+            continue
+        ultimo = mensajes[-1]
+        contenido = ultimo["content"]
+        if isinstance(contenido, list):
+            preview = next((b["text"] for b in contenido if b.get("type") == "text"), "[imagen]")
+        else:
+            preview = contenido
+        preview = html.escape(str(preview)[:50])
+        badge = "" if leida else f'<div class="contact-unread">{sum(1 for m in mensajes if m["role"] == "user")}</div>'
+        unread_class = "" if leida else " unread"
+        contacts_html += (
+            f'<div class="contact{unread_class}" id="c_{html.escape(phone)}" onclick="showChat(\'{html.escape(phone)}\')">'
+            f'<div class="avatar">👤</div>'
+            f'<div class="contact-info"><div class="contact-name">+{html.escape(phone)}</div>'
+            f'<div class="contact-preview">{preview}</div></div>{badge}</div>'
+        )
+    # Mensajes limpios (sin imágenes) + timestamp si existe
+    conv_clean = {}
+    for phone, data in conversaciones_raw.items():
+        conv_clean[phone] = []
+        for m in data["messages"]:
+            c = m["content"]
+            if isinstance(c, list):
+                texto = next((b["text"] for b in c if b.get("type") == "text"), "[imagen 📷]")
+            else:
+                texto = c
+            conv_clean[phone].append({"role": m["role"], "content": texto, "ts": m.get("ts", "")})
+    return JSONResponse({"contacts_html": contacts_html, "convs": conv_clean})
+
+
 @app.get("/admin", response_class=HTMLResponse)
 async def admin(credentials: HTTPBasicCredentials = Depends(verificar_admin)):
     conversaciones_raw = db.get_conversations_with_status()
@@ -931,7 +1044,7 @@ async def admin(credentials: HTTPBasicCredentials = Depends(verificar_admin)):
     if not contacts_html:
         contacts_html = "<div class='no-convs'>Sin conversaciones aún</div>"
 
-    # Serializar conversaciones para JS (imágenes excluidas por tamaño)
+    # Serializar conversaciones para JS (imágenes excluidas por tamaño, timestamps incluidos)
     conv_clean = {}
     for phone, data in conversaciones_raw.items():
         conv_clean[phone] = []
@@ -941,7 +1054,7 @@ async def admin(credentials: HTTPBasicCredentials = Depends(verificar_admin)):
                 texto = next((b["text"] for b in c if b.get("type") == "text"), "[imagen 📷]")
             else:
                 texto = c
-            conv_clean[phone].append({"role": m["role"], "content": texto})
+            conv_clean[phone].append({"role": m["role"], "content": texto, "ts": m.get("ts", "")})
     conv_json = json.dumps(conv_clean, ensure_ascii=False)
 
     return f"""<!DOCTYPE html>
@@ -986,6 +1099,7 @@ async def admin(credentials: HTTPBasicCredentials = Depends(verificar_admin)):
         .bubble.bot .sender {{ color: #128c7e; }}
         .no-convs {{ padding: 24px; color: #667781; text-align: center; font-size: 14px; }}
         .refresh-note {{ font-size: 11px; color: #667781; text-align: center; padding: 6px; background: #f0f2f5; flex-shrink: 0; }}
+        .msg-ts {{ font-size: 10px; color: #aaa; font-weight: 400; margin-left: 6px; }}
     </style>
 </head>
 <body>
@@ -1046,7 +1160,8 @@ async def admin(credentials: HTTPBasicCredentials = Depends(verificar_admin)):
             const bubbles = msgs.map(m => {{
                 const lado = m.role === 'user' ? 'cliente' : 'bot';
                 const label = m.role === 'user' ? 'Cliente' : '🤖 Chilo';
-                return `<div class="bubble ${{lado}}"><div class="sender">${{label}}</div>${{esc(m.content)}}</div>`;
+                const tsHtml = m.ts ? `<span class="msg-ts">${{m.ts}}</span>` : '';
+                return `<div class="bubble ${{lado}}"><div class="sender">${{label}}${{tsHtml}}</div>${{esc(m.content)}}</div>`;
             }}).join('');
 
             document.getElementById('chatPanel').innerHTML = `
@@ -1061,11 +1176,41 @@ async def admin(credentials: HTTPBasicCredentials = Depends(verificar_admin)):
             sessionStorage.setItem('activePhone', phone);
         }}
 
-        // Restaurar conversación activa después del auto-refresh
+        // Restaurar conversación activa al cargar
         const saved = sessionStorage.getItem('activePhone');
         if (saved && convs[saved]) showChat(saved);
 
-        setTimeout(() => location.reload(), 20000);
+        // ── Polling AJAX: actualizar sidebar sin recargar página ──
+        async function pollConversaciones() {{
+            try {{
+                const r = await fetch('/api/conversations', {{credentials:'same-origin'}});
+                if (!r.ok) return;
+                const data = await r.json();
+                // Actualizar sidebar
+                const lista = document.querySelector('.sidebar-list');
+                if (!lista) return;
+                lista.innerHTML = data.contacts_html || '';
+                // Actualizar mensajes del chat abierto (si hay uno)
+                const activePhone = sessionStorage.getItem('activePhone');
+                if (activePhone && data.convs[activePhone]) {{
+                    const msgsEl = document.getElementById('msgs');
+                    if (msgsEl) {{
+                        const atBottom = msgsEl.scrollHeight - msgsEl.scrollTop - msgsEl.clientHeight < 60;
+                        const newBubbles = data.convs[activePhone].map(m => {{
+                            const lado = m.role === 'user' ? 'cliente' : 'bot';
+                            const label = m.role === 'user' ? 'Cliente' : '🤖 Chilo';
+                            const tsHtml = m.ts ? `<span class="msg-ts">${{m.ts}}</span>` : '';
+                            return `<div class="bubble ${{lado}}"><div class="sender">${{label}}${{tsHtml}}</div>${{esc(m.content)}}</div>`;
+                        }}).join('');
+                        if (msgsEl.innerHTML !== newBubbles) {{
+                            msgsEl.innerHTML = newBubbles;
+                        }}
+                        if (atBottom) msgsEl.scrollTop = msgsEl.scrollHeight;
+                    }}
+                }}
+            }} catch(e) {{}}
+        }}
+        setInterval(pollConversaciones, 20000);
 
         // Burbuja de nuevos pedidos en el nav
         async function checkPedidosNuevos() {{

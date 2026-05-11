@@ -43,6 +43,20 @@ META_PHONE_NUMBER_ID = os.environ.get("META_PHONE_NUMBER_ID", "").strip()
 META_VERIFY_TOKEN = os.environ.get("META_VERIFY_TOKEN", "").strip()
 BASE_URL = os.environ.get("RAILWAY_PUBLIC_DOMAIN", "")
 PDF_URL = f"https://{BASE_URL}/static/carta.pdf" if BASE_URL else ""
+# ── Servicios de delivery (1 o 2) ────────────────────────────
+# Backward compat: DELIVERY_PHONE se toma como delivery 1 si no hay DELIVERY_1_PHONE
+_d1_phone = (os.environ.get("DELIVERY_1_PHONE") or os.environ.get("DELIVERY_PHONE", "")).strip()
+_d1_name  = os.environ.get("DELIVERY_1_NAME", "Delivery 1").strip()
+_d2_phone = os.environ.get("DELIVERY_2_PHONE", "").strip()
+_d2_name  = os.environ.get("DELIVERY_2_NAME", "Delivery 2").strip()
+DELIVERIES = [
+    {"phone": _d1_phone, "name": _d1_name}
+    for _ in [None] if _d1_phone
+] + [
+    {"phone": _d2_phone, "name": _d2_name}
+    for _ in [None] if _d2_phone
+]
+DELIVERY_PHONE = _d1_phone  # backward compat para código existente
 
 PALABRAS_CARTA = ["carta", "menu", "menú", "ver carta", "ver menu", "qué tienen", "que tienen"]
 
@@ -435,11 +449,18 @@ def _render_card(p: dict) -> str:
         '<span class="entrega-badge recojo">🏪 Recojo</span>' if es_recojo
         else '<span class="entrega-badge delivery">🏍️ Delivery</span>'
     )
-    dir_html = (
-        f'<div class="card-dir">📍 {html.escape(direccion)}</div>'
-        if direccion and not es_recojo else
-        ('<div class="card-dir">📍 Recojo en local</div>' if es_recojo else
-         '<div class="card-dir sin-dir">📍 Sin dirección</div>')
+    if es_recojo:
+        dir_html = '<div class="card-dir"><span class="dir-label">Entrega:</span> 📦 El cliente retira</div>'
+    elif direccion:
+        dir_html = f'<div class="card-dir"><span class="dir-label">Dirección:</span> {html.escape(direccion)}</div>'
+    else:
+        dir_html = '<div class="card-dir sin-dir"><span class="dir-label">Dirección:</span> Sin especificar</div>'
+
+    # Notas / personalizaciones
+    notas = (p.get("notas") or "").strip()
+    notas_html = (
+        f'<div class="card-notas"><span class="dir-label">Notas:</span> {html.escape(notas)}</div>'
+        if notas else ""
     )
 
     mod_badge = '<span class="mod-badge">✏️ Mod</span>' if p.get("modificado") else ""
@@ -458,11 +479,16 @@ def _render_card(p: dict) -> str:
         sig_js_safe = siguiente.replace("'", "\\'")
         btn_sig = f"<button class='btn-next recojo-next' onclick=\"cambiarEstado({pid},'{sig_js_safe}')\">{sig_label_display}</button>"
 
+    # Botón "Llamar delivery" — solo para delivery activo (no entregado/cancelado/recojo)
+    btn_delivery = ""
+    if not es_recojo and estado not in ("Entregado ✅", "Cancelado ❌"):
+        btn_delivery = f'<button class="btn-delivery" onclick="llamarDelivery({pid})" title="Llamar servicio de delivery">🛵 Delivery</button>'
+
     return f"""<div class="card" id="card-{p['id']}" data-estado="{html.escape(estado)}" data-recojo="{1 if es_recojo else 0}"
-     style="border-left:4px solid {badge_color};background:{bg}">
+     style="border-left:4px solid {badge_color}">
   <div class="card-top">
     <span class="card-id">#{p['id']}</span>
-    <span class="card-time">🕒 {p['hora']}</span>
+    <span class="card-time">{p['hora']}</span>
     <span class="card-phone">+{html.escape(p['phone'])}</span>
     {entrega_badge}
     {mod_badge}
@@ -471,13 +497,14 @@ def _render_card(p: dict) -> str:
   <div class="progress-row">{steps_html}</div>
   <div class="card-items">{items_inner}</div>
   {dir_html}
+  {notas_html}
   <div class="card-foot">
     <div class="foot-left">
       <span class="card-total">{html.escape(p['total'])}</span>
       <span class="pago-badge" style="background:{pago_color}">{pago_emoji} {html.escape(metodo)}</span>
       {pago_estado_html}
     </div>
-    <div class="foot-right">{btn_sig}{btn_del}</div>
+    <div class="foot-right">{btn_delivery}{btn_sig}{btn_del}</div>
   </div>
 </div>"""
 
@@ -525,11 +552,12 @@ async def pedidos_panel(
     cards = "".join(_render_card(p) for p in pedidos) if pedidos else '<div class="empty">No hay pedidos hoy todavía 🌮</div>'
 
     # Inject Python data as JS constants
-    estados_js   = json.dumps(ESTADOS)
-    badge_js     = json.dumps(ESTADO_BADGE)
-    bg_js        = json.dumps(ESTADO_COLORS)
-    step_idx_js  = json.dumps(STEP_IDX)
-    step_lbl_js  = json.dumps(STEP_LABELS)
+    estados_js    = json.dumps(ESTADOS)
+    badge_js      = json.dumps(ESTADO_BADGE)
+    bg_js         = json.dumps(ESTADO_COLORS)
+    step_idx_js   = json.dumps(STEP_IDX)
+    step_lbl_js   = json.dumps(STEP_LABELS)
+    deliveries_js = json.dumps(DELIVERIES)
 
     return f"""<!DOCTYPE html>
 <html lang="es">
@@ -575,8 +603,8 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgro
 .grid{{padding:14px;display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:12px;max-width:1100px;margin:0 auto}}
 
 /* ── Tarjeta ── */
-.card{{border-radius:12px;padding:14px;box-shadow:0 2px 8px rgba(0,0,0,.08);transition:box-shadow .2s,opacity .3s}}
-.card:hover{{box-shadow:0 4px 16px rgba(0,0,0,.13)}}
+.card{{border-radius:12px;padding:14px;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.07);transition:box-shadow .2s,opacity .3s}}
+.card:hover{{box-shadow:0 3px 12px rgba(0,0,0,.11)}}
 .card.hidden{{display:none}}
 .card-top{{display:flex;align-items:center;gap:6px;margin-bottom:10px;flex-wrap:wrap}}
 .card-id{{font-size:11px;color:#aaa;font-weight:600}}
@@ -604,11 +632,13 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgro
 .sline{{flex:1;height:2px;background:#ddd;margin:0 2px;margin-bottom:12px}}
 .line-done{{background:#2D5016}}
 
-/* ── Items / Dir ── */
-.card-items{{font-size:13px;color:#333;background:rgba(0,0,0,.04);padding:8px 10px;border-radius:8px;margin-bottom:8px;word-break:break-word}}
+/* ── Items / Dir / Notas ── */
+.card-items{{font-size:13px;color:#333;background:rgba(0,0,0,.04);padding:8px 10px;border-radius:8px;margin-bottom:6px;word-break:break-word}}
 .item-line{{padding:2px 0;line-height:1.4}}
-.card-dir{{font-size:12px;color:#555;background:rgba(0,0,0,.04);padding:6px 10px;border-radius:8px;margin-bottom:10px}}
+.card-dir{{font-size:12px;color:#444;padding:4px 0;margin-bottom:4px}}
 .card-dir.sin-dir{{color:#bbb;font-style:italic}}
+.card-notas{{font-size:12px;color:#666;padding:4px 0;margin-bottom:6px;font-style:italic}}
+.dir-label{{font-weight:700;color:#888;font-size:11px;text-transform:uppercase;letter-spacing:.4px;margin-right:3px}}
 
 /* ── Footer ── */
 .card-foot{{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}}
@@ -622,6 +652,8 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgro
 .btn-next:disabled{{background:#aaa;cursor:not-allowed}}
 .btn-del{{background:transparent;border:1px solid #e0e0e0;padding:6px 9px;border-radius:8px;cursor:pointer;font-size:14px;color:#c62828;transition:background .15s}}
 .btn-del:hover{{background:#fce4ec;border-color:#c62828}}
+.btn-delivery{{background:#e65100;color:#fff;border:none;padding:7px 12px;border-radius:20px;cursor:pointer;font-size:11px;font-weight:700;transition:background .15s}}
+.btn-delivery:hover{{background:#bf360c}}
 .lbl-done{{font-size:12px;color:#666;font-weight:600}}
 
 /* ── Misc ── */
@@ -631,6 +663,18 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgro
 /* ── Toast ── */
 .toast{{position:fixed;bottom:24px;right:24px;background:#2D5016;color:#fff;padding:12px 22px;border-radius:30px;font-size:14px;font-weight:700;box-shadow:0 4px 20px rgba(0,0,0,.3);z-index:200;transform:translateY(80px);opacity:0;transition:all .35s cubic-bezier(.34,1.56,.64,1)}}
 .toast.show{{transform:translateY(0);opacity:1}}
+
+/* ── Modal selección delivery ── */
+.dlv-overlay{{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:300;align-items:center;justify-content:center}}
+.dlv-box{{background:#fff;border-radius:16px;padding:22px 26px;min-width:280px;box-shadow:0 8px 32px rgba(0,0,0,.22)}}
+.dlv-box h3{{font-size:15px;font-weight:700;margin-bottom:14px;color:#2D5016}}
+.dlv-option{{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;cursor:pointer;border:2px solid #e0e0e0;margin-bottom:8px;transition:border-color .15s,background .15s}}
+.dlv-option:hover{{background:#f5f5f5;border-color:#aaa}}
+.dlv-option input[type=radio]{{accent-color:#e65100;width:16px;height:16px;cursor:pointer}}
+.dlv-option label{{font-size:14px;font-weight:600;cursor:pointer;flex:1}}
+.dlv-btns{{display:flex;gap:8px;margin-top:14px;justify-content:flex-end}}
+.dlv-cancel{{background:transparent;border:1px solid #ccc;color:#555;padding:8px 16px;border-radius:20px;cursor:pointer;font-size:13px}}
+.dlv-confirm{{background:#e65100;color:#fff;border:none;padding:8px 18px;border-radius:20px;cursor:pointer;font-size:13px;font-weight:700}}
 </style>
 </head>
 <body>
@@ -671,10 +715,28 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgro
 <div class="footer-note" id="lastRefresh">🔄 Actualización automática cada 10 s</div>
 <div class="toast" id="toast">🔔 Nuevo pedido llegó</div>
 
+<!-- Modal selección delivery -->
+<div class="dlv-overlay" id="dlvModal" onclick="if(event.target===this)closeDlvModal()">
+  <div class="dlv-box">
+    <h3>🛵 ¿A qué servicio de delivery?</h3>
+    <input type="hidden" id="dlvOrderId" value="">
+    {"".join(
+        f'<div class="dlv-option"><input type="radio" name="dlvChoice" id="dlv{i}" value="{d["phone"]}" {"checked" if i==0 else ""}>'
+        f'<label for="dlv{i}">{html.escape(d["name"])}</label></div>'
+        for i, d in enumerate(DELIVERIES)
+    )}
+    <div class="dlv-btns">
+      <button class="dlv-cancel" onclick="closeDlvModal()">Cancelar</button>
+      <button class="dlv-confirm" onclick="confirmarDelivery()">📤 Enviar</button>
+    </div>
+  </div>
+</div>
+
 <script>
-const ESTADOS   = {estados_js};
-const BADGE_CLR = {badge_js};
-const BG_CLR    = {bg_js};
+const ESTADOS    = {estados_js};
+const BADGE_CLR  = {badge_js};
+const BG_CLR     = {bg_js};
+const DELIVERIES = {deliveries_js};
 const STEP_IDX  = {step_idx_js};
 const STEP_LBL  = {step_lbl_js};
 
@@ -755,6 +817,56 @@ async function eliminarPedido(id, btnEl) {{
   }} catch(e) {{ alert('Error al eliminar: ' + e.message); }}
 }}
 
+/* ── Llamar delivery ── */
+function llamarDelivery(orderId) {{
+  if (!DELIVERIES || DELIVERIES.length === 0) {{
+    alert('No hay servicio de delivery configurado.\nAgrega DELIVERY_1_PHONE en las variables de Railway.');
+    return;
+  }}
+  if (DELIVERIES.length === 1) {{
+    // Un solo delivery → confirmar y enviar directo
+    if (!confirm('¿Enviar solicitud a ' + DELIVERIES[0].name + ' para el pedido #' + orderId + '?')) return;
+    _enviarDelivery(orderId, DELIVERIES[0].phone, DELIVERIES[0].name);
+  }} else {{
+    // Varios deliveries → mostrar modal de selección
+    document.getElementById('dlvOrderId').value  = orderId;
+    document.getElementById('dlvModal').style.display = 'flex';
+  }}
+}}
+
+async function _enviarDelivery(orderId, phone, name) {{
+  try {{
+    const r = await fetch('/api/pedidos/llamar-delivery', {{
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {{'Content-Type':'application/json'}},
+      body: JSON.stringify({{order_id: orderId, delivery_phone: phone}})
+    }});
+    if (r.status === 401) {{ location.reload(); return; }}
+    const data = await r.json();
+    if (data.status === 'ok') {{
+      showToast('🛵 Solicitud enviada a ' + (data.delivery || name));
+    }} else {{
+      alert('Error: ' + (data.msg || 'No se pudo enviar'));
+    }}
+  }} catch(e) {{
+    alert('Error al llamar delivery: ' + e.message);
+  }}
+}}
+
+function closeDlvModal() {{
+  document.getElementById('dlvModal').style.display = 'none';
+}}
+
+function confirmarDelivery() {{
+  const orderId = +document.getElementById('dlvOrderId').value;
+  const sel = document.querySelector('input[name="dlvChoice"]:checked');
+  if (!sel) {{ alert('Selecciona un servicio de delivery'); return; }}
+  const d = DELIVERIES.find(d => d.phone === sel.value);
+  closeDlvModal();
+  _enviarDelivery(orderId, d.phone, d.name);
+}}
+
 /* ── Construir tarjeta desde JSON ── */
 function buildCard(p) {{
   const estado   = p.estado || 'Nuevo 🆕';
@@ -798,10 +910,18 @@ function buildCard(p) {{
     ? `<span class="entrega-badge recojo">🏪 Recojo</span>`
     : `<span class="entrega-badge delivery">🏍️ Delivery</span>`;
 
-  const dirTexto = esRecojo ? '📍 Recojo en local' : (p.direccion ? `📍 ${{esc(p.direccion)}}` : null);
-  const dirHtml  = dirTexto
-    ? `<div class="card-dir">${{dirTexto}}</div>`
-    : `<div class="card-dir sin-dir">📍 Sin dirección</div>`;
+  let dirHtml;
+  if (esRecojo) {{
+    dirHtml = `<div class="card-dir"><span class="dir-label">Entrega:</span> 📦 El cliente retira</div>`;
+  }} else if (p.direccion) {{
+    dirHtml = `<div class="card-dir"><span class="dir-label">Dirección:</span> ${{esc(p.direccion)}}</div>`;
+  }} else {{
+    dirHtml = `<div class="card-dir sin-dir"><span class="dir-label">Dirección:</span> Sin especificar</div>`;
+  }}
+
+  const notasHtml = (p.notas || '').trim()
+    ? `<div class="card-notas"><span class="dir-label">Notas:</span> ${{esc(p.notas)}}</div>`
+    : '';
 
   const modBadge  = p.modificado ? `<span class="mod-badge">✏️ Mod</span>` : '';
 
@@ -811,11 +931,17 @@ function buildCard(p) {{
     ? itemsList.map(i => `<div class="item-line">• ${{esc(i)}}</div>`).join('')
     : esc(p.items || '');
 
+  // Botón llamar delivery (solo delivery activo)
+  const esActivo = !['Entregado ✅','Cancelado ❌'].includes(estado);
+  const btnDelivery = (!esRecojo && esActivo)
+    ? `<button class="btn-delivery" onclick="llamarDelivery(${{p.id}})" title="Llamar delivery">🛵 Delivery</button>`
+    : '';
+
   return `<div class="card" id="card-${{p.id}}" data-estado="${{esc(estado)}}" data-recojo="${{esRecojo?1:0}}"
-    style="border-left:4px solid ${{badgeClr}};background:${{bg}}">
+    style="border-left:4px solid ${{badgeClr}}">
   <div class="card-top">
     <span class="card-id">#${{p.id}}</span>
-    <span class="card-time">🕒 ${{esc(p.hora)}}</span>
+    <span class="card-time">${{esc(p.hora)}}</span>
     <span class="card-phone">+${{esc(p.phone)}}</span>
     ${{entregaBadge}}
     ${{modBadge}}
@@ -824,6 +950,7 @@ function buildCard(p) {{
   <div class="progress-row">${{steps}}</div>
   <div class="card-items">${{itemsHtml}}</div>
   ${{dirHtml}}
+  ${{notasHtml}}
   <div class="card-foot">
     <div class="foot-left">
       <span class="card-total">${{esc(p.total)}}</span>
@@ -831,6 +958,7 @@ function buildCard(p) {{
       ${{pagoEstadoHtml}}
     </div>
     <div class="foot-right">
+      ${{btnDelivery}}
       ${{btnSig}}
       <button class="btn-del" onclick="eliminarPedido(${{p.id}},this)" title="Eliminar">🗑️</button>
     </div>
@@ -994,6 +1122,52 @@ async def api_eliminar_pedido(
         db.delete_order(order_id)
         return JSONResponse({"status": "ok"})
     return JSONResponse({"status": "error"}, status_code=400)
+
+
+@app.post("/api/pedidos/llamar-delivery")
+async def api_llamar_delivery(
+    request: Request,
+    credentials: HTTPBasicCredentials = Depends(verificar_admin)
+):
+    """Envía un mensaje WhatsApp al servicio de delivery elegido con los datos del pedido."""
+    data = await request.json()
+    order_id      = int(data.get("order_id", 0))
+    delivery_phone = data.get("delivery_phone", "").strip()
+
+    if not order_id:
+        return JSONResponse({"status": "error", "msg": "order_id requerido"}, status_code=400)
+
+    order = db.get_order_by_id(order_id)
+    if not order:
+        return JSONResponse({"status": "error", "msg": "Pedido no encontrado"}, status_code=404)
+
+    if not DELIVERIES:
+        return JSONResponse({"status": "error", "msg": "No hay delivery configurado en Railway (DELIVERY_1_PHONE)"}, status_code=500)
+
+    # Si el frontend envió un número específico, úsalo (y valida que esté en la lista)
+    valid_phones = {d["phone"] for d in DELIVERIES}
+    target_phone = delivery_phone if delivery_phone in valid_phones else DELIVERIES[0]["phone"]
+    target_name  = next((d["name"] for d in DELIVERIES if d["phone"] == target_phone), "Delivery")
+
+    from datetime import datetime, timezone, timedelta
+    _PERU_TZ = timezone(timedelta(hours=-5))
+    hora = datetime.now(_PERU_TZ).strftime("%d/%m · %I:%M %p")
+
+    mensaje = (
+        f"🛵 *SE REQUIERE MOTORIZADO — Chilango*\n"
+        f"📦 Pedido #{order['id']}\n"
+        f"👤 Cliente: +{order['phone']}\n"
+        f"📍 Dirección: {order.get('direccion') or 'Sin especificar'}\n"
+        f"🛒 {order['items']}\n"
+        f"💰 {order['total']}\n"
+        f"🕒 {hora}"
+    )
+    if order.get("notas"):
+        mensaje += f"\n📝 Notas: {order['notas']}"
+
+    await send_whatsapp_message(target_phone, mensaje)
+    print(f"[DELIVERY] Solicitud enviada para pedido #{order_id} → {target_name} ({target_phone})")
+    return JSONResponse({"status": "ok", "delivery": target_name})
 
 
 @app.post("/pedidos/estado")

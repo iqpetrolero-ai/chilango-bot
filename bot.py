@@ -156,11 +156,11 @@ Si es de las incluidas → no la cobres por separado. Si es adicional → agrég
    Ej delivery: "¡Pedido confirmado! 🌮 Tiempo estimado: unos [X] minutos. ¡Te avisamos cuando salga!"
    Ej recojo:   "¡Confirmado! Tiempo estimado: unos [X] minutos. Te avisamos cuando esté listo 🌮"
 
-   FORMATO EXACTO DEL TAG NUEVO PEDIDO (4 campos obligatorios):
-   [PEDIDO_OK|items: <descripción>|total: S/ XX.XX|pago: <Yape/Plin|Efectivo>|dir: <dirección o Recojo>]
+   FORMATO EXACTO DEL TAG NUEVO PEDIDO (5 campos):
+   [PEDIDO_OK|items: <descripción>|total: S/ XX.XX|pago: <Yape/Plin|Efectivo>|dir: <dirección o Recojo>|notas: <personalizaciones o dejar vacío>]
    Ejemplos:
-   [PEDIDO_OK|items: 2x Taco Suadero, 1x Agua Jamaica|total: S/ 15.00|pago: Yape/Plin|dir: Av. Bolognesi 456]
-   [PEDIDO_OK|items: 1x Quesabirria, 1x Esquites|total: S/ 20.00|pago: Efectivo|dir: Recojo]
+   [PEDIDO_OK|items: 2x Taco Suadero, 1x Agua Jamaica|total: S/ 15.00|pago: Yape/Plin|dir: Av. Bolognesi 456|notas: sin cebolla]
+   [PEDIDO_OK|items: 1x Quesabirria, 1x Esquites|total: S/ 20.00|pago: Efectivo|dir: Recojo|notas: ]
 
 5. MODIFICACIONES: Si el cliente ya tiene un pedido confirmado y quiere cambiarlo:
    - Escucha qué quiere modificar (agregar, quitar o cambiar ítems)
@@ -168,10 +168,10 @@ Si es de las incluidas → no la cobres por separado. Si es adicional → agrég
    - Pide confirmación ("¿Confirmas el cambio?")
    - Cuando confirme, incluye el tag de modificación al final de tu respuesta:
 
-   FORMATO EXACTO DEL TAG MODIFICACIÓN (4 campos obligatorios):
-   [PEDIDO_MOD|items: <pedido completo actualizado>|total: S/ XX.XX|pago: <Yape/Plin|Efectivo>|dir: <dirección>]
+   FORMATO EXACTO DEL TAG MODIFICACIÓN (5 campos):
+   [PEDIDO_MOD|items: <pedido completo actualizado>|total: S/ XX.XX|pago: <Yape/Plin|Efectivo>|dir: <dirección>|notas: <personalizaciones o dejar vacío>]
    Ejemplo:
-   [PEDIDO_MOD|items: 3x Taco Suadero, 1x Agua Jamaica|total: S/ 21.50|pago: Yape/Plin|dir: Av. Bolognesi 456, frente al parque]
+   [PEDIDO_MOD|items: 3x Taco Suadero, 1x Agua Jamaica|total: S/ 21.50|pago: Yape/Plin|dir: Av. Bolognesi 456, frente al parque|notas: sin cilantro]
 
    REGLA: usa [PEDIDO_OK|...] solo para pedidos nuevos y [PEDIDO_MOD|...] solo para modificaciones.
 
@@ -260,7 +260,7 @@ Si es de las incluidas → no la cobres por separado. Si es adicional → agrég
     Paso 2 — El equipo le enviará el costo de delivery directamente al cliente.
              Cuando el cliente responda confirmando el total completo
              (ej: "sí", "dale", "ok", o repita el monto total incluyendo delivery):
-             Emite [PEDIDO_OK|items: <items>, Delivery: S/X.XX|total: S/ XX.XX|pago: ...|dir: ...]
+             Emite [PEDIDO_OK|items: <items>, Delivery: S/X.XX|total: S/ XX.XX|pago: ...|dir: ...|notas: ...]
              con el total que incluye la comida + empaque + delivery.
 
     REGLA CRÍTICA: Mientras el cliente no haya confirmado explícitamente el total
@@ -351,8 +351,9 @@ def _extract_tag(reply: str, tag_name: str) -> tuple[dict | None, str]:
         fields = {
             "items": parts[0].replace("items: ", "").strip(),
             "total": parts[1].replace("total: ", "").strip(),
-            "pago":  parts[2].replace("pago: ", "").strip() if len(parts) > 2 else "Efectivo",
-            "dir":   parts[3].replace("dir: ", "").strip()  if len(parts) > 3 else "",
+            "pago":  parts[2].replace("pago: ", "").strip()  if len(parts) > 2 else "Efectivo",
+            "dir":   parts[3].replace("dir: ", "").strip()   if len(parts) > 3 else "",
+            "notas": parts[4].replace("notas: ", "").strip() if len(parts) > 4 else "",
         }
         reply_clean = (reply[:start] + reply[end + 1:]).strip()
         return fields, reply_clean
@@ -377,7 +378,7 @@ async def _parse_and_save_order(phone: str, reply: str) -> tuple[str, bool]:
     # Pedido nuevo
     fields, reply = _extract_tag(reply, "PEDIDO_OK")
     if fields:
-        await save_order(phone, fields["items"], fields["total"], fields["pago"], fields["dir"])
+        await save_order(phone, fields["items"], fields["total"], fields["pago"], fields["dir"], fields.get("notas", ""))
         try:
             db.save_customer_profile(phone_clean,
                                      ultima_dir=fields["dir"],
@@ -389,7 +390,7 @@ async def _parse_and_save_order(phone: str, reply: str) -> tuple[str, bool]:
     # Modificación de pedido existente
     fields, reply = _extract_tag(reply, "PEDIDO_MOD")
     if fields:
-        await update_order(phone, fields["items"], fields["total"], fields["pago"], fields["dir"])
+        await update_order(phone, fields["items"], fields["total"], fields["pago"], fields["dir"], fields.get("notas", ""))
         try:
             db.save_customer_profile(phone_clean,
                                      ultima_dir=fields["dir"],
@@ -479,9 +480,12 @@ async def _call_claude(phone: str, messages: list) -> str:
             p0 = pedidos_hoy[0]
             profile_ctx += (
                 f"\n\n⚠️ PEDIDO YA REGISTRADO EN ESTA SESIÓN: #{p0['id']} — {p0['items']} — {p0['total']}"
-                "\nEl pedido ESTÁ CONFIRMADO Y GUARDADO. NUNCA vuelvas a emitir [PEDIDO_OK] ni [PEDIDO_MOD]"
-                " a menos que el cliente EXPLÍCITAMENTE pida cambiar algo."
-                " Si dice 'gracias', 'ok', 'perfecto' u otras frases de cierre, responde brevemente"
+                "\nEl pedido ESTÁ CONFIRMADO Y GUARDADO."
+                "\n• NUNCA vuelvas a emitir [PEDIDO_OK] — el pedido ya está guardado."
+                "\n• Si el cliente EXPLÍCITAMENTE pide cambiar algo (agregar, quitar o cambiar ítems),"
+                " muestra el nuevo resumen completo con total recalculado, pide confirmación"
+                " y cuando confirme usa [PEDIDO_MOD|...] con el pedido completo actualizado."
+                "\n• Si dice 'gracias', 'ok', 'perfecto' u otras frases de cierre, responde brevemente"
                 " y amablemente sin ningún tag."
             )
     except Exception as e:

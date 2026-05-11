@@ -450,61 +450,79 @@ def _render_card(p: dict) -> str:
         else '<span class="entrega-badge delivery">🏍️ Delivery</span>'
     )
     if es_recojo:
-        dir_html = '<div class="card-dir"><span class="dir-label">Entrega:</span> 📦 El cliente retira</div>'
+        dir_value = "📦 El cliente retira"
     elif direccion:
-        dir_html = f'<div class="card-dir"><span class="dir-label">Dirección:</span> {html.escape(direccion)}</div>'
+        dir_value = html.escape(direccion)
     else:
-        dir_html = '<div class="card-dir sin-dir"><span class="dir-label">Dirección:</span> Sin especificar</div>'
+        dir_value = "Sin especificar"
+    dir_cls = " sin-dir" if (not es_recojo and not direccion) else ""
 
     # Notas / personalizaciones
     notas = (p.get("notas") or "").strip()
     notas_html = (
-        f'<div class="card-notas"><span class="dir-label">Notas:</span> {html.escape(notas)}</div>'
+        f'<div class="sec-label">📝 Notas</div>'
+        f'<div class="card-notas">{html.escape(notas)}</div>'
         if notas else ""
     )
 
     mod_badge = '<span class="mod-badge">✏️ Mod</span>' if p.get("modificado") else ""
 
-    # Bullets para múltiples productos
+    # Items con bullets
     items_raw = p.get("items") or ""
     items_list = [i.strip() for i in items_raw.split(",") if i.strip()]
-    if len(items_list) > 1:
-        items_inner = "".join(f'<div class="item-line">• {html.escape(i)}</div>' for i in items_list)
-    else:
-        items_inner = html.escape(items_raw)
+    items_inner = "".join(f'<div class="item-line">• {html.escape(i)}</div>' for i in items_list) if len(items_list) > 1 else html.escape(items_raw)
 
-    # Botón siguiente: para recojo en "En preparación" el siguiente es "Listo p/retirar"
+    # Botón siguiente estado
     if es_recojo and siguiente and siguiente == "En camino 🛵":
-        sig_label_display = "📦 Listo p/retirar"
         sig_js_safe = siguiente.replace("'", "\\'")
-        btn_sig = f"<button class='btn-next recojo-next' onclick=\"cambiarEstado({pid},'{sig_js_safe}')\">{sig_label_display}</button>"
+        btn_sig = f'<button class="act-btn act-next recojo-next" onclick="cambiarEstado({pid},\'{sig_js_safe}\')">📦 Listo p/retirar</button>'
+    elif siguiente:
+        sig_js = siguiente.replace("'", "\\'")
+        btn_sig = f'<button class="act-btn act-next" onclick="cambiarEstado({pid},\'{sig_js}\')">→ {html.escape(siguiente)}</button>'
+    elif es_cancelado:
+        btn_sig = '<span class="lbl-done">❌ Cancelado</span>'
+    else:
+        btn_sig = '<span class="lbl-done">✅ Entregado</span>'
 
-    # Botón "Llamar delivery" — solo para delivery activo (no entregado/cancelado/recojo)
+    # Botón cancelar (solo si no está cancelado/entregado)
+    activo = estado not in ("Entregado ✅", "Cancelado ❌")
+    btn_cancel = f'<button class="act-btn act-cancel" onclick="cancelarPedido({pid})" title="Cancelar pedido">✕ Cancelar</button>' if activo else ""
+
+    # Botón delivery (solo delivery activo + DELIVERIES configurado)
     btn_delivery = ""
-    if not es_recojo and estado not in ("Entregado ✅", "Cancelado ❌"):
-        btn_delivery = f'<button class="btn-delivery" onclick="llamarDelivery({pid})" title="Llamar servicio de delivery">🛵 Delivery</button>'
+    if not es_recojo and activo and DELIVERIES:
+        btn_delivery = f'<button class="act-btn act-delivery" onclick="llamarDelivery({pid})" title="Llamar servicio de delivery">🛵 Delivery</button>'
+
+    # Botón eliminar
+    btn_del = f'<button class="act-btn act-del" onclick="eliminarPedido({pid},this)" title="Eliminar">🗑️</button>'
 
     return f"""<div class="card" id="card-{p['id']}" data-estado="{html.escape(estado)}" data-recojo="{1 if es_recojo else 0}"
      style="border-left:4px solid {badge_color}">
-  <div class="card-top">
-    <span class="card-id">#{p['id']}</span>
-    <span class="card-time">{p['hora']}</span>
-    <span class="card-phone">+{html.escape(p['phone'])}</span>
-    {entrega_badge}
-    {mod_badge}
-    <span class="badge" style="background:{badge_color}">{html.escape(estado)}</span>
+  <div class="card-hdr">
+    <div class="card-hdr-row1">
+      <span class="card-num">Pedido #{p['id']}</span>
+      <span class="badge" style="background:{badge_color}">{html.escape(estado)}</span>
+    </div>
+    <div class="card-hdr-row2">
+      <span class="card-meta">🕒 {p['hora']} · +{html.escape(p['phone'])}</span>
+      {entrega_badge}{mod_badge}
+    </div>
   </div>
   <div class="progress-row">{steps_html}</div>
-  <div class="card-items">{items_inner}</div>
-  {dir_html}
-  {notas_html}
-  <div class="card-foot">
-    <div class="foot-left">
-      <span class="card-total">{html.escape(p['total'])}</span>
-      <span class="pago-badge" style="background:{pago_color}">{pago_emoji} {html.escape(metodo)}</span>
-      {pago_estado_html}
-    </div>
-    <div class="foot-right">{btn_delivery}{btn_sig}{btn_del}</div>
+  <div class="card-body">
+    <div class="sec-label">🌶️ Artículos</div>
+    <div class="card-items">{items_inner}</div>
+    <div class="sec-label">📍 {'Entrega' if es_recojo else 'Dirección'}</div>
+    <div class="card-dir{dir_cls}">{dir_value}</div>
+    {notas_html}
+  </div>
+  <div class="card-payment">
+    <span class="card-total">{html.escape(p['total'])}</span>
+    <span class="pago-badge" style="background:{pago_color}">{pago_emoji} {html.escape(metodo)}</span>
+    {pago_estado_html}
+  </div>
+  <div class="card-actions">
+    {btn_cancel}{btn_delivery}{btn_sig}{btn_del}
   </div>
 </div>"""
 
@@ -603,26 +621,25 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgro
 .grid{{padding:14px;display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:12px;max-width:1100px;margin:0 auto}}
 
 /* ── Tarjeta ── */
-.card{{border-radius:12px;padding:14px;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.07);transition:box-shadow .2s,opacity .3s}}
-.card:hover{{box-shadow:0 3px 12px rgba(0,0,0,.11)}}
+.card{{border-radius:14px;background:#fff;box-shadow:0 2px 8px rgba(0,0,0,.09);transition:box-shadow .2s,opacity .3s;overflow:hidden}}
+.card:hover{{box-shadow:0 4px 18px rgba(0,0,0,.14)}}
 .card.hidden{{display:none}}
-.card-top{{display:flex;align-items:center;gap:6px;margin-bottom:10px;flex-wrap:wrap}}
-.card-id{{font-size:11px;color:#aaa;font-weight:600}}
-.card-time{{font-size:12px;color:#666}}
-.card-phone{{font-size:13px;color:#111;font-weight:700}}
-.badge{{font-size:11px;color:#fff;padding:3px 10px;border-radius:20px;font-weight:700;margin-left:auto;white-space:nowrap}}
+
+/* Header de tarjeta */
+.card-hdr{{padding:12px 14px 10px;border-bottom:1px solid #f0f0f0}}
+.card-hdr-row1{{display:flex;align-items:center;justify-content:space-between;margin-bottom:4px}}
+.card-hdr-row2{{display:flex;align-items:center;gap:6px;flex-wrap:wrap}}
+.card-num{{font-size:16px;font-weight:800;color:#1a1a1a;letter-spacing:-.3px}}
+.badge{{font-size:11px;color:#fff;padding:4px 11px;border-radius:20px;font-weight:800;white-space:nowrap;letter-spacing:.2px}}
+.card-meta{{font-size:12px;color:#777}}
 .mod-badge{{font-size:10px;background:#e65100;color:#fff;padding:2px 7px;border-radius:20px;font-weight:700}}
 .entrega-badge{{font-size:10px;padding:2px 8px;border-radius:20px;font-weight:700;white-space:nowrap}}
 .entrega-badge.delivery{{background:#0277bd;color:#fff}}
 .entrega-badge.recojo{{background:#6a1b9a;color:#fff}}
-.pago-estado{{font-size:11px;padding:2px 8px;border-radius:20px;font-weight:700}}
-.pago-estado.pagado{{background:#e8f5e9;color:#2e7d32;border:1px solid #a5d6a7}}
-.pago-estado.pendiente{{background:#fff3e0;color:#e65100;border:1px solid #ffcc80}}
-.btn-next.recojo-next{{background:#6a1b9a}}
 .nav-badge{{background:#e53935;color:#fff;border-radius:10px;min-width:18px;height:18px;font-size:10px;font-weight:700;display:none;align-items:center;justify-content:center;padding:0 5px;margin-left:5px;vertical-align:middle;line-height:18px}}
 
-/* ── Progress ── */
-.progress-row{{display:flex;align-items:center;margin-bottom:10px}}
+/* Progress */
+.progress-row{{display:flex;align-items:center;padding:10px 14px 8px}}
 .step{{display:flex;flex-direction:column;align-items:center;font-size:9px;color:#bbb;gap:3px;min-width:0}}
 .step span{{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:52px}}
 .sdot{{width:10px;height:10px;border-radius:50%;background:#ddd;transition:background .3s}}
@@ -632,29 +649,40 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgro
 .sline{{flex:1;height:2px;background:#ddd;margin:0 2px;margin-bottom:12px}}
 .line-done{{background:#2D5016}}
 
-/* ── Items / Dir / Notas ── */
-.card-items{{font-size:13px;color:#333;background:rgba(0,0,0,.04);padding:8px 10px;border-radius:8px;margin-bottom:6px;word-break:break-word}}
-.item-line{{padding:2px 0;line-height:1.4}}
-.card-dir{{font-size:12px;color:#444;padding:4px 0;margin-bottom:4px}}
+/* Secciones internas */
+.card-body{{padding:0 14px 10px}}
+.sec-label{{font-size:10px;font-weight:700;color:#aaa;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px;margin-top:10px}}
+.card-items{{font-size:13px;color:#222;line-height:1.5;word-break:break-word}}
+.item-line{{padding:1px 0}}
+.card-dir{{font-size:13px;color:#333}}
 .card-dir.sin-dir{{color:#bbb;font-style:italic}}
-.card-notas{{font-size:12px;color:#666;padding:4px 0;margin-bottom:6px;font-style:italic}}
-.dir-label{{font-weight:700;color:#888;font-size:11px;text-transform:uppercase;letter-spacing:.4px;margin-right:3px}}
+.card-notas{{font-size:12px;color:#888;font-style:italic}}
 
-/* ── Footer ── */
-.card-foot{{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}}
-.foot-left{{display:flex;align-items:center;gap:8px}}
-.card-total{{font-size:16px;font-weight:800;color:#2D5016}}
+/* Pago */
+.card-payment{{display:flex;align-items:center;gap:8px;padding:8px 14px;border-top:1px solid #f0f0f0;border-bottom:1px solid #f0f0f0;flex-wrap:wrap}}
+.card-total{{font-size:18px;font-weight:800;color:#2D5016;flex:1}}
 .pago-badge{{font-size:11px;color:#fff;padding:3px 10px;border-radius:20px;font-weight:700}}
-.foot-right{{display:flex;align-items:center;gap:6px}}
-.btn-next{{background:#2D5016;color:#fff;border:none;padding:8px 16px;border-radius:20px;cursor:pointer;font-size:12px;font-weight:700;transition:background .15s,transform .1s}}
-.btn-next:hover{{background:#3a6b1e}}
-.btn-next:active{{transform:scale(.96)}}
-.btn-next:disabled{{background:#aaa;cursor:not-allowed}}
-.btn-del{{background:transparent;border:1px solid #e0e0e0;padding:6px 9px;border-radius:8px;cursor:pointer;font-size:14px;color:#c62828;transition:background .15s}}
-.btn-del:hover{{background:#fce4ec;border-color:#c62828}}
-.btn-delivery{{background:#e65100;color:#fff;border:none;padding:7px 12px;border-radius:20px;cursor:pointer;font-size:11px;font-weight:700;transition:background .15s}}
-.btn-delivery:hover{{background:#bf360c}}
-.lbl-done{{font-size:12px;color:#666;font-weight:600}}
+.pago-estado{{font-size:11px;padding:2px 8px;border-radius:20px;font-weight:700}}
+.pago-estado.pagado{{background:#e8f5e9;color:#2e7d32;border:1px solid #a5d6a7}}
+.pago-estado.pendiente{{background:#fff3e0;color:#e65100;border:1px solid #ffcc80}}
+
+/* Barra de acciones */
+.card-actions{{display:flex;border-top:1px solid #f0f0f0}}
+.act-btn{{flex:1;border:none;padding:11px 6px;font-size:12px;font-weight:700;cursor:pointer;transition:background .15s,opacity .1s;display:flex;align-items:center;justify-content:center;gap:4px}}
+.act-btn:active{{opacity:.7}}
+.act-btn + .act-btn{{border-left:1px solid #f0f0f0}}
+.act-cancel{{background:#fff;color:#c62828}}
+.act-cancel:hover{{background:#fce4ec}}
+.act-delivery{{background:#fff;color:#e65100}}
+.act-delivery:hover{{background:#fff3e0}}
+.act-next{{background:#2D5016;color:#fff;border-radius:0 0 14px 0}}
+.act-next:hover{{background:#3a6b1e}}
+.act-next:disabled{{background:#aaa;cursor:not-allowed}}
+.act-next.recojo-next{{background:#6a1b9a}}
+.act-next.recojo-next:hover{{background:#7b1fa2}}
+.act-del{{background:#fff;color:#999;flex:0 0 44px}}
+.act-del:hover{{background:#fce4ec;color:#c62828}}
+.lbl-done{{font-size:12px;color:#aaa;font-weight:600;padding:11px 14px}}
 
 /* ── Misc ── */
 .empty{{text-align:center;padding:60px 20px;color:#aaa;font-size:15px;grid-column:1/-1}}
@@ -800,6 +828,24 @@ async function cambiarEstado(id, nuevoEstado) {{
   }}
 }}
 
+/* ── Cancelar pedido (AJAX) ── */
+async function cancelarPedido(id) {{
+  if (!confirm('¿Cancelar el pedido #' + id + '? Esta acción no se puede deshacer.')) return;
+  try {{
+    const r = await fetch('/api/pedidos/estado', {{
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {{'Content-Type':'application/json'}},
+      body: JSON.stringify({{order_id: id, estado: 'Cancelado ❌'}})
+    }});
+    if (r.status === 401) {{ location.reload(); return; }}
+    if (!r.ok) throw new Error(await r.text());
+    await refreshOrders();
+  }} catch(e) {{
+    alert('Error al cancelar: ' + e.message);
+  }}
+}}
+
 /* ── Eliminar (AJAX) ── */
 async function eliminarPedido(id, btnEl) {{
   if (!confirm('¿Eliminar este pedido? No se puede deshacer.')) return;
@@ -910,58 +956,75 @@ function buildCard(p) {{
     ? `<span class="entrega-badge recojo">🏪 Recojo</span>`
     : `<span class="entrega-badge delivery">🏍️ Delivery</span>`;
 
-  let dirHtml;
-  if (esRecojo) {{
-    dirHtml = `<div class="card-dir"><span class="dir-label">Entrega:</span> 📦 El cliente retira</div>`;
-  }} else if (p.direccion) {{
-    dirHtml = `<div class="card-dir"><span class="dir-label">Dirección:</span> ${{esc(p.direccion)}}</div>`;
-  }} else {{
-    dirHtml = `<div class="card-dir sin-dir"><span class="dir-label">Dirección:</span> Sin especificar</div>`;
-  }}
+  let dirValue, dirCls = '';
+  if (esRecojo) {{ dirValue = '📦 El cliente retira'; }}
+  else if (p.direccion) {{ dirValue = esc(p.direccion); }}
+  else {{ dirValue = 'Sin especificar'; dirCls = ' sin-dir'; }}
 
   const notasHtml = (p.notas || '').trim()
-    ? `<div class="card-notas"><span class="dir-label">Notas:</span> ${{esc(p.notas)}}</div>`
+    ? `<div class="sec-label">📝 Notas</div><div class="card-notas">${{esc(p.notas)}}</div>`
     : '';
 
-  const modBadge  = p.modificado ? `<span class="mod-badge">✏️ Mod</span>` : '';
+  const modBadge = p.modificado ? `<span class="mod-badge">✏️ Mod</span>` : '';
 
-  // Bullets para múltiples productos
+  // Items con bullets
   const itemsList = (p.items || '').split(',').map(s => s.trim()).filter(Boolean);
   const itemsHtml = itemsList.length > 1
     ? itemsList.map(i => `<div class="item-line">• ${{esc(i)}}</div>`).join('')
     : esc(p.items || '');
 
-  // Botón llamar delivery (solo delivery activo)
-  const esActivo = !['Entregado ✅','Cancelado ❌'].includes(estado);
-  const btnDelivery = (!esRecojo && esActivo)
-    ? `<button class="btn-delivery" onclick="llamarDelivery(${{p.id}})" title="Llamar delivery">🛵 Delivery</button>`
+  // Botón siguiente estado
+  const esActivo  = !['Entregado ✅','Cancelado ❌'].includes(estado);
+  const esCancelado = estado === 'Cancelado ❌';
+  let btnSigHtml;
+  if (siguiente) {{
+    const esSiguienteCamino = p.siguiente_estado_raw === 'En camino 🛵';
+    const lblBtn  = (esRecojo && esSiguienteCamino) ? '📦 Listo p/retirar' : `→ ${{esc(siguiente)}}`;
+    const clsNext = (esRecojo && esSiguienteCamino) ? 'act-btn act-next recojo-next' : 'act-btn act-next';
+    btnSigHtml = `<button class="${{clsNext}}" data-next="${{esc(p.siguiente_estado_raw || siguiente)}}" onclick="cambiarEstado(${{p.id}},this.dataset.next)">${{lblBtn}}</button>`;
+  }} else {{
+    btnSigHtml = esCancelado
+      ? `<span class="lbl-done">❌ Cancelado</span>`
+      : `<span class="lbl-done">✅ Entregado</span>`;
+  }}
+
+  const btnCancelHtml = esActivo
+    ? `<button class="act-btn act-cancel" onclick="cancelarPedido(${{p.id}})">✕ Cancelar</button>`
+    : '';
+
+  // Delivery: solo muestra si hay deliveries configurados + es delivery activo
+  const btnDeliveryHtml = (!esRecojo && esActivo && DELIVERIES && DELIVERIES.length > 0)
+    ? `<button class="act-btn act-delivery" onclick="llamarDelivery(${{p.id}})">🛵 Delivery</button>`
     : '';
 
   return `<div class="card" id="card-${{p.id}}" data-estado="${{esc(estado)}}" data-recojo="${{esRecojo?1:0}}"
     style="border-left:4px solid ${{badgeClr}}">
-  <div class="card-top">
-    <span class="card-id">#${{p.id}}</span>
-    <span class="card-time">${{esc(p.hora)}}</span>
-    <span class="card-phone">+${{esc(p.phone)}}</span>
-    ${{entregaBadge}}
-    ${{modBadge}}
-    <span class="badge" style="background:${{badgeClr}}">${{esc(estado)}}</span>
+  <div class="card-hdr">
+    <div class="card-hdr-row1">
+      <span class="card-num">Pedido #${{p.id}}</span>
+      <span class="badge" style="background:${{badgeClr}}">${{esc(estado)}}</span>
+    </div>
+    <div class="card-hdr-row2">
+      <span class="card-meta">🕒 ${{esc(p.hora)}} · +${{esc(p.phone)}}</span>
+      ${{entregaBadge}}${{modBadge}}
+    </div>
   </div>
   <div class="progress-row">${{steps}}</div>
-  <div class="card-items">${{itemsHtml}}</div>
-  ${{dirHtml}}
-  ${{notasHtml}}
-  <div class="card-foot">
-    <div class="foot-left">
-      <span class="card-total">${{esc(p.total)}}</span>
-      <span class="pago-badge" style="background:${{pagoClr}}">${{pagoEmoji}} ${{esc(metodo)}}</span>
-      ${{pagoEstadoHtml}}
-    </div>
-    <div class="foot-right">
-      ${{btnDelivery}}
-      ${{btnSig}}
-      <button class="btn-del" onclick="eliminarPedido(${{p.id}},this)" title="Eliminar">🗑️</button>
-    </div>
+  <div class="card-body">
+    <div class="sec-label">🌶️ Artículos</div>
+    <div class="card-items">${{itemsHtml}}</div>
+    <div class="sec-label">${{esRecojo ? '📦 Entrega' : '📍 Dirección'}}</div>
+    <div class="card-dir${{dirCls}}">${{dirValue}}</div>
+    ${{notasHtml}}
+  </div>
+  <div class="card-payment">
+    <span class="card-total">${{esc(p.total)}}</span>
+    <span class="pago-badge" style="background:${{pagoClr}}">${{pagoEmoji}} ${{esc(metodo)}}</span>
+    ${{pagoEstadoHtml}}
+  </div>
+  <div class="card-actions">
+    ${{btnCancelHtml}}${{btnDeliveryHtml}}${{btnSigHtml}}
+    <button class="act-btn act-del" onclick="eliminarPedido(${{p.id}},this)" title="Eliminar">🗑️</button>
   </div>
 </div>`;
 }}

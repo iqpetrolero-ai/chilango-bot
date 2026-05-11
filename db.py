@@ -57,6 +57,7 @@ def init_db():
             "ALTER TABLE orders ADD COLUMN metodo_pago TEXT DEFAULT 'Efectivo'",
             "ALTER TABLE orders ADD COLUMN modificado INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE orders ADD COLUMN direccion TEXT DEFAULT ''",
+            "ALTER TABLE orders ADD COLUMN notas TEXT DEFAULT ''",
         ]:
             try:
                 c.execute(migration)
@@ -202,12 +203,12 @@ def append_message(phone: str, role: str, content: str, ts: str = "", manual: bo
 
 # ── Orders ────────────────────────────────────────────────────
 
-def save_order_db(phone: str, items: str, total: str, metodo_pago: str = "Efectivo", direccion: str = ""):
+def save_order_db(phone: str, items: str, total: str, metodo_pago: str = "Efectivo", direccion: str = "", notas: str = ""):
     now = datetime.now(PERU_TZ)
     with _conn() as c:
         c.execute(
-            "INSERT INTO orders (fecha, hora, phone, items, total, estado, metodo_pago, direccion) VALUES (?,?,?,?,?,?,?,?)",
-            (now.strftime("%d/%m/%Y"), now.strftime("%H:%M"), phone, items, total, "Nuevo 🆕", metodo_pago, direccion),
+            "INSERT INTO orders (fecha, hora, phone, items, total, estado, metodo_pago, direccion, notas) VALUES (?,?,?,?,?,?,?,?,?)",
+            (now.strftime("%d/%m/%Y"), now.strftime("%H:%M"), phone, items, total, "Nuevo 🆕", metodo_pago, direccion, notas),
         )
 
 
@@ -221,7 +222,7 @@ def get_orders_for_date(date_str: str) -> list:
     """Retorna pedidos de una fecha específica (formato DD/MM/YYYY)."""
     with _conn() as c:
         rows = c.execute(
-            "SELECT id, fecha, hora, phone, items, total, estado, metodo_pago, modificado, direccion FROM orders WHERE fecha=? ORDER BY id DESC",
+            "SELECT id, fecha, hora, phone, items, total, estado, metodo_pago, modificado, direccion, notas FROM orders WHERE fecha=? ORDER BY id DESC",
             (date_str,)
         ).fetchall()
         return [dict(r) for r in rows]
@@ -252,7 +253,7 @@ def get_orders_today() -> list:
     today = now.strftime("%d/%m/%Y")
     with _conn() as c:
         rows = c.execute(
-            "SELECT id, fecha, hora, phone, items, total, estado, metodo_pago, modificado, direccion FROM orders WHERE fecha=? ORDER BY id DESC",
+            "SELECT id, fecha, hora, phone, items, total, estado, metodo_pago, modificado, direccion, notas FROM orders WHERE fecha=? ORDER BY id DESC",
             (today,)
         ).fetchall()
         return [dict(r) for r in rows]
@@ -266,7 +267,7 @@ def update_order_estado(order_id: int, estado: str):
 def get_order_by_id(order_id: int) -> dict | None:
     with _conn() as c:
         row = c.execute(
-            "SELECT id, phone, items, total, estado, direccion FROM orders WHERE id=?", (order_id,)
+            "SELECT id, phone, items, total, estado, direccion, notas FROM orders WHERE id=?", (order_id,)
         ).fetchone()
         return dict(row) if row else None
 
@@ -289,7 +290,7 @@ def delete_order(order_id: int):
         c.execute("DELETE FROM orders WHERE id=?", (order_id,))
 
 
-def update_latest_order(phone: str, items: str, total: str, metodo_pago: str, direccion: str = "") -> bool:
+def update_latest_order(phone: str, items: str, total: str, metodo_pago: str, direccion: str = "", notas: str = "") -> bool:
     """Actualiza el pedido más reciente del cliente que no esté entregado.
     Retorna True si se encontró y actualizó, False si no había pedido activo."""
     with _conn() as c:
@@ -300,7 +301,8 @@ def update_latest_order(phone: str, items: str, total: str, metodo_pago: str, di
         if not row:
             return False
         c.execute(
-            "UPDATE orders SET items=?, total=?, metodo_pago=?, modificado=1, direccion=CASE WHEN ?!='' THEN ? ELSE direccion END WHERE id=?",
-            (items, total, metodo_pago, direccion, direccion, row["id"]),
+            "UPDATE orders SET items=?, total=?, metodo_pago=?, modificado=1, notas=?,"
+            " direccion=CASE WHEN ?!='' THEN ? ELSE direccion END WHERE id=?",
+            (items, total, metodo_pago, notas, direccion, direccion, row["id"]),
         )
         return True

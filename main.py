@@ -970,6 +970,29 @@ async def mark_read(phone: str, credentials: HTTPBasicCredentials = Depends(veri
     return JSONResponse({"status": "ok"})
 
 
+@app.post("/admin/send-message")
+async def send_manual_message(
+    request: Request,
+    credentials: HTTPBasicCredentials = Depends(verificar_admin)
+):
+    """El equipo envía un mensaje manual a un cliente desde el panel de conversaciones."""
+    from datetime import datetime, timezone, timedelta
+    PERU_TZ = timezone(timedelta(hours=-5))
+    data = await request.json()
+    phone   = data.get("phone", "").strip()
+    message = data.get("message", "").strip()
+    if not phone or not message:
+        return JSONResponse({"status": "error", "msg": "Faltan datos"}, status_code=400)
+    # Enviar por WhatsApp
+    await send_whatsapp_message(phone, message)
+    # Guardar en historial marcado como manual (no lo procesa Claude como tag)
+    now_ts = datetime.now(PERU_TZ).strftime("%H:%M")
+    db.append_message(phone, "assistant", message, ts=now_ts, manual=True)
+    db.mark_unread(phone)
+    print(f"[MANUAL] Mensaje enviado a {phone}: {message[:60]}")
+    return JSONResponse({"status": "ok"})
+
+
 @app.get("/api/conversations")
 async def api_conversations(credentials: HTTPBasicCredentials = Depends(verificar_admin)):
     """Endpoint JSON para polling del panel admin sin recargar la página."""
@@ -1006,7 +1029,12 @@ async def api_conversations(credentials: HTTPBasicCredentials = Depends(verifica
                 texto = next((b["text"] for b in c if b.get("type") == "text"), "[imagen 📷]")
             else:
                 texto = c
-            conv_clean[phone].append({"role": m["role"], "content": texto, "ts": m.get("ts", "")})
+            conv_clean[phone].append({
+                "role": m["role"],
+                "content": texto,
+                "ts": m.get("ts", ""),
+                "manual": m.get("manual", False),
+            })
     return JSONResponse({"contacts_html": contacts_html, "convs": conv_clean})
 
 
@@ -1054,7 +1082,12 @@ async def admin(credentials: HTTPBasicCredentials = Depends(verificar_admin)):
                 texto = next((b["text"] for b in c if b.get("type") == "text"), "[imagen 📷]")
             else:
                 texto = c
-            conv_clean[phone].append({"role": m["role"], "content": texto, "ts": m.get("ts", "")})
+            conv_clean[phone].append({
+                "role": m["role"],
+                "content": texto,
+                "ts": m.get("ts", ""),
+                "manual": m.get("manual", False),
+            })
     conv_json = json.dumps(conv_clean, ensure_ascii=False)
 
     return f"""<!DOCTYPE html>
@@ -1100,6 +1133,14 @@ async def admin(credentials: HTTPBasicCredentials = Depends(verificar_admin)):
         .no-convs {{ padding: 24px; color: #667781; text-align: center; font-size: 14px; }}
         .refresh-note {{ font-size: 11px; color: #667781; text-align: center; padding: 6px; background: #f0f2f5; flex-shrink: 0; }}
         .msg-ts {{ font-size: 10px; color: #aaa; font-weight: 400; margin-left: 6px; }}
+        .bubble.manual {{ background: #fff8e1; align-self: flex-end; border-radius: 8px 0 8px 8px; box-shadow: 0 1px 1px rgba(0,0,0,.08); }}
+        .bubble.manual .sender {{ color: #e65100; }}
+        .chat-input-area {{ padding: 10px 12px; background: #f0f2f5; border-top: 1px solid #e0e0e0; display: flex; gap: 8px; align-items: center; flex-shrink: 0; }}
+        .chat-input {{ flex: 1; border: 1px solid #ccc; border-radius: 20px; padding: 8px 14px; font-size: 14px; outline: none; font-family: inherit; }}
+        .chat-input:focus {{ border-color: #2D5016; }}
+        .chat-send-btn {{ background: #2D5016; color: white; border: none; border-radius: 50%; width: 40px; height: 40px; cursor: pointer; font-size: 18px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: background .15s; }}
+        .chat-send-btn:hover {{ background: #3a6b1e; }}
+        .chat-send-btn:disabled {{ background: #aaa; cursor: default; }}
     </style>
 </head>
 <body>
@@ -1139,41 +1180,76 @@ async def admin(credentials: HTTPBasicCredentials = Depends(verificar_admin)):
             return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\\n/g,'<br>');
         }}
 
+        function buildBubble(m) {{
+            const isManual = !!m.manual;
+            const lado  = isManual ? 'manual' : (m.role === 'user' ? 'cliente' : 'bot');
+            const label = isManual ? '👨‍💼 Equipo' : (m.role === 'user' ? 'Cliente' : '🤖 Chilo');
+            const tsHtml = m.ts ? `<span class="msg-ts">${{m.ts}}</span>` : '';
+            return `<div class="bubble ${{lado}}"><div class="sender">${{label}}${{tsHtml}}</div>${{esc(m.content)}}</div>`;
+        }}
+
         function showChat(phone) {{
             document.querySelectorAll('.contact').forEach(c => c.classList.remove('active'));
             const el = document.getElementById('c_' + phone);
             if (el) {{
                 el.classList.add('active');
-                // Marcar como leída: quitar bolita verde y fondo destacado
                 el.classList.remove('unread');
                 const badge = el.querySelector('.contact-unread');
                 if (badge) badge.remove();
             }}
 
-            // Notificar al servidor (credentials: 'same-origin' reutiliza las credenciales ya autenticadas)
             fetch(`/admin/mark-read/${{encodeURIComponent(phone)}}`, {{
-                method: 'POST',
-                credentials: 'same-origin'
+                method: 'POST', credentials: 'same-origin'
             }});
 
             const msgs = convs[phone] || [];
-            const bubbles = msgs.map(m => {{
-                const lado = m.role === 'user' ? 'cliente' : 'bot';
-                const label = m.role === 'user' ? 'Cliente' : '🤖 Chilo';
-                const tsHtml = m.ts ? `<span class="msg-ts">${{m.ts}}</span>` : '';
-                return `<div class="bubble ${{lado}}"><div class="sender">${{label}}${{tsHtml}}</div>${{esc(m.content)}}</div>`;
-            }}).join('');
+            const bubbles = msgs.map(buildBubble).join('');
 
             document.getElementById('chatPanel').innerHTML = `
                 <div class="chat-header">
                     <div class="avatar">👤</div>
                     <div class="chat-header-name">+${{esc(phone)}}</div>
                 </div>
-                <div class="chat-messages" id="msgs">${{bubbles}}</div>`;
+                <div class="chat-messages" id="msgs">${{bubbles}}</div>
+                <div class="chat-input-area">
+                    <input type="text" id="manualInput" class="chat-input"
+                           placeholder="Escribe un mensaje al cliente (ej: el delivery a tu zona es S/ 5.00)..."
+                           onkeydown="if(event.key==='Enter' && !event.shiftKey){{ event.preventDefault(); sendManual('${{esc(phone)}}'); }}">
+                    <button id="sendBtn" class="chat-send-btn" onclick="sendManual('${{esc(phone)}}')" title="Enviar">➤</button>
+                </div>`;
 
             const msgsEl = document.getElementById('msgs');
             if (msgsEl) msgsEl.scrollTop = msgsEl.scrollHeight;
             sessionStorage.setItem('activePhone', phone);
+        }}
+
+        async function sendManual(phone) {{
+            const input = document.getElementById('manualInput');
+            const btn   = document.getElementById('sendBtn');
+            const msg   = (input.value || '').trim();
+            if (!msg) return;
+            btn.disabled = true;
+            input.value  = '';
+            try {{
+                const r = await fetch('/admin/send-message', {{
+                    method: 'POST', credentials: 'same-origin',
+                    headers: {{'Content-Type': 'application/json'}},
+                    body: JSON.stringify({{phone, message: msg}})
+                }});
+                if (!r.ok) {{ input.value = msg; alert('Error al enviar'); return; }}
+                // Mostrar inmediatamente en el chat
+                const msgsEl = document.getElementById('msgs');
+                if (msgsEl) {{
+                    const now = new Date().toLocaleTimeString('es-PE', {{hour:'2-digit', minute:'2-digit'}});
+                    msgsEl.innerHTML += buildBubble({{role:'assistant', content: msg, ts: now, manual: true}});
+                    msgsEl.scrollTop = msgsEl.scrollHeight;
+                }}
+            }} catch(e) {{
+                input.value = msg;
+                alert('Error: ' + e.message);
+            }}
+            btn.disabled = false;
+            input.focus();
         }}
 
         // Restaurar conversación activa al cargar
@@ -1196,16 +1272,11 @@ async def admin(credentials: HTTPBasicCredentials = Depends(verificar_admin)):
                     const msgsEl = document.getElementById('msgs');
                     if (msgsEl) {{
                         const atBottom = msgsEl.scrollHeight - msgsEl.scrollTop - msgsEl.clientHeight < 60;
-                        const newBubbles = data.convs[activePhone].map(m => {{
-                            const lado = m.role === 'user' ? 'cliente' : 'bot';
-                            const label = m.role === 'user' ? 'Cliente' : '🤖 Chilo';
-                            const tsHtml = m.ts ? `<span class="msg-ts">${{m.ts}}</span>` : '';
-                            return `<div class="bubble ${{lado}}"><div class="sender">${{label}}${{tsHtml}}</div>${{esc(m.content)}}</div>`;
-                        }}).join('');
+                        const newBubbles = data.convs[activePhone].map(buildBubble).join('');
                         if (msgsEl.innerHTML !== newBubbles) {{
                             msgsEl.innerHTML = newBubbles;
+                            if (atBottom) msgsEl.scrollTop = msgsEl.scrollHeight;
                         }}
-                        if (atBottom) msgsEl.scrollTop = msgsEl.scrollHeight;
                     }}
                 }}
             }} catch(e) {{}}

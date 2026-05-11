@@ -212,6 +212,25 @@ def get_orders_count() -> int:
         return row["n"] if row else 0
 
 
+def get_orders_for_date(date_str: str) -> list:
+    """Retorna pedidos de una fecha específica (formato DD/MM/YYYY)."""
+    with _conn() as c:
+        rows = c.execute(
+            "SELECT id, fecha, hora, phone, items, total, estado, metodo_pago, modificado, direccion FROM orders WHERE fecha=? ORDER BY id DESC",
+            (date_str,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_available_dates() -> list:
+    """Retorna lista de fechas con pedidos, más recientes primero."""
+    with _conn() as c:
+        rows = c.execute(
+            "SELECT DISTINCT fecha FROM orders ORDER BY fecha DESC LIMIT 30"
+        ).fetchall()
+        return [r["fecha"] for r in rows]
+
+
 def get_active_orders_count() -> int:
     """Cuenta pedidos en preparación ahora mismo (Nuevo + En preparación)."""
     today = datetime.now(PERU_TZ).strftime("%d/%m/%Y")

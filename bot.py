@@ -246,11 +246,12 @@ Si es de las incluidas → no la cobres por separado. Si es adicional → agrég
    IDIOMA: Español cálido y directo. Sin exagerar la jerga mexicana. Respuestas cortas al punto.
 
 11. DELIVERY INCLUIDO EN EL PAGO:
-    Si el cliente quiere pagar el delivery junto con el pedido:
-    - Pregunta cuánto es el costo de delivery (si no lo sabe, dile que pregunte al repartidor)
-    - Agrega la línea "Delivery: S/ X.XX" a los ítems del pedido
-    - Recalcula el total sumando el delivery
-    - Incluye "Delivery: S/X.XX" en el campo items del tag [PEDIDO_OK|...]
+    Si el cliente quiere pagar el delivery junto con el pedido en un solo pago:
+    - NO le pidas el costo al cliente, nosotros lo gestionamos.
+    - Responde: "Claro, nosotros consultamos el costo de delivery a tu zona y
+      te enviamos el total final para que hagas un solo pago. ¡Dame un momento! 🛵"
+    - Confirma el pedido de comida normalmente (sin incluir delivery en el total aún).
+    - El equipo ajustará el total manualmente cuando tenga el dato del repartidor.
 
 12. QUEJAS (sabor, temperatura, falta de producto, orden incorrecta):
     - Responde con ownership inmediato y empatía real. Sin excusas.
@@ -444,6 +445,25 @@ async def _call_claude(phone: str, messages: list) -> str:
                 )
     except Exception as e:
         print(f"[PERFIL] Error al obtener perfil de {phone_clean}: {e}")
+
+    # Pedido activo hoy — inyectar para evitar que Claude regenere [PEDIDO_OK]
+    try:
+        pedidos_hoy = [
+            p for p in db.get_orders_today()
+            if str(p.get("phone", "")) == phone_clean
+            and p.get("estado") != "Cancelado ❌"
+        ]
+        if pedidos_hoy:
+            p0 = pedidos_hoy[0]
+            profile_ctx += (
+                f"\n\n⚠️ PEDIDO YA REGISTRADO EN ESTA SESIÓN: #{p0['id']} — {p0['items']} — {p0['total']}"
+                "\nEl pedido ESTÁ CONFIRMADO Y GUARDADO. NUNCA vuelvas a emitir [PEDIDO_OK] ni [PEDIDO_MOD]"
+                " a menos que el cliente EXPLÍCITAMENTE pida cambiar algo."
+                " Si dice 'gracias', 'ok', 'perfecto' u otras frases de cierre, responde brevemente"
+                " y amablemente sin ningún tag."
+            )
+    except Exception as e:
+        print(f"[PEDIDO-CTX] Error: {e}")
 
     # Tiempo estimado — con fallback directo a SQLite si db.py es versión antigua
     tiempo_ctx = "\nTiempo estimado de preparación: 35-40 minutos"

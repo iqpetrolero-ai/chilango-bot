@@ -1210,7 +1210,7 @@ async def admin(credentials: HTTPBasicCredentials = Depends(verificar_admin)):
                 }}
             }} catch(e) {{}}
         }}
-        setInterval(pollConversaciones, 20000);
+        setInterval(pollConversaciones, 5000);
 
         // Burbuja de nuevos pedidos en el nav
         async function checkPedidosNuevos() {{

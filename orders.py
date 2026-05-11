@@ -112,12 +112,12 @@ async def _notify_owner(phone_clean: str, items: str, total: str, metodo_pago: s
         print(f"[ERROR NOTIFICACIÓN] Excepción: {e}")
 
 
-async def save_order(phone: str, items: str, total: str, metodo_pago: str = "Efectivo", direccion: str = ""):
+async def save_order(phone: str, items: str, total: str, metodo_pago: str = "Efectivo", direccion: str = "", notas: str = ""):
     now = datetime.now(PERU_TZ)
     phone_clean = phone.replace("whatsapp:", "").replace("+", "")
 
     # Persistencia confiable en SQLite
-    db.save_order_db(phone_clean, items, total, metodo_pago, direccion)
+    db.save_order_db(phone_clean, items, total, metodo_pago, direccion, notas)
     print(f"[PEDIDO GUARDADO] {now.strftime('%d/%m %H:%M')} | {phone_clean} | {total} | {metodo_pago}")
 
     # Excel como backup (se pierde en reinicios sin Railway Volume)
@@ -147,11 +147,11 @@ async def save_order(phone: str, items: str, total: str, metodo_pago: str = "Efe
     await _notify_owner(phone_clean, items, total, metodo_pago, now, direccion=direccion)
 
 
-async def update_order(phone: str, items: str, total: str, metodo_pago: str = "Efectivo", direccion: str = ""):
+async def update_order(phone: str, items: str, total: str, metodo_pago: str = "Efectivo", direccion: str = "", notas: str = ""):
     now = datetime.now(PERU_TZ)
     phone_clean = phone.replace("whatsapp:", "").replace("+", "")
 
-    updated = db.update_latest_order(phone_clean, items, total, metodo_pago, direccion)
+    updated = db.update_latest_order(phone_clean, items, total, metodo_pago, direccion, notas)
     if updated:
         print(f"[PEDIDO MODIFICADO] {now.strftime('%d/%m %H:%M')} | {phone_clean} | {total} | {metodo_pago}")
         await _notify_owner(

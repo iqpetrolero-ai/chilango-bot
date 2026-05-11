@@ -129,6 +129,45 @@ async def _send_reply(phone: str, reply: str, sending_id: str):
         await send_whatsapp_message(phone, reply, sending_id)
 
 
+async def send_whatsapp_buttons(to: str, body: str, buttons: list, phone_number_id: str = None):
+    """Envía mensaje con botones interactivos de WhatsApp (máx 3 botones, 20 chars c/u)."""
+    pid = phone_number_id or META_PHONE_NUMBER_ID
+    url = f"https://graph.facebook.com/v19.0/{pid}/messages"
+    headers = {"Authorization": f"Bearer {META_ACCESS_TOKEN}", "Content-Type": "application/json"}
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": to,
+        "type": "interactive",
+        "interactive": {
+            "type": "button",
+            "body": {"text": body},
+            "action": {
+                "buttons": [
+                    {"type": "reply", "reply": {"id": b["id"], "title": b["title"]}}
+                    for b in buttons
+                ]
+            },
+        },
+    }
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.post(url, json=payload, headers=headers)
+        if resp.status_code != 200:
+            print(f"[ERROR BOTONES] {resp.status_code} {resp.text}")
+
+
+async def send_escalate_button(phone: str, sending_id: str = None):
+    """Manda el botón '¿Quieres hablar con el equipo?' al cliente."""
+    await send_whatsapp_buttons(
+        phone,
+        "¿Quieres que alguien del equipo te escriba aquí mismo? 👨‍💼",
+        [
+            {"id": "equipo_si", "title": "Sí, por favor"},
+            {"id": "equipo_no", "title": "No, gracias"},
+        ],
+        sending_id,
+    )
+
+
 async def handle_message(phone: str, message: str, phone_number_id: str = None):
     msg_lower = message.lower().strip()
     sending_id = phone_number_id or META_PHONE_NUMBER_ID
@@ -161,11 +200,11 @@ async def handle_message(phone: str, message: str, phone_number_id: str = None):
         bienvenida = mensaje_bienvenida()
         await send_whatsapp_message(phone, bienvenida, sending_id)
         if msg_lower not in SALUDOS_GENERICOS and message.strip():
-            # process_message se encarga de guardar el historial
-            reply = await process_message(phone, message)
+            reply, escalate = await process_message(phone, message)
             await _send_reply(phone, reply, sending_id)
+            if escalate:
+                await send_escalate_button(phone, sending_id)
         else:
-            # Saludo genérico: guardar el intercambio manualmente
             db.append_message(phone, "user", message)
             db.append_message(phone, "assistant", bienvenida)
         db.mark_unread(phone)
@@ -173,8 +212,10 @@ async def handle_message(phone: str, message: str, phone_number_id: str = None):
 
     db.mark_unread(phone)
     try:
-        reply = await process_message(phone, message)
+        reply, escalate = await process_message(phone, message)
         await _send_reply(phone, reply, sending_id)
+        if escalate:
+            await send_escalate_button(phone, sending_id)
     except Exception as e:
         import traceback
         print(f"[ERROR PROCESO] {phone}: {e}")
@@ -228,10 +269,33 @@ async def receive_message(request: Request):
             media_id = message_data["image"]["id"]
             image_bytes, mime_type = await download_meta_image(media_id)
             if image_bytes:
-                reply = await process_message_with_image(phone, image_bytes, mime_type)
+                reply, _ = await process_message_with_image(phone, image_bytes, mime_type)
                 await send_whatsapp_message(phone, reply, phone_number_id)
             else:
                 await send_whatsapp_message(phone, "No pude leer la imagen, ¿puedes enviarla de nuevo? 📸", phone_number_id)
+        elif msg_type == "interactive":
+            # Respuesta a botones interactivos
+            btn = message_data.get("interactive", {}).get("button_reply", {})
+            btn_id    = btn.get("id", "")
+            btn_title = btn.get("title", "")
+            from datetime import datetime, timezone, timedelta
+            _PERU_TZ = timezone(timedelta(hours=-5))
+            now_ts = datetime.now(_PERU_TZ).strftime("%H:%M")
+            if btn_id == "equipo_si":
+                respuesta = "¡Perfecto! En breve alguien del equipo te escribirá aquí mismo 👨‍💼\nGracias por tu paciencia, Chilanguit@ 🌮"
+                db.append_message(phone, "user",      "Sí, quiero hablar con el equipo", ts=now_ts)
+                db.append_message(phone, "assistant", respuesta, ts=now_ts)
+                db.mark_unread(phone)
+                await send_whatsapp_message(phone, respuesta, phone_number_id)
+                print(f"[ESCALATE] {phone} solicitó hablar con el equipo")
+            elif btn_id == "equipo_no":
+                respuesta = "Entendido. Cualquier cosa, aquí estamos 🌮"
+                db.append_message(phone, "user",      "No, gracias", ts=now_ts)
+                db.append_message(phone, "assistant", respuesta, ts=now_ts)
+                await send_whatsapp_message(phone, respuesta, phone_number_id)
+            else:
+                # Botón desconocido: tratar como texto normal
+                await handle_message(phone, btn_title or btn_id, phone_number_id)
         else:
             await send_whatsapp_message(phone, "Por favor envía un mensaje de texto 😊", phone_number_id)
 

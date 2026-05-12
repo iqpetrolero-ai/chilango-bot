@@ -517,7 +517,8 @@ def _render_card(p: dict) -> str:
     if activo:
         btn_cancel = f'<button class="oa oa-cancel" onclick="cancelarPedido({pid})">❌ Cancelar</button>'
         btn_delivery = f'<button class="oa oa-delivery" onclick="llamarDelivery({pid})">🛵 Delivery</button>' if not es_recojo else ""
-        btn_cost = f'<button class="oa oa-cost" onclick="consultarCostoDelivery({pid})">💰 ¿Costo?</button>' if (not es_recojo and estado == "Nuevo 🆕") else ""
+        delivery_cotizado = "delivery" in items_raw.lower()
+        btn_cost = f'<button class="oa oa-cost" onclick="consultarCostoDelivery({pid})">💰 ¿Costo?</button>' if (not es_recojo and estado == "Nuevo 🆕" and not delivery_cotizado) else ""
         if es_recojo and siguiente and siguiente == "En camino 🛵":
             sig_js = siguiente.replace("'", "\\'")
             btn_next = f'<button class="oa oa-next recojo-next" onclick="cambiarEstado({pid},\'{sig_js}\')">📦 Listo p/retirar</button>'
@@ -1070,7 +1071,8 @@ function buildCard(p) {{
     btnDeliveryHtml = !esRecojo
       ? `<button class="oa oa-delivery" onclick="llamarDelivery(${{p.id}})">🛵 Delivery</button>`
       : '';
-    btnCostHtml = (!esRecojo && estado === 'Nuevo 🆕')
+    const deliveryCotizado = (p.items || '').toLowerCase().includes('delivery');
+    btnCostHtml = (!esRecojo && estado === 'Nuevo 🆕' && !deliveryCotizado)
       ? `<button class="oa oa-cost" onclick="consultarCostoDelivery(${{p.id}})">💰 ¿Costo?</button>`
       : '';
     if (siguiente) {{
@@ -1621,7 +1623,7 @@ async def admin(credentials: HTTPBasicCredentials = Depends(verificar_admin)):
         function buildBubble(m) {{
             const isManual = !!m.manual;
             const lado  = isManual ? 'manual' : (m.role === 'user' ? 'cliente' : 'bot');
-            const label = isManual ? '👨‍💼 Equipo' : (m.role === 'user' ? 'Cliente' : '🤖 Chilo');
+            const label = isManual ? '👨‍💼 Equipo' : (m.role === 'user' ? 'Cliente' : '🤖 Chili');
             const tsHtml = m.ts ? `<span class="msg-ts">${{m.ts}}</span>` : '';
             return `<div class="bubble ${{lado}}"><div class="sender">${{label}}${{tsHtml}}</div>${{esc(m.content)}}</div>`;
         }}

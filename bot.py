@@ -4,7 +4,7 @@ import httpx
 from datetime import datetime, timezone, timedelta
 from anthropic import AsyncAnthropic
 from menu import MENU_TEXTO
-from orders import save_order, update_order, cancel_order
+from orders import save_order, update_order, cancel_order, notify_delivery_cost_query
 import db
 
 db.init_db()
@@ -264,9 +264,11 @@ Si es de las incluidas → no la cobres por separado. Si es adicional → agrég
              "🛵 Entendido. El costo de comida es [subtotal+empaque].
               Vamos a consultar el costo de delivery a tu zona y
               te enviamos el total final antes de confirmar. ¡Un momento!"
+             Agrega AL FINAL de tu respuesta (invisible para el cliente):
+             [CONSULTAR_COSTO|dir: <dirección que el cliente indicó>]
              ⛔ NO emitas [PEDIDO_OK] ni [PEDIDO_MOD] en este paso.
 
-    Paso 2 — El equipo le enviará el costo de delivery directamente al cliente.
+    Paso 2 — El equipo contactará al motorizado y le informará el costo al cliente.
              Cuando el cliente responda confirmando el total completo
              (ej: "sí", "dale", "ok", o repita el monto total incluyendo delivery):
              Emite [PEDIDO_OK|items: <items>, Delivery: S/X.XX|total: S/ XX.XX|pago: ...|dir: ...|notas: ...]
@@ -407,6 +409,22 @@ async def _parse_and_save_order(phone: str, reply: str) -> tuple[str, bool]:
                                      ultimo_pago=fields["pago"])
         except Exception as e:
             print(f"[PERFIL] Error al guardar perfil tras PEDIDO_MOD: {e}")
+
+    # Consulta automática de costo de delivery al motorizado
+    if "[CONSULTAR_COSTO|" in reply:
+        try:
+            start = reply.index("[CONSULTAR_COSTO|")
+            end = reply.index("]", start)
+            tag_str = reply[start:end + 1]
+            inner = tag_str[len("[CONSULTAR_COSTO|"):-1]
+            direccion = ""
+            for part in inner.split("|"):
+                if part.strip().startswith("dir:"):
+                    direccion = part.strip()[4:].strip()
+            reply = (reply[:start] + reply[end + 1:]).strip()
+            await notify_delivery_cost_query(phone_clean, direccion)
+        except Exception as e:
+            print(f"[CONSULTAR_COSTO] Error al procesar tag: {e}")
 
     # Cancelación de pedido
     if "[PEDIDO_CANCEL]" in reply:

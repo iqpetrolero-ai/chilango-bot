@@ -13,6 +13,38 @@ PERU_TZ = timezone(timedelta(hours=-5))
 OWNER_PHONE = "51954713696"
 
 
+async def _send_whatsapp(to: str, body: str):
+    """Envía un mensaje WhatsApp usando la API de Meta."""
+    token = os.environ.get("META_ACCESS_TOKEN", "").strip()
+    phone_number_id = os.environ.get("META_PHONE_NUMBER_ID", "").strip()
+    if not token or not phone_number_id:
+        print("[WA] META_ACCESS_TOKEN o META_PHONE_NUMBER_ID no configurados")
+        return
+    url = f"https://graph.facebook.com/v19.0/{phone_number_id}/messages"
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    payload = {"messaging_product": "whatsapp", "to": to, "type": "text", "text": {"body": body}}
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.post(url, json=payload, headers=headers)
+        if resp.status_code != 200:
+            print(f"[WA] Error al enviar a {to}: {resp.status_code} {resp.text}")
+
+
+async def notify_delivery_cost_query(phone_client: str, direccion: str):
+    """Envía consulta de costo de delivery al motorizado cuando el cliente pide pagar delivery incluido."""
+    delivery_phone = os.environ.get("DELIVERY_1_PHONE", "").strip()
+    if not delivery_phone:
+        print("[CONSULTAR_COSTO] No hay DELIVERY_1_PHONE configurado — no se envió consulta")
+        return
+    delivery_name = os.environ.get("DELIVERY_1_NAME", "Delivery").strip()
+    mensaje = (
+        f"¿Cual es el costo a la siguiente dirección?\n"
+        f"Dirección: {direccion or 'Sin especificar'}\n"
+        f"Cliente: +{phone_client}"
+    )
+    await _send_whatsapp(delivery_phone, mensaje)
+    print(f"[CONSULTAR_COSTO] Consulta enviada a {delivery_name} ({delivery_phone}) para cliente +{phone_client}")
+
+
 def _init_excel():
     if not os.path.exists(EXCEL_FILE):
         wb = openpyxl.Workbook()

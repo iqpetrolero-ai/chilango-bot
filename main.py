@@ -452,6 +452,7 @@ def _render_card(p: dict) -> str:
     if activo:
         btn_cancel = f'<button class="oa oa-cancel" onclick="cancelarPedido({pid})">❌ Cancelar</button>'
         btn_delivery = f'<button class="oa oa-delivery" onclick="llamarDelivery({pid})">🛵 Delivery</button>' if not es_recojo else ""
+        btn_cost = f'<button class="oa oa-cost" onclick="consultarCostoDelivery({pid})">💰 ¿Costo?</button>' if not es_recojo else ""
         if es_recojo and siguiente and siguiente == "En camino 🛵":
             sig_js = siguiente.replace("'", "\\'")
             btn_next = f'<button class="oa oa-next recojo-next" onclick="cambiarEstado({pid},\'{sig_js}\')">📦 Listo p/retirar</button>'
@@ -461,7 +462,7 @@ def _render_card(p: dict) -> str:
         else:
             btn_next = ""
     else:
-        btn_cancel = btn_delivery = ""
+        btn_cancel = btn_delivery = btn_cost = ""
         btn_next = f'<span class="oa-done">{"❌ Cancelado" if es_cancelado else "✅ Entregado"}</span>'
 
     btn_del = f'<button class="oa oa-del" onclick="eliminarPedido({pid},this)" title="Eliminar">🗑️</button>'
@@ -494,7 +495,7 @@ def _render_card(p: dict) -> str:
       {cobro_badge}
     </div>
   </div>
-  <div class="oc-actions">{btn_cancel}{btn_delivery}{btn_next}{btn_del}</div>
+  <div class="oc-actions">{btn_cancel}{btn_delivery}{btn_cost}{btn_next}{btn_del}</div>
 </div>"""
 
 
@@ -672,6 +673,8 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgro
 .oa-cancel:hover{{background:var(--ch-red-bg)}}
 .oa-delivery{{color:var(--ch-orange)}}
 .oa-delivery:hover{{background:var(--ch-orange-bg)}}
+.oa-cost{{color:var(--ch-green)}}
+.oa-cost:hover{{background:var(--ch-green-bg)}}
 .oa-next{{background:var(--ch-blue);color:#fff;border-radius:0 0 16px 0}}
 .oa-next:hover{{background:#1976D2}}
 .oa-next:disabled{{background:#bbb;cursor:not-allowed}}
@@ -728,12 +731,12 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgro
 </div>
 
 <div class="filters">
-  <button class="tab active" onclick="filterCards('all',this)">Todos ({len(pedidos)})</button>
-  <button class="tab" onclick="filterCards('Nuevo 🆕',this)" id="tabNuevo">🆕 Nuevos ({count_nuevos})</button>
-  <button class="tab" onclick="filterCards('En preparación 👨‍🍳',this)">👨‍🍳 Preparación ({count_prep})</button>
-  <button class="tab" onclick="filterCards('En camino 🛵',this)">🛵 En camino ({count_camino})</button>
-  <button class="tab" onclick="filterCards('Entregado ✅',this)">✅ Entregados ({count_entregado})</button>
-  <button class="tab" onclick="filterCards('Cancelado ❌',this)">❌ Cancelados ({count_cancel})</button>
+  <button class="tab active" data-estado="all" onclick="filterCards('all',this)">Todos ({len(pedidos)})</button>
+  <button class="tab" data-estado="Nuevo 🆕" onclick="filterCards('Nuevo 🆕',this)" id="tabNuevo">🆕 Nuevos ({count_nuevos})</button>
+  <button class="tab" data-estado="En preparación 👨‍🍳" onclick="filterCards('En preparación 👨‍🍳',this)">👨‍🍳 Preparación ({count_prep})</button>
+  <button class="tab" data-estado="En camino 🛵" onclick="filterCards('En camino 🛵',this)">🛵 En camino ({count_camino})</button>
+  <button class="tab" data-estado="Entregado ✅" onclick="filterCards('Entregado ✅',this)">✅ Entregados ({count_entregado})</button>
+  <button class="tab" data-estado="Cancelado ❌" onclick="filterCards('Cancelado ❌',this)">❌ Cancelados ({count_cancel})</button>
 </div>
 
 <div class="grid" id="ordersGrid">{cards}</div>
@@ -868,14 +871,15 @@ async function eliminarPedido(id, btnEl) {{
   }} catch(e) {{ alert('Error al eliminar: ' + e.message); }}
 }}
 
-/* ── Llamar delivery ── */
-function llamarDelivery(orderId) {{
+/* ── Modal delivery (compartido para llamar y consultar costo) ── */
+function _openDlvModal(orderId, mode) {{
   document.getElementById('dlvOrderId').value = orderId;
-  // Regenerar opciones del modal según configuración actual
+  const modal = document.getElementById('dlvModal');
+  modal.dataset.mode = mode;
+  modal.querySelector('h3').textContent = mode === 'cost' ? '💰 Consultar costo delivery' : '🛵 Llamar delivery';
   const optsEl = document.getElementById('dlvOpts');
   optsEl.innerHTML = '';
   if (DELIVERIES && DELIVERIES.length > 0) {{
-    // Hay deliveries pre-configurados: mostrar botones de selección
     document.getElementById('dlvManual').style.display = 'none';
     DELIVERIES.forEach((d, i) => {{
       optsEl.innerHTML += `<div class="dlv-option">
@@ -884,20 +888,22 @@ function llamarDelivery(orderId) {{
       </div>`;
     }});
   }} else {{
-    // Sin configuración: mostrar input manual
     document.getElementById('dlvManual').style.display = 'block';
     document.getElementById('dlvPhoneInput').value = '';
   }}
-  document.getElementById('dlvModal').style.display = 'flex';
+  modal.style.display = 'flex';
   setTimeout(() => {{
     const inp = document.getElementById('dlvPhoneInput');
     if (inp && inp.offsetParent) inp.focus();
   }}, 100);
 }}
 
-async function _enviarDelivery(orderId, phone, name) {{
+function llamarDelivery(orderId) {{ _openDlvModal(orderId, 'delivery'); }}
+function consultarCostoDelivery(orderId) {{ _openDlvModal(orderId, 'cost'); }}
+
+async function _enviarDelivery(orderId, phone, name, endpoint, toastPrefix) {{
   try {{
-    const r = await fetch('/api/pedidos/llamar-delivery', {{
+    const r = await fetch(endpoint, {{
       method: 'POST',
       credentials: 'same-origin',
       headers: {{'Content-Type':'application/json'}},
@@ -906,12 +912,12 @@ async function _enviarDelivery(orderId, phone, name) {{
     if (r.status === 401) {{ location.reload(); return; }}
     const data = await r.json();
     if (data.status === 'ok') {{
-      showToast('🛵 Solicitud enviada a ' + (data.delivery || name));
+      showToast(toastPrefix + (data.delivery || name));
     }} else {{
       alert('Error: ' + (data.msg || 'No se pudo enviar'));
     }}
   }} catch(e) {{
-    alert('Error al llamar delivery: ' + e.message);
+    alert('Error: ' + e.message);
   }}
 }}
 
@@ -920,11 +926,13 @@ function closeDlvModal() {{
 }}
 
 function confirmarDelivery() {{
-  const orderId = +document.getElementById('dlvOrderId').value;
+  const orderId  = +document.getElementById('dlvOrderId').value;
+  const mode     = document.getElementById('dlvModal').dataset.mode || 'delivery';
+  const endpoint = mode === 'cost' ? '/api/pedidos/consultar-delivery' : '/api/pedidos/llamar-delivery';
+  const toastPrefix = mode === 'cost' ? '💰 Consulta enviada a ' : '🛵 Solicitud enviada a ';
   let phone, name;
   const manualDiv = document.getElementById('dlvManual');
   if (manualDiv && manualDiv.style.display !== 'none') {{
-    // Modo manual: leer número del input
     phone = (document.getElementById('dlvPhoneInput').value || '').trim().replace(/[^0-9]/g,'');
     if (!phone || phone.length < 8) {{ alert('Ingresa un número de WhatsApp válido (solo dígitos)'); return; }}
     name = 'Delivery';
@@ -935,7 +943,7 @@ function confirmarDelivery() {{
     phone = d.phone; name = d.name;
   }}
   closeDlvModal();
-  _enviarDelivery(orderId, phone, name);
+  _enviarDelivery(orderId, phone, name, endpoint, toastPrefix);
 }}
 
 /* ── Construir tarjeta desde JSON ── */
@@ -991,11 +999,14 @@ function buildCard(p) {{
     : `<span class="oc-pbadge cobrar">💳 Cobrar al entregar</span>`;
 
   // Botones de acción
-  let btnCancelHtml = '', btnDeliveryHtml = '', btnSigHtml = '';
+  let btnCancelHtml = '', btnDeliveryHtml = '', btnCostHtml = '', btnSigHtml = '';
   if (esActivo) {{
     btnCancelHtml   = `<button class="oa oa-cancel" onclick="cancelarPedido(${{p.id}})">❌ Cancelar</button>`;
     btnDeliveryHtml = !esRecojo
       ? `<button class="oa oa-delivery" onclick="llamarDelivery(${{p.id}})">🛵 Delivery</button>`
+      : '';
+    btnCostHtml = !esRecojo
+      ? `<button class="oa oa-cost" onclick="consultarCostoDelivery(${{p.id}})">💰 ¿Costo?</button>`
       : '';
     if (siguiente) {{
       const esSiguienteCamino = p.siguiente_estado_raw === 'En camino 🛵';
@@ -1038,7 +1049,7 @@ function buildCard(p) {{
       ${{cobroBadge}}
     </div>
   </div>
-  <div class="oc-actions">${{btnCancelHtml}}${{btnDeliveryHtml}}${{btnSigHtml}}${{btnDelHtml}}</div>
+  <div class="oc-actions">${{btnCancelHtml}}${{btnDeliveryHtml}}${{btnCostHtml}}${{btnSigHtml}}${{btnDelHtml}}</div>
 </div>`;
 }}
 
@@ -1072,15 +1083,32 @@ async function refreshOrders() {{
       grid.innerHTML = pedidos.map(buildCard).join('');
     }}
 
-    // Mientras estamos en la página de Pedidos, todos los "Nuevo" se marcan como vistos
-    const nuevoIds = pedidos.filter(p => (p.estado||'').startsWith('Nuevo')).map(p => p.id);
-    const seen = new Set(JSON.parse(localStorage.getItem('seenNuevoIds') || '[]'));
-    nuevoIds.forEach(id => seen.add(id));
-    localStorage.setItem('seenNuevoIds', JSON.stringify([...seen]));
-
-    // Ocultar burbuja mientras estamos en esta página
+    // Actualizar burbuja de pedidos nuevos en el nav
+    const nNuevos = pedidos.filter(p => (p.estado||'').startsWith('Nuevo')).length;
     const navBadge = document.getElementById('navBadge');
-    if (navBadge) navBadge.style.display = 'none';
+    if (navBadge) {{
+      navBadge.textContent = nNuevos;
+      navBadge.style.display = nNuevos > 0 ? 'inline-flex' : 'none';
+    }}
+
+    // Actualizar conteos en las pestañas de filtro
+    const _tabCounts = {{
+      'all': pedidos.length,
+      'Nuevo 🆕': nNuevos,
+      'En preparación 👨‍🍳': pedidos.filter(p => p.estado === 'En preparación 👨‍🍳').length,
+      'En camino 🛵': pedidos.filter(p => p.estado === 'En camino 🛵').length,
+      'Entregado ✅': pedidos.filter(p => p.estado === 'Entregado ✅').length,
+      'Cancelado ❌': pedidos.filter(p => p.estado === 'Cancelado ❌').length,
+    }};
+    const _tabLabels = {{
+      'all':'Todos', 'Nuevo 🆕':'🆕 Nuevos', 'En preparación 👨‍🍳':'👨‍🍳 Preparación',
+      'En camino 🛵':'🛵 En camino', 'Entregado ✅':'✅ Entregados', 'Cancelado ❌':'❌ Cancelados',
+    }};
+    document.querySelectorAll('.tab[data-estado]').forEach(tab => {{
+      const e = tab.dataset.estado;
+      if (e in _tabCounts) tab.textContent = `${{_tabLabels[e]}} (${{_tabCounts[e]}})`;
+      if (e === curFilter) tab.classList.add('active');
+    }});
 
     // Re-aplicar filtro activo
     filterCards(curFilter, document.querySelector('.tab.active'));
@@ -1124,18 +1152,14 @@ function probarNotif() {{
 // Iniciar polling cada 10 segundos
 setInterval(refreshOrders, 10000);
 
-// Al abrir la página marcar todos los "Nuevo" actuales como vistos
-(function markNuevosAsSeen() {{
-  const cards = document.querySelectorAll('.card[data-estado]');
-  const ids = Array.from(cards)
-    .filter(c => (c.dataset.estado||'').startsWith('Nuevo'))
-    .map(c => parseInt(c.id.replace('card-', '')))
-    .filter(id => !isNaN(id));
-  const seen = new Set(JSON.parse(localStorage.getItem('seenNuevoIds') || '[]'));
-  ids.forEach(id => seen.add(id));
-  localStorage.setItem('seenNuevoIds', JSON.stringify([...seen]));
+// Inicializar burbuja nav al cargar la página
+(function initNavBadge() {{
+  const nNuevos = document.querySelectorAll('.card[data-estado^="Nuevo"]').length;
   const nb = document.getElementById('navBadge');
-  if (nb) nb.style.display = 'none';
+  if (nb) {{
+    nb.textContent = nNuevos;
+    nb.style.display = nNuevos > 0 ? 'inline-flex' : 'none';
+  }}
 }})();
 </script>
 </body></html>"""
@@ -1230,19 +1254,54 @@ async def api_llamar_delivery(
     hora = datetime.now(_PERU_TZ).strftime("%d/%m · %I:%M %p")
 
     mensaje = (
-        f"🛵 *SE REQUIERE MOTORIZADO — Chilango*\n"
-        f"📦 Pedido #{order['id']}\n"
-        f"👤 Cliente: +{order['phone']}\n"
-        f"📍 Dirección: {order.get('direccion') or 'Sin especificar'}\n"
-        f"🛒 {order['items']}\n"
-        f"💰 {order['total']}\n"
+        f"Un motorizado porfavor - Chilango 🛵\n"
+        f"Cliente: +{order['phone']}\n"
+        f"📍 {order.get('direccion') or 'Sin dirección'}\n"
         f"🕒 {hora}"
     )
     if order.get("notas"):
-        mensaje += f"\n📝 Notas: {order['notas']}"
+        mensaje += f"\n📝 {order['notas']}"
 
     await send_whatsapp_message(target_phone, mensaje)
     print(f"[DELIVERY] Solicitud enviada para pedido #{order_id} → {target_name} ({target_phone})")
+    return JSONResponse({"status": "ok", "delivery": target_name})
+
+
+@app.post("/api/pedidos/consultar-delivery")
+async def api_consultar_delivery(
+    request: Request,
+    credentials: HTTPBasicCredentials = Depends(verificar_admin)
+):
+    """Envía consulta de costo de delivery al motorizado."""
+    data = await request.json()
+    order_id       = int(data.get("order_id", 0))
+    delivery_phone = data.get("delivery_phone", "").strip()
+
+    if not order_id:
+        return JSONResponse({"status": "error", "msg": "order_id requerido"}, status_code=400)
+
+    order = db.get_order_by_id(order_id)
+    if not order:
+        return JSONResponse({"status": "error", "msg": "Pedido no encontrado"}, status_code=404)
+
+    if not DELIVERIES:
+        return JSONResponse({"status": "error", "msg": "No hay delivery configurado en Railway"}, status_code=500)
+
+    valid_phones = {d["phone"] for d in DELIVERIES}
+    target_phone = delivery_phone if delivery_phone in valid_phones else DELIVERIES[0]["phone"]
+    target_name  = next((d["name"] for d in DELIVERIES if d["phone"] == target_phone), "Delivery")
+
+    from datetime import datetime, timezone, timedelta
+    _PERU_TZ = timezone(timedelta(hours=-5))
+    hora = datetime.now(_PERU_TZ).strftime("%d/%m · %I:%M %p")
+
+    consulta = (
+        f"¿Cual es el costo a la siguiente dirección?\n"
+        f"Dirección: {order.get('direccion') or 'Sin dirección'}"
+    )
+
+    await send_whatsapp_message(target_phone, consulta)
+    print(f"[COSTO DELIVERY] Consulta enviada para pedido #{order_id} → {target_name} ({target_phone})")
     return JSONResponse({"status": "ok", "delivery": target_name})
 
 
@@ -1597,14 +1656,13 @@ async def admin(credentials: HTTPBasicCredentials = Depends(verificar_admin)):
         }}
         setInterval(pollConversaciones, 5000);
 
-        // Burbuja de nuevos pedidos en el nav
+        // Burbuja de nuevos pedidos en el nav (sin depender de localStorage)
         async function checkPedidosNuevos() {{
             try {{
                 const r = await fetch('/api/pedidos', {{credentials:'same-origin'}});
                 if (!r.ok) return;
                 const data = await r.json();
-                const seenIds = new Set(JSON.parse(localStorage.getItem('seenNuevoIds') || '[]'));
-                const n = data.pedidos.filter(p => (p.estado||'').startsWith('Nuevo') && !seenIds.has(p.id)).length;
+                const n = data.pedidos.filter(p => (p.estado||'').startsWith('Nuevo')).length;
                 const badge = document.getElementById('adminNavBadge');
                 if (badge) {{
                     badge.textContent = n;
@@ -1613,7 +1671,7 @@ async def admin(credentials: HTTPBasicCredentials = Depends(verificar_admin)):
             }} catch(e) {{}}
         }}
         checkPedidosNuevos();
-        setInterval(checkPedidosNuevos, 15000);
+        setInterval(checkPedidosNuevos, 10000);
     </script>
 </body>
 </html>"""

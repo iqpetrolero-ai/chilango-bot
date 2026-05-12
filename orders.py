@@ -29,8 +29,9 @@ async def _send_whatsapp(to: str, body: str):
             print(f"[WA] Error al enviar a {to}: {resp.status_code} {resp.text}")
 
 
-async def notify_delivery_cost_query(phone_client: str, direccion: str):
-    """Envía consulta de costo de delivery al motorizado cuando el cliente pide pagar delivery incluido."""
+async def notify_delivery_cost_query(phone_client: str, direccion: str,
+                                      subtotal: str = "", items: str = "", pago: str = ""):
+    """Envía consulta de costo de delivery al motorizado y guarda la consulta pendiente en BD."""
     delivery_phone = os.environ.get("DELIVERY_1_PHONE", "").strip()
     if not delivery_phone:
         print("[CONSULTAR_COSTO] No hay DELIVERY_1_PHONE configurado — no se envió consulta")
@@ -42,7 +43,9 @@ async def notify_delivery_cost_query(phone_client: str, direccion: str):
         f"Cliente: +{phone_client}"
     )
     await _send_whatsapp(delivery_phone, mensaje)
-    print(f"[CONSULTAR_COSTO] Consulta enviada a {delivery_name} ({delivery_phone}) para cliente +{phone_client}")
+    # Guardar consulta pendiente para poder auto-responder al cliente cuando el motorizado conteste
+    db.save_delivery_query(delivery_phone, phone_client, subtotal, items, pago, direccion)
+    print(f"[CONSULTAR_COSTO] Consulta guardada — {delivery_name} ({delivery_phone}) → cliente +{phone_client}")
 
 
 def _init_excel():

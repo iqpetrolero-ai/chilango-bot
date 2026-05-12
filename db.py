@@ -64,6 +64,20 @@ def init_db():
             except Exception:
                 pass  # La columna ya existe
 
+        # ── Consultas de costo de delivery pendientes ──────────────
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS delivery_queries (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                delivery_phone TEXT,
+                client_phone TEXT,
+                subtotal TEXT,
+                items TEXT,
+                pago TEXT,
+                direccion TEXT,
+                created_at TEXT
+            )
+        """)
+
         # Normalizar estados sin emoji que quedaron por el DEFAULT antiguo
         c.execute("UPDATE orders SET estado='Nuevo 🆕' WHERE estado='Nuevo' OR estado IS NULL OR estado=''")
         c.execute("UPDATE orders SET estado='En preparación 👨‍🍳' WHERE estado='En preparación'")
@@ -306,3 +320,35 @@ def update_latest_order(phone: str, items: str, total: str, metodo_pago: str, di
             (items, total, metodo_pago, notas, direccion, direccion, row["id"]),
         )
         return True
+
+
+# ── Consultas de costo de delivery ────────────────────────────
+
+def save_delivery_query(delivery_phone: str, client_phone: str, subtotal: str,
+                        items: str, pago: str, direccion: str):
+    """Guarda una consulta de costo de delivery pendiente."""
+    now = datetime.now(PERU_TZ).strftime("%d/%m/%Y %H:%M")
+    with _conn() as c:
+        # Solo una consulta activa por teléfono de delivery
+        c.execute("DELETE FROM delivery_queries WHERE delivery_phone=?", (delivery_phone,))
+        c.execute(
+            "INSERT INTO delivery_queries (delivery_phone, client_phone, subtotal, items, pago, direccion, created_at)"
+            " VALUES (?,?,?,?,?,?,?)",
+            (delivery_phone, client_phone, subtotal, items, pago, direccion, now),
+        )
+
+
+def get_pending_delivery_query(delivery_phone: str) -> dict | None:
+    """Retorna la consulta pendiente para este teléfono de delivery, si existe."""
+    with _conn() as c:
+        row = c.execute(
+            "SELECT * FROM delivery_queries WHERE delivery_phone=? ORDER BY id DESC LIMIT 1",
+            (delivery_phone,)
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def delete_delivery_query(query_id: int):
+    """Elimina la consulta resuelta."""
+    with _conn() as c:
+        c.execute("DELETE FROM delivery_queries WHERE id=?", (query_id,))

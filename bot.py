@@ -265,7 +265,8 @@ Si es de las incluidas → no la cobres por separado. Si es adicional → agrég
               Vamos a consultar el costo de delivery a tu zona y
               te enviamos el total final antes de confirmar. ¡Un momento!"
              Agrega AL FINAL de tu respuesta (invisible para el cliente):
-             [CONSULTAR_COSTO|dir: <dirección que el cliente indicó>]
+             [CONSULTAR_COSTO|dir: <dirección>|subtotal: S/ XX.XX|items: <descripción completa>|pago: <Yape/Plin|Efectivo>]
+             (subtotal = comida + empaque, SIN delivery)
              ⛔ NO emitas [PEDIDO_OK] ni [PEDIDO_MOD] en este paso.
 
     Paso 2 — El equipo contactará al motorizado y le informará el costo al cliente.
@@ -417,12 +418,19 @@ async def _parse_and_save_order(phone: str, reply: str) -> tuple[str, bool]:
             end = reply.index("]", start)
             tag_str = reply[start:end + 1]
             inner = tag_str[len("[CONSULTAR_COSTO|"):-1]
-            direccion = ""
+            fields_cc: dict = {}
             for part in inner.split("|"):
-                if part.strip().startswith("dir:"):
-                    direccion = part.strip()[4:].strip()
+                if ":" in part:
+                    k, v = part.split(":", 1)
+                    fields_cc[k.strip().lower()] = v.strip()
             reply = (reply[:start] + reply[end + 1:]).strip()
-            await notify_delivery_cost_query(phone_clean, direccion)
+            await notify_delivery_cost_query(
+                phone_clean,
+                fields_cc.get("dir", ""),
+                fields_cc.get("subtotal", ""),
+                fields_cc.get("items", ""),
+                fields_cc.get("pago", ""),
+            )
         except Exception as e:
             print(f"[CONSULTAR_COSTO] Error al procesar tag: {e}")
 

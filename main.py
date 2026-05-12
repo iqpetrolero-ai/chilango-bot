@@ -182,10 +182,75 @@ async def send_escalate_button(phone: str, sending_id: str = None):
     )
 
 
+def _parse_delivery_cost(text: str):
+    """Extrae el monto numérico de la respuesta del motorizado. Ej: '7', 'S/7', '7 soles' → 7.0"""
+    import re
+    t = text.strip().lower()
+    t = re.sub(r's\s*/?\s*', '', t)          # quitar S/
+    t = t.replace("soles", "").replace("sol", "").replace(",", ".")
+    m = re.search(r'\b(\d+(?:\.\d{1,2})?)\b', t)
+    return float(m.group(1)) if m else None
+
+
+def _parse_amount(text: str) -> float:
+    """Extrae el valor numérico de un string de monto. Ej: 'S/ 31.90' → 31.9"""
+    import re
+    m = re.search(r'(\d+(?:[.,]\d{1,2})?)', (text or "").replace(",", "."))
+    return float(m.group(1)) if m else 0.0
+
+
 async def handle_message(phone: str, message: str, phone_number_id: str = None):
     msg_lower = message.lower().strip()
     sending_id = phone_number_id or META_PHONE_NUMBER_ID
+    phone_clean = phone.replace("whatsapp:", "").replace("+", "")
     print(f"[MENSAJE] {phone}: {message}")
+
+    # ── Respuesta del motorizado: no procesar como cliente ──────────────────────
+    delivery_phones = {d["phone"].replace("+", "") for d in DELIVERIES}
+    if phone_clean in delivery_phones:
+        delivery_name = next(
+            (d["name"] for d in DELIVERIES if d["phone"].replace("+", "") == phone_clean),
+            "Motorizado"
+        )
+        print(f"[DELIVERY REPLY] {delivery_name} ({phone_clean}): {message}")
+
+        # Intentar auto-responder al cliente con el costo total
+        consulta = db.get_pending_delivery_query(phone_clean)
+        if consulta:
+            costo_delivery = _parse_delivery_cost(message)
+            if costo_delivery is not None:
+                subtotal_num = _parse_amount(consulta.get("subtotal", "0"))
+                total_num    = subtotal_num + costo_delivery
+                items_txt    = consulta.get("items", "")
+                pago_txt     = consulta.get("pago", "")
+                client_phone = consulta["client_phone"]
+                wa_client    = f"whatsapp:+{client_phone}"
+
+                msg_cliente = (
+                    f"¡Ya tenemos el costo! 🛵\n\n"
+                    f"🛒 {items_txt}\n"
+                    f"📦 Empaque incluido\n"
+                    f"🛵 Delivery: S/ {costo_delivery:.2f}\n"
+                    f"💰 *Total completo: S/ {total_num:.2f}*\n\n"
+                    f"¿Confirmamos tu pedido con {pago_txt}? 😊"
+                )
+                # Inyectar en historial para que Claude sepa el total al confirmar
+                from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+                _ts = _dt.now(_tz(_td(hours=-5))).strftime("%H:%M")
+                db.append_message(wa_client, "assistant", msg_cliente, ts=_ts)
+                db.mark_unread(wa_client)
+                await send_whatsapp_message(client_phone, msg_cliente, sending_id)
+                db.delete_delivery_query(consulta["id"])
+                print(f"[DELIVERY COST] S/{costo_delivery} enviado a cliente +{client_phone} — total S/{total_num:.2f}")
+            else:
+                # No se pudo parsear el número — reenviar al dueño para que lo gestione manualmente
+                aviso = f"🛵 *{delivery_name}* (respuesta sin monto reconocible):\n{message}"
+                await send_whatsapp_message("51954713696", aviso)
+        else:
+            # Sin consulta pendiente — reenviar al dueño
+            aviso = f"🛵 *Respuesta de {delivery_name}:*\n{message}"
+            await send_whatsapp_message("51954713696", aviso)
+        return
 
     # Enviar carta como PDF o texto
     if message.strip() == "1" or any(p in msg_lower for p in PALABRAS_CARTA):

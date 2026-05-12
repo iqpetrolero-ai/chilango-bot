@@ -452,7 +452,7 @@ def _render_card(p: dict) -> str:
     if activo:
         btn_cancel = f'<button class="oa oa-cancel" onclick="cancelarPedido({pid})">❌ Cancelar</button>'
         btn_delivery = f'<button class="oa oa-delivery" onclick="llamarDelivery({pid})">🛵 Delivery</button>' if not es_recojo else ""
-        btn_cost = f'<button class="oa oa-cost" onclick="consultarCostoDelivery({pid})">💰 ¿Costo?</button>' if not es_recojo else ""
+        btn_cost = f'<button class="oa oa-cost" onclick="consultarCostoDelivery({pid})">💰 ¿Costo?</button>' if (not es_recojo and estado == "Nuevo 🆕") else ""
         if es_recojo and siguiente and siguiente == "En camino 🛵":
             sig_js = siguiente.replace("'", "\\'")
             btn_next = f'<button class="oa oa-next recojo-next" onclick="cambiarEstado({pid},\'{sig_js}\')">📦 Listo p/retirar</button>'
@@ -1005,7 +1005,7 @@ function buildCard(p) {{
     btnDeliveryHtml = !esRecojo
       ? `<button class="oa oa-delivery" onclick="llamarDelivery(${{p.id}})">🛵 Delivery</button>`
       : '';
-    btnCostHtml = !esRecojo
+    btnCostHtml = (!esRecojo && estado === 'Nuevo 🆕')
       ? `<button class="oa oa-cost" onclick="consultarCostoDelivery(${{p.id}})">💰 ¿Costo?</button>`
       : '';
     if (siguiente) {{

@@ -397,133 +397,104 @@ async def _notify_order_camino(order: dict):
 def _render_card(p: dict) -> str:
     """Renderiza una tarjeta de pedido como HTML."""
     estado = p.get("estado") or "Nuevo 🆕"
-    bg = ESTADO_COLORS.get(estado, "#f5f5f5")
     badge_color = ESTADO_BADGE.get(estado, "#666")
+    pid = p["id"]
 
-    # Progress steps
+    # ── Progress steps ──────────────────────────────────────────
     step_idx = STEP_IDX.get(estado, -1)
     steps_parts = []
     for i, label in enumerate(STEP_LABELS):
-        if i < step_idx:
-            cls = "s-done"
-        elif i == step_idx:
-            cls = "s-active"
-        else:
-            cls = "s-pending"
-        steps_parts.append(f'<div class="step {cls}"><div class="sdot"></div><span>{label}</span></div>')
+        cls = "s-done" if i < step_idx else ("s-active" if i == step_idx else "")
+        line_cls = "done" if i < step_idx else ""
+        steps_parts.append(
+            f'<div class="oc-step {cls}"><div class="oc-dot"></div><span>{label}</span></div>'
+        )
         if i < len(STEP_LABELS) - 1:
-            line_cls = "line-done" if i < step_idx else "line-pending"
-            steps_parts.append(f'<div class="sline {line_cls}"></div>')
+            steps_parts.append(f'<div class="oc-line {line_cls}"></div>')
     steps_html = "".join(steps_parts)
 
-    # Botón siguiente estado
-    pid = p["id"]
+    # ── Datos del pedido ────────────────────────────────────────
     es_cancelado = estado == "Cancelado ❌"
+    activo = estado not in ("Entregado ✅", "Cancelado ❌")
     idx = ESTADOS.index(estado) if estado in ESTADOS else 0
     siguiente = ESTADOS[idx + 1] if (idx < len(ESTADOS) - 1 and not es_cancelado) else None
-    if siguiente:
-        sig_label = html.escape(siguiente)
-        sig_js = siguiente.replace("'", "\\'")
-        btn_sig = f"<button class='btn-next' onclick=\"cambiarEstado({pid},'{sig_js}')\">→ {sig_label}</button>"
-    elif es_cancelado:
-        btn_sig = '<span class="lbl-done" style="color:#c62828">Cancelado</span>'
-    else:
-        btn_sig = '<span class="lbl-done">✅ Completado</span>'
 
-    btn_del = f'<button class="btn-del" onclick="eliminarPedido({pid},this)" title="Eliminar">🗑️</button>'
-
-    # Pago
     metodo = p.get("metodo_pago") or "Efectivo"
-    pago_color = {"Yape/Plin": "#6c3d98", "Yape": "#6c3d98", "Plin": "#6c3d98", "Efectivo": "#2D5016"}.get(metodo, "#555")
-    pago_emoji = {"Yape/Plin": "💜", "Yape": "💜", "Plin": "💜", "Efectivo": "💵"}.get(metodo, "💳")
     es_digital = metodo in ("Yape/Plin", "Yape", "Plin")
-    pago_estado_html = (
-        '<span class="pago-estado pagado">✅ Pagado</span>' if es_digital
-        else '<span class="pago-estado pendiente">💵 Cobrar al entregar</span>'
+    metodo_cls = "metodo-yape" if es_digital else "metodo-efectivo"
+    metodo_icon = "💜" if es_digital else "💵"
+    cobro_badge = (
+        '<span class="oc-pbadge pagado">✅ Pagado</span>' if es_digital
+        else '<span class="oc-pbadge cobrar">💳 Cobrar al entregar</span>'
     )
 
-    # Dirección / tipo de entrega
     direccion = p.get("direccion") or ""
     es_recojo = direccion.strip().lower() == "recojo"
-    entrega_badge = (
-        '<span class="entrega-badge recojo">🏪 Recojo</span>' if es_recojo
-        else '<span class="entrega-badge delivery">🏍️ Delivery</span>'
-    )
-    if es_recojo:
-        dir_value = "📦 El cliente retira"
-    elif direccion:
-        dir_value = html.escape(direccion)
-    else:
-        dir_value = "Sin especificar"
+    entrega_cls = "recojo" if es_recojo else "delivery"
+    entrega_txt = "🏪 Recojo" if es_recojo else "🏍️ Delivery"
+    dir_label = "📦 Entrega" if es_recojo else "📍 Dirección:"
+    dir_value = "El cliente retira" if es_recojo else (html.escape(direccion) if direccion else "Sin especificar")
     dir_cls = " sin-dir" if (not es_recojo and not direccion) else ""
 
-    # Notas / personalizaciones
     notas = (p.get("notas") or "").strip()
     notas_html = (
-        f'<div class="sec-label">📝 Notas</div>'
-        f'<div class="card-notas">{html.escape(notas)}</div>'
-        if notas else ""
-    )
+        f'<hr class="oc-sep"><div class="oc-section"><div class="oc-sec-title">📝 Notas:</div>'
+        f'<div class="oc-notas-val">{html.escape(notas)}</div></div>'
+    ) if notas else ""
 
-    mod_badge = '<span class="mod-badge">✏️ Mod</span>' if p.get("modificado") else ""
+    mod_badge = '<span class="oc-mod">✏️ Mod</span>' if p.get("modificado") else ""
 
-    # Items con bullets
     items_raw = p.get("items") or ""
     items_list = [i.strip() for i in items_raw.split(",") if i.strip()]
-    items_inner = "".join(f'<div class="item-line">• {html.escape(i)}</div>' for i in items_list) if len(items_list) > 1 else html.escape(items_raw)
+    items_html = "".join(f'<div class="oc-item-line">• {html.escape(i)}</div>' for i in items_list) if len(items_list) > 1 else html.escape(items_raw)
 
-    # Botón siguiente estado
-    if es_recojo and siguiente and siguiente == "En camino 🛵":
-        sig_js_safe = siguiente.replace("'", "\\'")
-        btn_sig = f'<button class="act-btn act-next recojo-next" onclick="cambiarEstado({pid},\'{sig_js_safe}\')">📦 Listo p/retirar</button>'
-    elif siguiente:
-        sig_js = siguiente.replace("'", "\\'")
-        btn_sig = f'<button class="act-btn act-next" onclick="cambiarEstado({pid},\'{sig_js}\')">→ {html.escape(siguiente)}</button>'
-    elif es_cancelado:
-        btn_sig = '<span class="lbl-done">❌ Cancelado</span>'
+    # ── Botones de acción ───────────────────────────────────────
+    if activo:
+        btn_cancel = f'<button class="oa oa-cancel" onclick="cancelarPedido({pid})">❌ Cancelar</button>'
+        btn_delivery = f'<button class="oa oa-delivery" onclick="llamarDelivery({pid})">🛵 Delivery</button>' if not es_recojo else ""
+        if es_recojo and siguiente and siguiente == "En camino 🛵":
+            sig_js = siguiente.replace("'", "\\'")
+            btn_next = f'<button class="oa oa-next recojo-next" onclick="cambiarEstado({pid},\'{sig_js}\')">📦 Listo p/retirar</button>'
+        elif siguiente:
+            sig_js = siguiente.replace("'", "\\'")
+            btn_next = f'<button class="oa oa-next" onclick="cambiarEstado({pid},\'{sig_js}\')">→ {html.escape(siguiente)}</button>'
+        else:
+            btn_next = ""
     else:
-        btn_sig = '<span class="lbl-done">✅ Entregado</span>'
+        btn_cancel = btn_delivery = ""
+        btn_next = f'<span class="oa-done">{"❌ Cancelado" if es_cancelado else "✅ Entregado"}</span>'
 
-    # Botón cancelar (solo si no está cancelado/entregado)
-    activo = estado not in ("Entregado ✅", "Cancelado ❌")
-    btn_cancel = f'<button class="act-btn act-cancel" onclick="cancelarPedido({pid})" title="Cancelar pedido">✕ Cancelar</button>' if activo else ""
+    btn_del = f'<button class="oa oa-del" onclick="eliminarPedido({pid},this)" title="Eliminar">🗑️</button>'
 
-    # Botón delivery (solo delivery activo + DELIVERIES configurado)
-    btn_delivery = ""
-    if not es_recojo and activo and DELIVERIES:
-        btn_delivery = f'<button class="act-btn act-delivery" onclick="llamarDelivery({pid})" title="Llamar servicio de delivery">🛵 Delivery</button>'
-
-    # Botón eliminar
-    btn_del = f'<button class="act-btn act-del" onclick="eliminarPedido({pid},this)" title="Eliminar">🗑️</button>'
-
-    return f"""<div class="card" id="card-{p['id']}" data-estado="{html.escape(estado)}" data-recojo="{1 if es_recojo else 0}"
-     style="border-left:4px solid {badge_color}">
-  <div class="card-hdr">
-    <div class="card-hdr-row1">
-      <span class="card-num">Pedido #{p['id']}</span>
-      <span class="badge" style="background:{badge_color}">{html.escape(estado)}</span>
+    return f"""<div class="card" id="card-{pid}" data-estado="{html.escape(estado)}" data-recojo="{1 if es_recojo else 0}">
+  <div class="oc-hdr">
+    <div class="oc-hdr-left">
+      <div class="oc-title">Pedido <span class="oc-num">#{pid}</span></div>
+      <div class="oc-meta">🕒 {p['hora']} · +{html.escape(p['phone'])} <span class="oc-entrega {entrega_cls}">{entrega_txt}</span>{mod_badge}</div>
     </div>
-    <div class="card-hdr-row2">
-      <span class="card-meta">🕒 {p['hora']} · +{html.escape(p['phone'])}</span>
-      {entrega_badge}{mod_badge}
+    <span class="oc-status" style="background:{badge_color}">{html.escape(estado)}</span>
+  </div>
+  <div class="oc-progress">{steps_html}</div>
+  <hr class="oc-sep">
+  <div class="oc-section">
+    <div class="oc-sec-title">🌶️ Artículos:</div>
+    <div class="oc-items">{items_html}</div>
+  </div>
+  <hr class="oc-sep">
+  <div class="oc-section">
+    <div class="oc-sec-title">{dir_label}</div>
+    <div class="oc-addr{dir_cls}">{dir_value}</div>
+  </div>
+  {notas_html}
+  <hr class="oc-sep">
+  <div class="oc-payment">
+    <span class="oc-total">{html.escape(p['total'])}</span>
+    <div class="oc-pay-badges">
+      <span class="oc-pbadge {metodo_cls}">{metodo_icon} {html.escape(metodo)}</span>
+      {cobro_badge}
     </div>
   </div>
-  <div class="progress-row">{steps_html}</div>
-  <div class="card-body">
-    <div class="sec-label">🌶️ Artículos</div>
-    <div class="card-items">{items_inner}</div>
-    <div class="sec-label">📍 {'Entrega' if es_recojo else 'Dirección'}</div>
-    <div class="card-dir{dir_cls}">{dir_value}</div>
-    {notas_html}
-  </div>
-  <div class="card-payment">
-    <span class="card-total">{html.escape(p['total'])}</span>
-    <span class="pago-badge" style="background:{pago_color}">{pago_emoji} {html.escape(metodo)}</span>
-    {pago_estado_html}
-  </div>
-  <div class="card-actions">
-    {btn_cancel}{btn_delivery}{btn_sig}{btn_del}
-  </div>
+  <div class="oc-actions">{btn_cancel}{btn_delivery}{btn_next}{btn_del}</div>
 </div>"""
 
 
@@ -620,69 +591,95 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgro
 /* ── Grid de tarjetas ── */
 .grid{{padding:14px;display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:12px;max-width:1100px;margin:0 auto}}
 
+/* ══ Variables de marca Chilango ══════════════════════════════ */
+:root{{
+  --ch-red:#D32F2F;       /* rojo vibrante */
+  --ch-red-bg:#FFEBEE;
+  --ch-yellow:#F9A825;    /* amarillo dorado */
+  --ch-yellow-bg:#FFFDE7;
+  --ch-green:#2E7D32;     /* verde menta */
+  --ch-green-bg:#E8F5E9;
+  --ch-purple:#6A1B9A;    /* morado oscuro */
+  --ch-purple-bg:#F3E5F5;
+  --ch-blue:#1565C0;      /* azul vibrante */
+  --ch-blue-bg:#E3F2FD;
+  --ch-orange:#E65100;
+  --ch-orange-bg:#FFF3E0;
+  --ch-text:#333;
+  --ch-text2:#555;
+  --ch-text3:#888;
+  --ch-border:#EEEEEE;
+  --ch-shadow:0 3px 14px rgba(0,0,0,.10);
+}}
+
 /* ── Tarjeta ── */
-.card{{border-radius:14px;background:#fff;box-shadow:0 2px 8px rgba(0,0,0,.09);transition:box-shadow .2s,opacity .3s;overflow:hidden}}
-.card:hover{{box-shadow:0 4px 18px rgba(0,0,0,.14)}}
+.card{{border-radius:16px;background:#fff;box-shadow:var(--ch-shadow);transition:box-shadow .2s,opacity .3s;overflow:hidden;font-family:'Segoe UI',system-ui,sans-serif}}
+.card:hover{{box-shadow:0 6px 24px rgba(0,0,0,.14)}}
 .card.hidden{{display:none}}
 
-/* Header de tarjeta */
-.card-hdr{{padding:12px 14px 10px;border-bottom:1px solid #f0f0f0}}
-.card-hdr-row1{{display:flex;align-items:center;justify-content:space-between;margin-bottom:4px}}
-.card-hdr-row2{{display:flex;align-items:center;gap:6px;flex-wrap:wrap}}
-.card-num{{font-size:16px;font-weight:800;color:#1a1a1a;letter-spacing:-.3px}}
-.badge{{font-size:11px;color:#fff;padding:4px 11px;border-radius:20px;font-weight:800;white-space:nowrap;letter-spacing:.2px}}
-.card-meta{{font-size:12px;color:#777}}
-.mod-badge{{font-size:10px;background:#e65100;color:#fff;padding:2px 7px;border-radius:20px;font-weight:700}}
-.entrega-badge{{font-size:10px;padding:2px 8px;border-radius:20px;font-weight:700;white-space:nowrap}}
-.entrega-badge.delivery{{background:#0277bd;color:#fff}}
-.entrega-badge.recojo{{background:#6a1b9a;color:#fff}}
+/* Header */
+.oc-hdr{{padding:14px 16px 10px;border-bottom:1px solid var(--ch-border);display:flex;align-items:flex-start;justify-content:space-between;gap:10px}}
+.oc-hdr-left{{min-width:0}}
+.oc-title{{font-size:16px;font-weight:800;color:var(--ch-text);letter-spacing:-.2px;line-height:1.2}}
+.oc-num{{color:var(--ch-red)}}
+.oc-meta{{font-size:11px;color:var(--ch-text3);margin-top:4px;display:flex;align-items:center;gap:5px;flex-wrap:wrap}}
+.oc-status{{font-size:11px;font-weight:800;color:#fff;padding:5px 13px;border-radius:20px;white-space:nowrap;letter-spacing:.3px;flex-shrink:0}}
+.oc-entrega{{font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;white-space:nowrap}}
+.oc-entrega.delivery{{background:#E3F2FD;color:var(--ch-blue)}}
+.oc-entrega.recojo{{background:var(--ch-purple-bg);color:var(--ch-purple)}}
+.oc-mod{{font-size:10px;background:var(--ch-orange-bg);color:var(--ch-orange);padding:2px 7px;border-radius:20px;font-weight:700}}
 .nav-badge{{background:#e53935;color:#fff;border-radius:10px;min-width:18px;height:18px;font-size:10px;font-weight:700;display:none;align-items:center;justify-content:center;padding:0 5px;margin-left:5px;vertical-align:middle;line-height:18px}}
 
 /* Progress */
-.progress-row{{display:flex;align-items:center;padding:10px 14px 8px}}
-.step{{display:flex;flex-direction:column;align-items:center;font-size:9px;color:#bbb;gap:3px;min-width:0}}
-.step span{{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:52px}}
-.sdot{{width:10px;height:10px;border-radius:50%;background:#ddd;transition:background .3s}}
-.s-done .sdot{{background:#2D5016}}
-.s-active .sdot{{background:#f57f17;box-shadow:0 0 0 3px rgba(245,127,23,.25)}}
-.s-done span,.s-active span{{color:#333;font-weight:600}}
-.sline{{flex:1;height:2px;background:#ddd;margin:0 2px;margin-bottom:12px}}
-.line-done{{background:#2D5016}}
+.oc-progress{{display:flex;align-items:center;padding:10px 16px 8px}}
+.oc-step{{display:flex;flex-direction:column;align-items:center;gap:4px;min-width:0}}
+.oc-step span{{font-size:9px;color:#ccc;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:54px;text-align:center}}
+.oc-dot{{width:12px;height:12px;border-radius:50%;background:#E0E0E0;transition:background .3s}}
+.oc-step.s-done .oc-dot{{background:var(--ch-green)}}
+.oc-step.s-active .oc-dot{{background:var(--ch-red);box-shadow:0 0 0 3px rgba(211,47,47,.2)}}
+.oc-step.s-done span,.oc-step.s-active span{{color:var(--ch-text);font-weight:700}}
+.oc-line{{flex:1;height:2px;background:#E0E0E0;margin:0 3px;margin-bottom:14px}}
+.oc-line.done{{background:var(--ch-green)}}
 
-/* Secciones internas */
-.card-body{{padding:0 14px 10px}}
-.sec-label{{font-size:10px;font-weight:700;color:#aaa;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px;margin-top:10px}}
-.card-items{{font-size:13px;color:#222;line-height:1.5;word-break:break-word}}
-.item-line{{padding:1px 0}}
-.card-dir{{font-size:13px;color:#333}}
-.card-dir.sin-dir{{color:#bbb;font-style:italic}}
-.card-notas{{font-size:12px;color:#888;font-style:italic}}
+/* Separador punteado */
+.oc-sep{{border:none;border-top:1px dashed #E8E8E8;margin:0 16px}}
 
-/* Pago */
-.card-payment{{display:flex;align-items:center;gap:8px;padding:8px 14px;border-top:1px solid #f0f0f0;border-bottom:1px solid #f0f0f0;flex-wrap:wrap}}
-.card-total{{font-size:18px;font-weight:800;color:#2D5016;flex:1}}
-.pago-badge{{font-size:11px;color:#fff;padding:3px 10px;border-radius:20px;font-weight:700}}
-.pago-estado{{font-size:11px;padding:2px 8px;border-radius:20px;font-weight:700}}
-.pago-estado.pagado{{background:#e8f5e9;color:#2e7d32;border:1px solid #a5d6a7}}
-.pago-estado.pendiente{{background:#fff3e0;color:#e65100;border:1px solid #ffcc80}}
+/* Secciones */
+.oc-section{{padding:10px 16px}}
+.oc-sec-title{{font-size:11px;font-weight:700;color:var(--ch-text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px}}
+.oc-items{{font-size:13px;color:var(--ch-text);line-height:1.6;word-break:break-word}}
+.oc-item-line{{padding:1px 0}}
+.oc-addr{{font-size:13px;color:var(--ch-text)}}
+.oc-addr.sin-dir{{color:#ccc;font-style:italic}}
+.oc-notas-val{{font-size:12px;color:var(--ch-text2);font-style:italic}}
+
+/* Resumen pago */
+.oc-payment{{display:flex;align-items:center;justify-content:space-between;padding:10px 16px;gap:8px;flex-wrap:wrap}}
+.oc-total{{font-size:21px;font-weight:900;color:var(--ch-purple);letter-spacing:-.5px}}
+.oc-pay-badges{{display:flex;gap:6px;flex-wrap:wrap;align-items:center}}
+.oc-pbadge{{font-size:11px;font-weight:700;padding:4px 11px;border-radius:20px;display:inline-flex;align-items:center;gap:4px}}
+.oc-pbadge.metodo-efectivo{{background:var(--ch-green-bg);color:var(--ch-green);border:1px solid #C8E6C9}}
+.oc-pbadge.metodo-yape{{background:var(--ch-purple-bg);color:var(--ch-purple);border:1px solid #CE93D8}}
+.oc-pbadge.cobrar{{background:var(--ch-yellow-bg);color:#F57F17;border:1px solid #FFE082}}
+.oc-pbadge.pagado{{background:var(--ch-green-bg);color:var(--ch-green);border:1px solid #C8E6C9}}
 
 /* Barra de acciones */
-.card-actions{{display:flex;border-top:1px solid #f0f0f0}}
-.act-btn{{flex:1;border:none;padding:11px 6px;font-size:12px;font-weight:700;cursor:pointer;transition:background .15s,opacity .1s;display:flex;align-items:center;justify-content:center;gap:4px}}
-.act-btn:active{{opacity:.7}}
-.act-btn + .act-btn{{border-left:1px solid #f0f0f0}}
-.act-cancel{{background:#fff;color:#c62828}}
-.act-cancel:hover{{background:#fce4ec}}
-.act-delivery{{background:#fff;color:#e65100}}
-.act-delivery:hover{{background:#fff3e0}}
-.act-next{{background:#2D5016;color:#fff;border-radius:0 0 14px 0}}
-.act-next:hover{{background:#3a6b1e}}
-.act-next:disabled{{background:#aaa;cursor:not-allowed}}
-.act-next.recojo-next{{background:#6a1b9a}}
-.act-next.recojo-next:hover{{background:#7b1fa2}}
-.act-del{{background:#fff;color:#999;flex:0 0 44px}}
-.act-del:hover{{background:#fce4ec;color:#c62828}}
-.lbl-done{{font-size:12px;color:#aaa;font-weight:600;padding:11px 14px}}
+.oc-actions{{display:flex;border-top:1px solid var(--ch-border)}}
+.oa{{flex:1;border:none;padding:12px 6px;font-size:12px;font-weight:700;cursor:pointer;background:#fff;color:var(--ch-text);display:flex;align-items:center;justify-content:center;gap:4px;transition:background .15s,opacity .1s}}
+.oa:active{{opacity:.7}}
+.oa+.oa{{border-left:1px solid var(--ch-border)}}
+.oa-cancel{{color:var(--ch-red)}}
+.oa-cancel:hover{{background:var(--ch-red-bg)}}
+.oa-delivery{{color:var(--ch-orange)}}
+.oa-delivery:hover{{background:var(--ch-orange-bg)}}
+.oa-next{{background:var(--ch-blue);color:#fff;border-radius:0 0 16px 0}}
+.oa-next:hover{{background:#1976D2}}
+.oa-next:disabled{{background:#bbb;cursor:not-allowed}}
+.oa-next.recojo-next{{background:var(--ch-purple)}}
+.oa-next.recojo-next:hover{{background:#7B1FA2}}
+.oa-del{{flex:0 0 44px;color:#ccc}}
+.oa-del:hover{{background:var(--ch-red-bg);color:var(--ch-red)}}
+.oa-done{{padding:12px 16px;font-size:12px;color:#bbb;font-weight:600}}
 
 /* ── Misc ── */
 .empty{{text-align:center;padding:60px 20px;color:#aaa;font-size:15px;grid-column:1/-1}}
@@ -743,16 +740,24 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgro
 <div class="footer-note" id="lastRefresh">🔄 Actualización automática cada 10 s</div>
 <div class="toast" id="toast">🔔 Nuevo pedido llegó</div>
 
-<!-- Modal selección delivery -->
+<!-- Modal selección/envío delivery -->
 <div class="dlv-overlay" id="dlvModal" onclick="if(event.target===this)closeDlvModal()">
   <div class="dlv-box">
-    <h3>🛵 ¿A qué servicio de delivery?</h3>
+    <h3>🛵 Llamar delivery</h3>
     <input type="hidden" id="dlvOrderId" value="">
-    {"".join(
-        f'<div class="dlv-option"><input type="radio" name="dlvChoice" id="dlv{i}" value="{d["phone"]}" {"checked" if i==0 else ""}>'
-        f'<label for="dlv{i}">{html.escape(d["name"])}</label></div>'
-        for i, d in enumerate(DELIVERIES)
-    )}
+    <div id="dlvOpts">
+      {"".join(
+          f'<div class="dlv-option"><input type="radio" name="dlvChoice" id="dlv{i}" value="{d["phone"]}" {"checked" if i==0 else ""}>'
+          f'<label for="dlv{i}">{html.escape(d["name"])}</label></div>'
+          for i, d in enumerate(DELIVERIES)
+      )}
+    </div>
+    <div id="dlvManual" style="{'display:none' if DELIVERIES else ''}">
+      <p style="font-size:13px;color:#777;margin-bottom:8px">Número WhatsApp del motorizado (sin +):</p>
+      <input id="dlvPhoneInput" type="tel" placeholder="ej: 51987654321"
+             style="width:100%;border:1px solid #ccc;border-radius:8px;padding:9px 12px;font-size:14px;outline:none"
+             onkeydown="if(event.key==='Enter')confirmarDelivery()">
+    </div>
     <div class="dlv-btns">
       <button class="dlv-cancel" onclick="closeDlvModal()">Cancelar</button>
       <button class="dlv-confirm" onclick="confirmarDelivery()">📤 Enviar</button>
@@ -865,19 +870,29 @@ async function eliminarPedido(id, btnEl) {{
 
 /* ── Llamar delivery ── */
 function llamarDelivery(orderId) {{
-  if (!DELIVERIES || DELIVERIES.length === 0) {{
-    alert('No hay servicio de delivery configurado.\nAgrega DELIVERY_1_PHONE en las variables de Railway.');
-    return;
-  }}
-  if (DELIVERIES.length === 1) {{
-    // Un solo delivery → confirmar y enviar directo
-    if (!confirm('¿Enviar solicitud a ' + DELIVERIES[0].name + ' para el pedido #' + orderId + '?')) return;
-    _enviarDelivery(orderId, DELIVERIES[0].phone, DELIVERIES[0].name);
+  document.getElementById('dlvOrderId').value = orderId;
+  // Regenerar opciones del modal según configuración actual
+  const optsEl = document.getElementById('dlvOpts');
+  optsEl.innerHTML = '';
+  if (DELIVERIES && DELIVERIES.length > 0) {{
+    // Hay deliveries pre-configurados: mostrar botones de selección
+    document.getElementById('dlvManual').style.display = 'none';
+    DELIVERIES.forEach((d, i) => {{
+      optsEl.innerHTML += `<div class="dlv-option">
+        <input type="radio" name="dlvChoice" id="dlv${{i}}" value="${{d.phone}}" ${{i===0?'checked':''}}>
+        <label for="dlv${{i}}">${{d.name}}</label>
+      </div>`;
+    }});
   }} else {{
-    // Varios deliveries → mostrar modal de selección
-    document.getElementById('dlvOrderId').value  = orderId;
-    document.getElementById('dlvModal').style.display = 'flex';
+    // Sin configuración: mostrar input manual
+    document.getElementById('dlvManual').style.display = 'block';
+    document.getElementById('dlvPhoneInput').value = '';
   }}
+  document.getElementById('dlvModal').style.display = 'flex';
+  setTimeout(() => {{
+    const inp = document.getElementById('dlvPhoneInput');
+    if (inp && inp.offsetParent) inp.focus();
+  }}, 100);
 }}
 
 async function _enviarDelivery(orderId, phone, name) {{
@@ -906,126 +921,124 @@ function closeDlvModal() {{
 
 function confirmarDelivery() {{
   const orderId = +document.getElementById('dlvOrderId').value;
-  const sel = document.querySelector('input[name="dlvChoice"]:checked');
-  if (!sel) {{ alert('Selecciona un servicio de delivery'); return; }}
-  const d = DELIVERIES.find(d => d.phone === sel.value);
+  let phone, name;
+  const manualDiv = document.getElementById('dlvManual');
+  if (manualDiv && manualDiv.style.display !== 'none') {{
+    // Modo manual: leer número del input
+    phone = (document.getElementById('dlvPhoneInput').value || '').trim().replace(/[^0-9]/g,'');
+    if (!phone || phone.length < 8) {{ alert('Ingresa un número de WhatsApp válido (solo dígitos)'); return; }}
+    name = 'Delivery';
+  }} else {{
+    const sel = document.querySelector('input[name="dlvChoice"]:checked');
+    if (!sel) {{ alert('Selecciona un servicio de delivery'); return; }}
+    const d = DELIVERIES.find(d => d.phone === sel.value);
+    phone = d.phone; name = d.name;
+  }}
   closeDlvModal();
-  _enviarDelivery(orderId, d.phone, d.name);
+  _enviarDelivery(orderId, phone, name);
 }}
 
 /* ── Construir tarjeta desde JSON ── */
 function buildCard(p) {{
   const estado   = p.estado || 'Nuevo 🆕';
-  const bg       = BG_CLR[estado]    || '#f5f5f5';
   const badgeClr = BADGE_CLR[estado] || '#666';
   const sIdx     = STEP_IDX[estado] !== undefined ? STEP_IDX[estado] : -1;
 
+  // Progress steps
   const steps = STEP_LBL.map((lbl, i) => {{
-    const cls = i < sIdx ? 's-done' : (i === sIdx ? 's-active' : 's-pending');
-    const line = i < STEP_LBL.length-1
-      ? `<div class="sline ${{i < sIdx ? 'line-done' : 'line-pending'}}"></div>`
+    const cls  = i < sIdx ? 'oc-step s-done' : (i === sIdx ? 'oc-step s-active' : 'oc-step');
+    const line = i < STEP_LBL.length - 1
+      ? `<div class="oc-line${{i < sIdx ? ' done' : ''}}"></div>`
       : '';
-    return `<div class="step ${{cls}}"><div class="sdot"></div><span>${{lbl}}</span></div>${{line}}`;
+    return `<div class="${{cls}}"><div class="oc-dot"></div><span>${{lbl}}</span></div>${{line}}`;
   }}).join('');
 
-  // siguiente_estado viene calculado por el servidor (evita bug de emoji encoding en JS)
-  const siguiente  = p.siguiente_estado || null;
-  const es_cancel  = estado === 'Cancelado ❌';
-  const esRecojo   = (p.es_recojo === true || p.es_recojo === 1);
+  const esRecojo  = (p.es_recojo === true || p.es_recojo === 1);
+  const es_cancel = estado === 'Cancelado ❌';
+  const esActivo  = !['Entregado ✅','Cancelado ❌'].includes(estado);
+  const siguiente = p.siguiente_estado || null;
 
-  // Botón siguiente: para recojo en preparación el botón dice "Listo p/retirar"
-  let btnSig;
-  if (siguiente) {{
-    const esSiguienteCamino = p.siguiente_estado_raw === 'En camino 🛵';
-    const lblBtn = (esRecojo && esSiguienteCamino) ? '📦 Listo p/retirar' : `→ ${{esc(siguiente)}}`;
-    const clsBtn = (esRecojo && esSiguienteCamino) ? 'btn-next recojo-next' : 'btn-next';
-    btnSig = `<button class="${{clsBtn}}" data-next="${{esc(p.siguiente_estado_raw || siguiente)}}" onclick="cambiarEstado(${{p.id}},this.dataset.next)">${{lblBtn}}</button>`;
-  }} else {{
-    btnSig = es_cancel ? `<span class="lbl-done" style="color:#c62828">Cancelado</span>` : `<span class="lbl-done">✅ Completado</span>`;
-  }}
-
-  const metodo    = p.metodo_pago || 'Efectivo';
-  const pagoClr   = {{'Yape/Plin':'#6c3d98',Yape:'#6c3d98',Plin:'#6c3d98',Efectivo:'#2D5016'}}[metodo] || '#555';
-  const pagoEmoji = {{'Yape/Plin':'💜',Yape:'💜',Plin:'💜',Efectivo:'💵'}}[metodo] || '💳';
-  const esDigital = ['Yape/Plin','Yape','Plin'].includes(metodo);
-  const pagoEstadoHtml = esDigital
-    ? `<span class="pago-estado pagado">✅ Pagado</span>`
-    : `<span class="pago-estado pendiente">💵 Cobrar al entregar</span>`;
-
-  const entregaBadge = esRecojo
-    ? `<span class="entrega-badge recojo">🏪 Recojo</span>`
-    : `<span class="entrega-badge delivery">🏍️ Delivery</span>`;
-
-  let dirValue, dirCls = '';
-  if (esRecojo) {{ dirValue = '📦 El cliente retira'; }}
-  else if (p.direccion) {{ dirValue = esc(p.direccion); }}
-  else {{ dirValue = 'Sin especificar'; dirCls = ' sin-dir'; }}
-
-  const notasHtml = (p.notas || '').trim()
-    ? `<div class="sec-label">📝 Notas</div><div class="card-notas">${{esc(p.notas)}}</div>`
-    : '';
-
-  const modBadge = p.modificado ? `<span class="mod-badge">✏️ Mod</span>` : '';
+  // Header badges
+  const entregaCls = esRecojo ? 'recojo' : 'delivery';
+  const entregaTxt = esRecojo ? '🏪 Recojo' : '🏍️ Delivery';
+  const modBadge   = p.modificado ? `<span class="oc-mod">✏️ Mod</span>` : '';
 
   // Items con bullets
   const itemsList = (p.items || '').split(',').map(s => s.trim()).filter(Boolean);
   const itemsHtml = itemsList.length > 1
-    ? itemsList.map(i => `<div class="item-line">• ${{esc(i)}}</div>`).join('')
+    ? itemsList.map(i => `<div class="oc-item-line">• ${{esc(i)}}</div>`).join('')
     : esc(p.items || '');
 
-  // Botón siguiente estado
-  const esActivo  = !['Entregado ✅','Cancelado ❌'].includes(estado);
-  const esCancelado = estado === 'Cancelado ❌';
-  let btnSigHtml;
-  if (siguiente) {{
-    const esSiguienteCamino = p.siguiente_estado_raw === 'En camino 🛵';
-    const lblBtn  = (esRecojo && esSiguienteCamino) ? '📦 Listo p/retirar' : `→ ${{esc(siguiente)}}`;
-    const clsNext = (esRecojo && esSiguienteCamino) ? 'act-btn act-next recojo-next' : 'act-btn act-next';
-    btnSigHtml = `<button class="${{clsNext}}" data-next="${{esc(p.siguiente_estado_raw || siguiente)}}" onclick="cambiarEstado(${{p.id}},this.dataset.next)">${{lblBtn}}</button>`;
+  // Dirección
+  let dirValue, dirCls = '';
+  if (esRecojo) {{ dirValue = 'El cliente retira'; }}
+  else if (p.direccion) {{ dirValue = esc(p.direccion); }}
+  else {{ dirValue = 'Sin especificar'; dirCls = ' sin-dir'; }}
+  const dirLabel = esRecojo ? '📦 Entrega' : '📍 Dirección:';
+
+  // Notas
+  const notasHtml = (p.notas || '').trim()
+    ? `<hr class="oc-sep"><div class="oc-section"><div class="oc-sec-title">📝 Notas:</div><div class="oc-notas-val">${{esc(p.notas)}}</div></div>`
+    : '';
+
+  // Pago
+  const metodo     = p.metodo_pago || 'Efectivo';
+  const esDigital  = ['Yape/Plin','Yape','Plin'].includes(metodo);
+  const metodoCls  = esDigital ? 'metodo-yape' : 'metodo-efectivo';
+  const pagoEmoji  = esDigital ? '💜' : '💵';
+  const cobroBadge = esDigital
+    ? `<span class="oc-pbadge pagado">✅ Pagado</span>`
+    : `<span class="oc-pbadge cobrar">💳 Cobrar al entregar</span>`;
+
+  // Botones de acción
+  let btnCancelHtml = '', btnDeliveryHtml = '', btnSigHtml = '';
+  if (esActivo) {{
+    btnCancelHtml   = `<button class="oa oa-cancel" onclick="cancelarPedido(${{p.id}})">❌ Cancelar</button>`;
+    btnDeliveryHtml = !esRecojo
+      ? `<button class="oa oa-delivery" onclick="llamarDelivery(${{p.id}})">🛵 Delivery</button>`
+      : '';
+    if (siguiente) {{
+      const esSiguienteCamino = p.siguiente_estado_raw === 'En camino 🛵';
+      const lblBtn  = (esRecojo && esSiguienteCamino) ? '📦 Listo p/retirar' : `→ ${{esc(siguiente)}}`;
+      const clsNext = (esRecojo && esSiguienteCamino) ? 'oa oa-next recojo-next' : 'oa oa-next';
+      btnSigHtml = `<button class="${{clsNext}}" data-next="${{esc(p.siguiente_estado_raw || siguiente)}}" onclick="cambiarEstado(${{p.id}},this.dataset.next)">${{lblBtn}}</button>`;
+    }}
   }} else {{
-    btnSigHtml = esCancelado
-      ? `<span class="lbl-done">❌ Cancelado</span>`
-      : `<span class="lbl-done">✅ Entregado</span>`;
+    btnSigHtml = es_cancel
+      ? `<span class="oa-done">❌ Cancelado</span>`
+      : `<span class="oa-done">✅ Entregado</span>`;
   }}
+  const btnDelHtml = `<button class="oa oa-del" onclick="eliminarPedido(${{p.id}},this)" title="Eliminar">🗑️</button>`;
 
-  const btnCancelHtml = esActivo
-    ? `<button class="act-btn act-cancel" onclick="cancelarPedido(${{p.id}})">✕ Cancelar</button>`
-    : '';
-
-  // Delivery: solo muestra si hay deliveries configurados + es delivery activo
-  const btnDeliveryHtml = (!esRecojo && esActivo && DELIVERIES && DELIVERIES.length > 0)
-    ? `<button class="act-btn act-delivery" onclick="llamarDelivery(${{p.id}})">🛵 Delivery</button>`
-    : '';
-
-  return `<div class="card" id="card-${{p.id}}" data-estado="${{esc(estado)}}" data-recojo="${{esRecojo?1:0}}"
-    style="border-left:4px solid ${{badgeClr}}">
-  <div class="card-hdr">
-    <div class="card-hdr-row1">
-      <span class="card-num">Pedido #${{p.id}}</span>
-      <span class="badge" style="background:${{badgeClr}}">${{esc(estado)}}</span>
+  return `<div class="card" id="card-${{p.id}}" data-estado="${{esc(estado)}}" data-recojo="${{esRecojo?1:0}}">
+  <div class="oc-hdr">
+    <div class="oc-hdr-left">
+      <div class="oc-title">Pedido <span class="oc-num">#${{p.id}}</span></div>
+      <div class="oc-meta">🕒 ${{esc(p.hora)}} · +${{esc(p.phone)}} <span class="oc-entrega ${{entregaCls}}">${{entregaTxt}}</span>${{modBadge}}</div>
     </div>
-    <div class="card-hdr-row2">
-      <span class="card-meta">🕒 ${{esc(p.hora)}} · +${{esc(p.phone)}}</span>
-      ${{entregaBadge}}${{modBadge}}
+    <span class="oc-status" style="background:${{badgeClr}}">${{esc(estado)}}</span>
+  </div>
+  <div class="oc-progress">${{steps}}</div>
+  <hr class="oc-sep">
+  <div class="oc-section">
+    <div class="oc-sec-title">🌶️ Artículos:</div>
+    <div class="oc-items">${{itemsHtml}}</div>
+  </div>
+  <hr class="oc-sep">
+  <div class="oc-section">
+    <div class="oc-sec-title">${{dirLabel}}</div>
+    <div class="oc-addr${{dirCls}}">${{dirValue}}</div>
+  </div>
+  ${{notasHtml}}
+  <hr class="oc-sep">
+  <div class="oc-payment">
+    <span class="oc-total">${{esc(p.total)}}</span>
+    <div class="oc-pay-badges">
+      <span class="oc-pbadge ${{metodoCls}}">${{pagoEmoji}} ${{esc(metodo)}}</span>
+      ${{cobroBadge}}
     </div>
   </div>
-  <div class="progress-row">${{steps}}</div>
-  <div class="card-body">
-    <div class="sec-label">🌶️ Artículos</div>
-    <div class="card-items">${{itemsHtml}}</div>
-    <div class="sec-label">${{esRecojo ? '📦 Entrega' : '📍 Dirección'}}</div>
-    <div class="card-dir${{dirCls}}">${{dirValue}}</div>
-    ${{notasHtml}}
-  </div>
-  <div class="card-payment">
-    <span class="card-total">${{esc(p.total)}}</span>
-    <span class="pago-badge" style="background:${{pagoClr}}">${{pagoEmoji}} ${{esc(metodo)}}</span>
-    ${{pagoEstadoHtml}}
-  </div>
-  <div class="card-actions">
-    ${{btnCancelHtml}}${{btnDeliveryHtml}}${{btnSigHtml}}
-    <button class="act-btn act-del" onclick="eliminarPedido(${{p.id}},this)" title="Eliminar">🗑️</button>
-  </div>
+  <div class="oc-actions">${{btnCancelHtml}}${{btnDeliveryHtml}}${{btnSigHtml}}${{btnDelHtml}}</div>
 </div>`;
 }}
 

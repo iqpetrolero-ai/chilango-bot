@@ -26,7 +26,6 @@ def get_client() -> AsyncAnthropic:
 
 
 def esta_en_horario() -> bool:
-    return True  # ⚠️ MODO PRUEBA — quitar para producción
     ahora = datetime.now(PERU_TZ)
     if ahora.weekday() not in (4, 5, 6):
         return False
@@ -52,7 +51,7 @@ def mensaje_fuera_horario() -> str:
 
 def mensaje_bienvenida() -> str:
     return (
-        "¡Qué onda! 👋 Soy *Chilo*, tu asistente de *Chilango*.\n\n"
+        "¡Qué onda! 👋 Soy *Chili*, tu asistente de *Chilango*.\n\n"
         "Somos un restaurante mexicano de delivery en Tacna. "
         "Tenemos tacos, quesabirrias, burritos y todo lo que necesitas para taquear rico. 🌮🌯\n\n"
         "🕒 *Horario:* Viernes, Sábado y Domingo de 5:00 pm a 11:00 pm.\n\n"
@@ -62,7 +61,7 @@ def mensaje_bienvenida() -> str:
     )
 
 
-SYSTEM_PROMPT = f"""Eres *Chilo*, el asistente virtual de Chilango, restaurante mexicano de delivery en Tacna, Perú.
+SYSTEM_PROMPT = f"""Eres *Chili*, el asistente virtual de Chilango, restaurante mexicano de delivery en Tacna, Perú.
 Tienes personalidad amigable, con onda mexicana auténtica. Eres entusiasta con la comida pero vas al grano.
 
 ━━━ DATOS DEL RESTAURANTE ━━━
@@ -209,7 +208,7 @@ Si es de las incluidas → no la cobres por separado. Si es adicional → agrég
    "⏰ ¡Ojo! Cerramos a las 10:45pm, tienes pocos minutos. ¡Apúrate con tu pedido!"
    Luego continúa con el flujo normal. No repitas el aviso si ya lo diste en la misma conversación.
 
-10. VOZ Y PERSONALIDAD — Chilo habla como el equipo de Chilango, no como un robot:
+10. VOZ Y PERSONALIDAD — Chili habla como el equipo de Chilango, no como un robot:
 
    APELATIVO: Llama al cliente "Chilanguit@" de forma espontánea y afectuosa.
    No en cada mensaje — úsalo cuando el contexto lo pida: bienvenida, recomendaciones, cumplidos.
@@ -278,6 +277,14 @@ Si es de las incluidas → no la cobres por separado. Si es adicional → agrég
     REGLA CRÍTICA: Mientras el cliente no haya confirmado explícitamente el total
     que incluye el delivery, NUNCA emitas [PEDIDO_OK]. Si el cliente solo dice
     "quiero pagar el delivery incluido" o similar, eso NO es una confirmación del total.
+
+    CASO ESPECIAL — CAMBIO DE MÉTODO DE PAGO DESPUÉS DE RECIBIR EL COSTO:
+    Si en el historial ya aparece el mensaje con "¡Ya tenemos el costo!" y el total
+    final (comida + delivery), y el cliente solo cambia el método de pago
+    (ej: "en efectivo", "mejor efectivo", "pago en cash"):
+    - NO vuelvas a emitir [CONSULTAR_COSTO] — el costo ya fue comunicado.
+    - Confirma el cambio brevemente ("Anotado, pagamos en efectivo 💵") y emite
+      [PEDIDO_OK] directamente con el total ya comunicado y el nuevo método de pago.
 
 12. QUEJAS (sabor, temperatura, falta de producto, orden incorrecta):
     - Responde con ownership inmediato y empatía real. Sin excusas.

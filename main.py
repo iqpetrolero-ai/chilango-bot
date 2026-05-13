@@ -70,8 +70,12 @@ SALUDOS_GENERICOS = {"hola", "buenas", "buenos días", "buenas tardes", "buenas 
 _processed_msg_ids: set[str] = set()
 
 
-async def send_whatsapp_message(to: str, text: str, phone_number_id: str = None):
+async def send_whatsapp_message(to: str, text: str, phone_number_id: str = None) -> bool:
+    """Envía mensaje WA. Retorna True si fue exitoso, False si hubo error."""
     pid = phone_number_id or META_PHONE_NUMBER_ID
+    if not pid or not META_ACCESS_TOKEN:
+        print(f"[ERROR META] META_ACCESS_TOKEN o META_PHONE_NUMBER_ID no configurados")
+        return False
     url = f"https://graph.facebook.com/v19.0/{pid}/messages"
     headers = {
         "Authorization": f"Bearer {META_ACCESS_TOKEN}",
@@ -83,10 +87,17 @@ async def send_whatsapp_message(to: str, text: str, phone_number_id: str = None)
         "type": "text",
         "text": {"body": text},
     }
-    async with httpx.AsyncClient() as client:
-        resp = await client.post(url, json=payload, headers=headers)
-        if resp.status_code != 200:
-            print(f"[ERROR META] {resp.status_code} {resp.text}")
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(url, json=payload, headers=headers)
+            if resp.status_code != 200:
+                err = resp.json().get("error", {})
+                print(f"[ERROR META] {resp.status_code} | código {err.get('code')} | {err.get('message', resp.text)}")
+                return False
+            return True
+    except Exception as e:
+        print(f"[ERROR META] Excepción al enviar WA a {to}: {e}")
+        return False
 
 
 async def send_whatsapp_document(to: str, caption: str, doc_url: str, phone_number_id: str = None):
@@ -517,8 +528,7 @@ def _render_card(p: dict) -> str:
     if activo:
         btn_cancel = f'<button class="oa oa-cancel" onclick="cancelarPedido({pid})">❌ Cancelar</button>'
         btn_delivery = f'<button class="oa oa-delivery" onclick="llamarDelivery({pid})">🛵 Delivery</button>' if not es_recojo else ""
-        delivery_cotizado = "delivery" in items_raw.lower()
-        btn_cost = f'<button class="oa oa-cost" onclick="consultarCostoDelivery({pid})">💰 ¿Costo?</button>' if (not es_recojo and estado == "Nuevo 🆕" and not delivery_cotizado) else ""
+        btn_cost = ""  # eliminado — la consulta de costo se dispara automáticamente desde el bot
         if es_recojo and siguiente and siguiente == "En camino 🛵":
             sig_js = siguiente.replace("'", "\\'")
             btn_next = f'<button class="oa oa-next recojo-next" onclick="cambiarEstado({pid},\'{sig_js}\')">📦 Listo p/retirar</button>'
@@ -1071,10 +1081,7 @@ function buildCard(p) {{
     btnDeliveryHtml = !esRecojo
       ? `<button class="oa oa-delivery" onclick="llamarDelivery(${{p.id}})">🛵 Delivery</button>`
       : '';
-    const deliveryCotizado = (p.items || '').toLowerCase().includes('delivery');
-    btnCostHtml = (!esRecojo && estado === 'Nuevo 🆕' && !deliveryCotizado)
-      ? `<button class="oa oa-cost" onclick="consultarCostoDelivery(${{p.id}})">💰 ¿Costo?</button>`
-      : '';
+    btnCostHtml = ''; // eliminado — la consulta se dispara automáticamente desde el bot
     if (siguiente) {{
       const esSiguienteCamino = p.siguiente_estado_raw === 'En camino 🛵';
       const lblBtn  = (esRecojo && esSiguienteCamino) ? '📦 Listo p/retirar' : `→ ${{esc(siguiente)}}`;
@@ -1329,7 +1336,9 @@ async def api_llamar_delivery(
     if order.get("notas"):
         mensaje += f"\n📝 {order['notas']}"
 
-    await send_whatsapp_message(target_phone, mensaje)
+    ok = await send_whatsapp_message(target_phone, mensaje)
+    if not ok:
+        return JSONResponse({"status": "error", "msg": f"No se pudo enviar WA a {target_name} ({target_phone}) — revisa logs de Railway"}, status_code=500)
     print(f"[DELIVERY] Solicitud enviada para pedido #{order_id} → {target_name} ({target_phone})")
     return JSONResponse({"status": "ok", "delivery": target_name})
 

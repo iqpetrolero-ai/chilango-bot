@@ -72,15 +72,20 @@ _processed_msg_ids: set[str] = set()
 
 async def send_whatsapp_message(to: str, text: str, phone_number_id: str = None) -> bool:
     """Envía mensaje WA. Retorna True si fue exitoso, False si hubo error."""
-    pid = phone_number_id or META_PHONE_NUMBER_ID
-    if not pid or not META_ACCESS_TOKEN:
-        print(f"[ERROR META] META_ACCESS_TOKEN o META_PHONE_NUMBER_ID no configurados")
+    # Leer siempre en tiempo de ejecución (no al arrancar el módulo)
+    token = os.environ.get("META_ACCESS_TOKEN", "").strip() or META_ACCESS_TOKEN
+    pid   = phone_number_id or os.environ.get("META_PHONE_NUMBER_ID", "").strip() or META_PHONE_NUMBER_ID
+    # Normalizar número: quitar "+" y espacios
+    to_clean = to.replace("+", "").replace(" ", "")
+    if not pid or not token:
+        print(f"[ERROR META] META_ACCESS_TOKEN o META_PHONE_NUMBER_ID no configurados — no se puede enviar a {to_clean}")
         return False
     url = f"https://graph.facebook.com/v19.0/{pid}/messages"
     headers = {
-        "Authorization": f"Bearer {META_ACCESS_TOKEN}",
+        "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
     }
+    to = to_clean
     payload = {
         "messaging_product": "whatsapp",
         "to": to,
@@ -289,6 +294,15 @@ async def handle_message(phone: str, message: str, phone_number_id: str = None):
         db.mark_welcomed(phone)
         bienvenida = mensaje_bienvenida()
         await send_whatsapp_message(phone, bienvenida, sending_id)
+        await send_whatsapp_buttons(
+            phone,
+            "¿Qué hacemos? 👇",
+            [
+                {"id": "ver_carta",    "title": "🌮 Ver carta"},
+                {"id": "hacer_pedido", "title": "🛵 Hacer un pedido"},
+            ],
+            sending_id,
+        )
         if msg_lower not in SALUDOS_GENERICOS and message.strip():
             reply, escalate = await process_message(phone, message)
             await _send_reply(phone, reply, sending_id)
@@ -371,7 +385,13 @@ async def receive_message(request: Request):
             from datetime import datetime, timezone, timedelta
             _PERU_TZ = timezone(timedelta(hours=-5))
             now_ts = datetime.now(_PERU_TZ).strftime("%H:%M")
-            if btn_id == "equipo_si":
+            if btn_id == "ver_carta":
+                db.append_message(phone, "user", "Ver carta", ts=now_ts)
+                await handle_message(phone, "1", phone_number_id)
+            elif btn_id == "hacer_pedido":
+                db.append_message(phone, "user", "Hacer un pedido", ts=now_ts)
+                await handle_message(phone, "2", phone_number_id)
+            elif btn_id == "equipo_si":
                 respuesta = "¡Perfecto! En breve alguien del equipo te escribirá aquí mismo 👨‍💼\nGracias por tu paciencia, Chilanguit@ 🌮"
                 db.append_message(phone, "user",      "Sí, quiero hablar con el equipo", ts=now_ts)
                 db.append_message(phone, "assistant", respuesta, ts=now_ts)
@@ -1336,10 +1356,15 @@ async def api_llamar_delivery(
     if order.get("notas"):
         mensaje += f"\n📝 {order['notas']}"
 
-    ok = await send_whatsapp_message(target_phone, mensaje)
+    # Normalizar número: quitar "+" para la API Meta
+    target_phone_clean = target_phone.replace("+", "").strip()
+    token_ok = bool(os.environ.get("META_ACCESS_TOKEN", "").strip() or META_ACCESS_TOKEN)
+    pid_ok   = bool(os.environ.get("META_PHONE_NUMBER_ID", "").strip() or META_PHONE_NUMBER_ID)
+    print(f"[DELIVERY] Enviando a {target_name} ({target_phone_clean}) | token={token_ok} | pid={pid_ok}")
+    ok = await send_whatsapp_message(target_phone_clean, mensaje)
     if not ok:
-        return JSONResponse({"status": "error", "msg": f"No se pudo enviar WA a {target_name} ({target_phone}) — revisa logs de Railway"}, status_code=500)
-    print(f"[DELIVERY] Solicitud enviada para pedido #{order_id} → {target_name} ({target_phone})")
+        return JSONResponse({"status": "error", "msg": f"No se pudo enviar WA a {target_name} ({target_phone_clean}) — revisa logs de Railway"}, status_code=500)
+    print(f"[DELIVERY] ✅ Solicitud enviada para pedido #{order_id} → {target_name} ({target_phone_clean})")
     return JSONResponse({"status": "ok", "delivery": target_name})
 
 

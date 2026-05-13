@@ -69,6 +69,14 @@ def init_db():
         except Exception:
             pass
 
+        # ── Configuración general del negocio ─────────────────────
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS config (
+                key TEXT PRIMARY KEY,
+                value TEXT DEFAULT ''
+            )
+        """)
+
         # ── Consultas de costo de delivery pendientes ──────────────
         c.execute("""
             CREATE TABLE IF NOT EXISTS delivery_queries (
@@ -403,3 +411,19 @@ def update_customer_points(phone: str, puntos: int):
     """Actualiza los puntos de un cliente."""
     with _conn() as c:
         c.execute("UPDATE customer_profiles SET puntos=? WHERE phone=?", (puntos, phone))
+
+
+# ── Configuración general ─────────────────────────────────────
+
+def get_config(key: str, default: str = "") -> str:
+    with _conn() as c:
+        row = c.execute("SELECT value FROM config WHERE key=?", (key,)).fetchone()
+        return row["value"] if row else default
+
+
+def set_config(key: str, value: str):
+    with _conn() as c:
+        c.execute("""
+            INSERT INTO config (key, value) VALUES (?,?)
+            ON CONFLICT(key) DO UPDATE SET value=excluded.value
+        """, (key, value))

@@ -54,11 +54,9 @@ def mensaje_bienvenida() -> str:
     return (
         "¡Qué onda! 👋 Soy *Chili*, tu asistente de *Chilango*.\n\n"
         "Somos un restaurante mexicano de delivery en Tacna. "
-        "Tenemos tacos, quesabirrias, burritos y todo lo que necesitas para taquear rico. 🌮🌯\n\n"
+        "Tenemos tacos, quesabirrias, burritos y todo lo que necesitas para taquear rico. 🌯\n\n"
         "🕒 *Horario:* Viernes, Sábado y Domingo de 5:00 pm a 11:00 pm.\n\n"
-        "¿Qué te apetece hoy?\n\n"
-        "1️⃣ Ver carta\n"
-        "2️⃣ Hacer un pedido"
+        "¿Qué te apetece hoy?"
     )
 
 
@@ -423,18 +421,20 @@ async def _parse_and_save_order(phone: str, reply: str) -> tuple[str, bool]:
             print(f"[PERFIL] Error al guardar perfil tras PEDIDO_MOD: {e}")
 
     # Consulta automática de costo de delivery al motorizado
-    if "[CONSULTAR_COSTO|" in reply:
+    import re as _re
+    _cc_match = _re.search(r'\[CONSULTAR_COSTO[\s|]([^\]]*)\]', reply, _re.IGNORECASE)
+    if _cc_match:
         try:
-            start = reply.index("[CONSULTAR_COSTO|")
-            end = reply.index("]", start)
-            tag_str = reply[start:end + 1]
-            inner = tag_str[len("[CONSULTAR_COSTO|"):-1]
+            inner   = _cc_match.group(1)
+            tag_start = _cc_match.start()
+            tag_end   = _cc_match.end()
             fields_cc: dict = {}
             for part in inner.split("|"):
                 if ":" in part:
                     k, v = part.split(":", 1)
                     fields_cc[k.strip().lower()] = v.strip()
-            reply = (reply[:start] + reply[end + 1:]).strip()
+            reply = (reply[:tag_start] + reply[tag_end:]).strip()
+            print(f"[CONSULTAR_COSTO] Tag detectado — dir={fields_cc.get('dir')} subtotal={fields_cc.get('subtotal')} pago={fields_cc.get('pago')}")
             await notify_delivery_cost_query(
                 phone_clean,
                 fields_cc.get("dir", ""),

@@ -570,9 +570,26 @@ async def _call_claude(phone: str, messages: list) -> str:
     except Exception as e:
         print(f"[ESPERA] Error al calcular tiempo estimado: {e}")
 
+    # Productos agotados — leer desde BD en cada llamada
+    agotados_ctx = ""
+    try:
+        agotados = db.get_config("productos_agotados", "").strip()
+        if agotados:
+            agotados_ctx = (
+                f"\n\n━━━ PRODUCTOS AGOTADOS HOY ━━━"
+                f"\nLos siguientes productos NO están disponibles hoy: {agotados}"
+                f"\nSi el cliente pide alguno de estos productos:"
+                f"\n- Discúlpate brevemente: 'Hoy no contamos con [producto], disculpa.'"
+                f"\n- Sugiere una alternativa similar del menú."
+                f"\n- NUNCA confirmes ni incluyas en el pedido un producto agotado."
+            )
+    except Exception as e:
+        print(f"[AGOTADOS] Error al leer config: {e}")
+
     system = (
         SYSTEM_PROMPT
         + profile_ctx
+        + agotados_ctx
         + f"\n\n━━━ CONTEXTO ACTUAL ━━━"
         + f"\nHora actual en Tacna: {hora_tacna}"
         + tiempo_ctx

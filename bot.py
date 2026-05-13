@@ -264,9 +264,12 @@ Si es de las incluidas → no la cobres por separado. Si es adicional → agrég
              "🛵 Entendido. El costo de comida es [subtotal+empaque].
               Vamos a consultar el costo de delivery a tu zona y
               te enviamos el total final antes de confirmar. ¡Un momento!"
-             Agrega AL FINAL de tu respuesta (invisible para el cliente):
-             [CONSULTAR_COSTO|dir: <dirección>|subtotal: S/ XX.XX|items: <descripción completa>|pago: <Yape/Plin|Efectivo>]
-             (subtotal = comida + empaque, SIN delivery)
+             ⚠️ OBLIGATORIO — al final de tu respuesta agrega este tag exacto
+             (el sistema lo elimina antes de mostrarlo al cliente, pero SIN él el motorizado
+             no recibe la consulta y el flujo falla):
+             [CONSULTAR_COSTO|dir: <dirección del cliente>|subtotal: S/ XX.XX|items: <descripción>|pago: <Yape/Plin|Efectivo>]
+             Donde subtotal = precio comida + S/ 2.00 empaque, SIN delivery.
+             ⛔ NUNCA omitas el tag [CONSULTAR_COSTO] en este paso — es la acción que activa el sistema.
              ⛔ NO emitas [PEDIDO_OK] ni [PEDIDO_MOD] en este paso.
 
     Paso 2 — El equipo contactará al motorizado y le informará el costo al cliente.

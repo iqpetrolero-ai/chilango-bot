@@ -224,7 +224,6 @@ async def handle_message(phone: str, message: str, phone_number_id: str = None):
                 items_txt    = consulta.get("items", "")
                 pago_txt     = consulta.get("pago", "")
                 client_phone = consulta["client_phone"]
-                wa_client    = f"whatsapp:+{client_phone}"
 
                 msg_cliente = (
                     f"¡Ya tenemos el costo! 🛵\n\n"
@@ -235,10 +234,11 @@ async def handle_message(phone: str, message: str, phone_number_id: str = None):
                     f"¿Confirmamos tu pedido con {pago_txt}? 😊"
                 )
                 # Inyectar en historial para que Claude sepa el total al confirmar
+                # client_phone está en formato "521234567890" (igual que llega del webhook)
                 from datetime import datetime as _dt, timezone as _tz, timedelta as _td
                 _ts = _dt.now(_tz(_td(hours=-5))).strftime("%H:%M")
-                db.append_message(wa_client, "assistant", msg_cliente, ts=_ts)
-                db.mark_unread(wa_client)
+                db.append_message(client_phone, "assistant", msg_cliente, ts=_ts)
+                db.mark_unread(client_phone)
                 await send_whatsapp_message(client_phone, msg_cliente, sending_id)
                 db.delete_delivery_query(consulta["id"])
                 print(f"[DELIVERY COST] S/{costo_delivery} enviado a cliente +{client_phone} — total S/{total_num:.2f}")

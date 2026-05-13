@@ -63,6 +63,11 @@ def init_db():
                 c.execute(migration)
             except Exception:
                 pass  # La columna ya existe
+        # Migración: columna puntos en perfiles de clientes
+        try:
+            c.execute("ALTER TABLE customer_profiles ADD COLUMN puntos INTEGER NOT NULL DEFAULT 0")
+        except Exception:
+            pass
 
         # ── Consultas de costo de delivery pendientes ──────────────
         c.execute("""
@@ -352,3 +357,49 @@ def delete_delivery_query(query_id: int):
     """Elimina la consulta resuelta."""
     with _conn() as c:
         c.execute("DELETE FROM delivery_queries WHERE id=?", (query_id,))
+
+
+# ── Clientes / Programa de puntos ────────────────────────────
+
+def get_customers_with_stats() -> list:
+    """Retorna todos los clientes con conteo de pedidos y total gastado, ordenados por gasto."""
+    import re as _re
+    with _conn() as conn:
+        customers = conn.execute(
+            "SELECT phone, nombre, ultima_dir, ultimo_pedido, ultimo_pago, puntos, updated_at "
+            "FROM customer_profiles ORDER BY updated_at DESC"
+        ).fetchall()
+        orders = conn.execute(
+            "SELECT phone, total FROM orders WHERE estado NOT IN ('Cancelado ❌')"
+        ).fetchall()
+
+    # Calcular estadísticas por teléfono
+    stats: dict = {}
+    for o in orders:
+        ph = o["phone"]
+        if ph not in stats:
+            stats[ph] = {"count": 0, "total": 0.0}
+        stats[ph]["count"] += 1
+        try:
+            m = _re.search(r"(\d+(?:[.,]\d{1,2})?)", (o["total"] or ""))
+            if m:
+                stats[ph]["total"] += float(m.group(1).replace(",", "."))
+        except Exception:
+            pass
+
+    result = []
+    for row in customers:
+        c = dict(row)
+        s = stats.get(c["phone"], {"count": 0, "total": 0.0})
+        c["total_pedidos"] = s["count"]
+        c["total_gastado"] = round(s["total"], 2)
+        result.append(c)
+
+    result.sort(key=lambda x: x["total_gastado"], reverse=True)
+    return result
+
+
+def update_customer_points(phone: str, puntos: int):
+    """Actualiza los puntos de un cliente."""
+    with _conn() as c:
+        c.execute("UPDATE customer_profiles SET puntos=? WHERE phone=?", (puntos, phone))

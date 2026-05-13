@@ -32,11 +32,11 @@ async def _send_whatsapp(to: str, body: str):
 async def notify_delivery_cost_query(phone_client: str, direccion: str,
                                       subtotal: str = "", items: str = "", pago: str = ""):
     """Envía consulta de costo de delivery al motorizado y guarda la consulta pendiente en BD."""
-    delivery_phone = os.environ.get("DELIVERY_1_PHONE", "").strip()
+    delivery_phone = (os.environ.get("DELIVERY_1_PHONE") or os.environ.get("DELIVERY_PHONE", "")).strip()
     if not delivery_phone:
-        print("[CONSULTAR_COSTO] No hay DELIVERY_1_PHONE configurado — no se envió consulta")
+        print("[CONSULTAR_COSTO] No hay DELIVERY_1_PHONE ni DELIVERY_PHONE configurado — no se envió consulta")
         return
-    delivery_name = os.environ.get("DELIVERY_1_NAME", "Delivery").strip()
+    delivery_name = (os.environ.get("DELIVERY_1_NAME") or os.environ.get("DELIVERY_NAME", "Delivery")).strip()
     mensaje = (
         f"¿Cual es el costo a la siguiente dirección?\n"
         f"Dirección: {direccion or 'Sin especificar'}\n"

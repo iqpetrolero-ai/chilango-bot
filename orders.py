@@ -17,16 +17,19 @@ async def _send_whatsapp(to: str, body: str):
     """Envía un mensaje WhatsApp usando la API de Meta."""
     token = os.environ.get("META_ACCESS_TOKEN", "").strip()
     phone_number_id = os.environ.get("META_PHONE_NUMBER_ID", "").strip()
+    to_clean = to.replace("+", "").replace(" ", "")
     if not token or not phone_number_id:
-        print("[WA] META_ACCESS_TOKEN o META_PHONE_NUMBER_ID no configurados")
+        print(f"[WA] ⚠️ META_ACCESS_TOKEN o META_PHONE_NUMBER_ID no configurados — no se envió WA a {to_clean}")
         return
     url = f"https://graph.facebook.com/v19.0/{phone_number_id}/messages"
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-    payload = {"messaging_product": "whatsapp", "to": to, "type": "text", "text": {"body": body}}
+    payload = {"messaging_product": "whatsapp", "to": to_clean, "type": "text", "text": {"body": body}}
     async with httpx.AsyncClient(timeout=10) as client:
         resp = await client.post(url, json=payload, headers=headers)
-        if resp.status_code != 200:
-            print(f"[WA] Error al enviar a {to}: {resp.status_code} {resp.text}")
+        if resp.status_code == 200:
+            print(f"[WA] ✅ Enviado a {to_clean}")
+        else:
+            print(f"[WA] ❌ Error al enviar a {to_clean}: {resp.status_code} {resp.text}")
 
 
 async def notify_delivery_cost_query(phone_client: str, direccion: str,
@@ -34,18 +37,23 @@ async def notify_delivery_cost_query(phone_client: str, direccion: str,
     """Envía consulta de costo de delivery al motorizado y guarda la consulta pendiente en BD."""
     delivery_phone = (os.environ.get("DELIVERY_1_PHONE") or os.environ.get("DELIVERY_PHONE", "")).strip()
     if not delivery_phone:
-        print("[CONSULTAR_COSTO] No hay DELIVERY_1_PHONE ni DELIVERY_PHONE configurado — no se envió consulta")
+        print("[CONSULTAR_COSTO] ⚠️ No hay DELIVERY_1_PHONE ni DELIVERY_PHONE configurado — no se envió consulta")
         return
+    # Normalizar número: quitar "+" para la API Meta
+    delivery_phone_clean = delivery_phone.replace("+", "").strip()
     delivery_name = (os.environ.get("DELIVERY_1_NAME") or os.environ.get("DELIVERY_NAME", "Delivery")).strip()
+    token_ok = bool(os.environ.get("META_ACCESS_TOKEN", "").strip())
+    pid_ok   = bool(os.environ.get("META_PHONE_NUMBER_ID", "").strip())
+    print(f"[CONSULTAR_COSTO] Enviando a {delivery_name} ({delivery_phone_clean}) | token={token_ok} | pid={pid_ok}")
     mensaje = (
         f"¿Cual es el costo a la siguiente dirección?\n"
         f"Dirección: {direccion or 'Sin especificar'}\n"
         f"Cliente: +{phone_client}"
     )
-    await _send_whatsapp(delivery_phone, mensaje)
+    await _send_whatsapp(delivery_phone_clean, mensaje)
     # Guardar consulta pendiente para poder auto-responder al cliente cuando el motorizado conteste
-    db.save_delivery_query(delivery_phone, phone_client, subtotal, items, pago, direccion)
-    print(f"[CONSULTAR_COSTO] Consulta guardada — {delivery_name} ({delivery_phone}) → cliente +{phone_client}")
+    db.save_delivery_query(delivery_phone_clean, phone_client, subtotal, items, pago, direccion)
+    print(f"[CONSULTAR_COSTO] ✅ Consulta guardada — {delivery_name} ({delivery_phone_clean}) → cliente +{phone_client}")
 
 
 def _init_excel():

@@ -221,16 +221,16 @@ async def handle_message(phone: str, message: str, phone_number_id: str = None):
     phone_clean = phone.replace("whatsapp:", "").replace("+", "")
     print(f"[MENSAJE] {phone}: {message}")
 
-    # ── Respuesta del motorizado: no procesar como cliente ──────────────────────
+    # ── Mensajes de números de delivery ─────────────────────────────────────────
     delivery_phones = {d["phone"].replace("+", "") for d in DELIVERIES}
     if phone_clean in delivery_phones:
         delivery_name = next(
             (d["name"] for d in DELIVERIES if d["phone"].replace("+", "") == phone_clean),
             "Motorizado"
         )
-        print(f"[DELIVERY REPLY] {delivery_name} ({phone_clean}): {message}")
+        print(f"[DELIVERY MSG] {delivery_name} ({phone_clean}): {message}")
 
-        # Intentar auto-responder al cliente con el costo total
+        # Si hay consulta pendiente Y el mensaje parece un costo → procesar como respuesta de costo
         consulta = db.get_pending_delivery_query(phone_clean)
         if consulta:
             costo_delivery = _parse_delivery_cost(message)
@@ -249,8 +249,6 @@ async def handle_message(phone: str, message: str, phone_number_id: str = None):
                     f"💰 *Total completo: S/ {total_num:.2f}*\n\n"
                     f"¿Confirmamos tu pedido con {pago_txt}? 😊"
                 )
-                # Inyectar en historial para que Claude sepa el total al confirmar
-                # client_phone está en formato "521234567890" (igual que llega del webhook)
                 from datetime import datetime as _dt, timezone as _tz, timedelta as _td
                 _ts = _dt.now(_tz(_td(hours=-5))).strftime("%H:%M")
                 db.append_message(client_phone, "assistant", msg_cliente, ts=_ts)
@@ -258,15 +256,11 @@ async def handle_message(phone: str, message: str, phone_number_id: str = None):
                 await send_whatsapp_message(client_phone, msg_cliente, sending_id)
                 db.delete_delivery_query(consulta["id"])
                 print(f"[DELIVERY COST] S/{costo_delivery} enviado a cliente +{client_phone} — total S/{total_num:.2f}")
-            else:
-                # No se pudo parsear el número — reenviar al dueño para que lo gestione manualmente
-                aviso = f"🛵 *{delivery_name}* (respuesta sin monto reconocible):\n{message}"
-                await send_whatsapp_message("51954713696", aviso)
-        else:
-            # Sin consulta pendiente — reenviar al dueño
-            aviso = f"🛵 *Respuesta de {delivery_name}:*\n{message}"
-            await send_whatsapp_message("51954713696", aviso)
-        return
+                return  # procesado como costo — no continuar
+
+        # Sin consulta pendiente O mensaje no es un costo → tratar como cliente normal
+        # (el motorizado también puede hacer pedidos)
+        print(f"[DELIVERY MSG] {delivery_name} tratado como cliente para este mensaje")
 
     # Enviar carta como PDF o texto
     if message.strip() == "1" or any(p in msg_lower for p in PALABRAS_CARTA):

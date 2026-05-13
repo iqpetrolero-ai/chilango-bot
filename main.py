@@ -816,6 +816,7 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgro
 <nav class="nav">
   <a href="/pedidos" class="active">📦 Pedidos <span class="nav-badge" id="navBadge" style="display:none">0</span></a>
   <a href="/admin">💬 Conversaciones</a>
+  <a href="/admin/clientes">👥 Clientes</a>
 </nav>
 
 <div class="toolbar">
@@ -1512,6 +1513,176 @@ async def api_conversations(credentials: HTTPBasicCredentials = Depends(verifica
     return JSONResponse({"contacts_html": contacts_html, "convs": conv_clean})
 
 
+@app.get("/admin/clientes", response_class=HTMLResponse)
+async def admin_clientes(credentials: HTTPBasicCredentials = Depends(verificar_admin)):
+    clientes = db.get_customers_with_stats()
+
+    filas = ""
+    for i, c in enumerate(clientes, 1):
+        nombre    = html.escape(c.get("nombre") or "—")
+        phone     = html.escape(c.get("phone") or "")
+        ultima_dir= html.escape(c.get("ultima_dir") or "—")
+        puntos    = int(c.get("puntos") or 0)
+        pedidos   = int(c.get("total_pedidos") or 0)
+        gastado   = float(c.get("total_gastado") or 0)
+        updated   = (c.get("updated_at") or "—")[:16]
+        medal = "🥇" if i == 1 else ("🥈" if i == 2 else ("🥉" if i == 3 else f"{i}"))
+        filas += f"""<tr>
+          <td class="cl-rank">{medal}</td>
+          <td class="cl-phone"><a href="https://wa.me/{phone}" target="_blank">+{phone}</a></td>
+          <td>{nombre}</td>
+          <td class="cl-num">{pedidos}</td>
+          <td class="cl-num cl-total">S/ {gastado:.2f}</td>
+          <td class="cl-pts">
+            <input class="pts-input" type="number" min="0" value="{puntos}"
+              onchange="guardarPuntos('{phone}', this)"
+              onkeydown="if(event.key==='Enter')this.blur()">
+          </td>
+          <td class="cl-date">{updated}</td>
+        </tr>"""
+
+    total_clientes = len(clientes)
+    total_gastado_global = sum(c.get("total_gastado") or 0 for c in clientes)
+
+    return f"""<!DOCTYPE html>
+<html lang="es">
+<head>
+<title>Clientes — Chilango</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+*{{box-sizing:border-box;margin:0;padding:0}}
+body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f0f2f5;min-height:100vh}}
+.hdr{{background:#2D5016;color:white;padding:10px 18px;display:flex;align-items:center;gap:12px;position:sticky;top:0;z-index:50;box-shadow:0 2px 8px rgba(0,0,0,.25)}}
+.hdr-title h1{{font-size:16px;font-weight:700}}
+.hdr-title small{{font-size:11px;opacity:.7}}
+.nav{{background:#1b3a0e;display:flex}}
+.nav a{{color:rgba(255,255,255,.7);text-decoration:none;padding:9px 18px;font-size:13px;transition:background .15s}}
+.nav a:hover,.nav a.active{{color:#fff;background:rgba(255,255,255,.12)}}
+.wrap{{max-width:1100px;margin:0 auto;padding:20px 16px}}
+.stats-bar{{display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap}}
+.stat-chip{{background:white;border-radius:12px;padding:12px 20px;box-shadow:0 1px 4px rgba(0,0,0,.08);text-align:center}}
+.stat-chip .val{{font-size:22px;font-weight:700;color:#2D5016}}
+.stat-chip .lbl{{font-size:11px;color:#888;margin-top:2px}}
+.search-bar{{margin-bottom:14px}}
+.search-bar input{{width:100%;max-width:360px;border:1px solid #ddd;border-radius:10px;padding:9px 14px;font-size:14px;outline:none}}
+.search-bar input:focus{{border-color:#2D5016}}
+.tbl-wrap{{background:white;border-radius:14px;box-shadow:0 1px 4px rgba(0,0,0,.08);overflow:hidden}}
+table{{width:100%;border-collapse:collapse}}
+thead th{{background:#2D5016;color:white;padding:11px 14px;text-align:left;font-size:12px;font-weight:600;white-space:nowrap}}
+tbody tr{{border-bottom:1px solid #f0f0f0;transition:background .1s}}
+tbody tr:hover{{background:#f8fdf5}}
+tbody tr:last-child{{border-bottom:none}}
+td{{padding:10px 14px;font-size:13px;color:#333}}
+.cl-rank{{font-size:16px;text-align:center;width:40px}}
+.cl-phone a{{color:#2D5016;text-decoration:none;font-weight:600}}
+.cl-phone a:hover{{text-decoration:underline}}
+.cl-num{{text-align:right;font-variant-numeric:tabular-nums}}
+.cl-total{{color:#2D5016;font-weight:700}}
+.cl-date{{color:#999;font-size:12px}}
+.pts-input{{width:72px;border:1px solid #ddd;border-radius:8px;padding:5px 8px;font-size:13px;text-align:center;outline:none;transition:border-color .15s}}
+.pts-input:focus{{border-color:#2D5016}}
+.pts-input.saved{{border-color:#4caf50;background:#f0fff4}}
+.pts-input.saving{{border-color:#ff9800}}
+.empty{{text-align:center;padding:48px;color:#aaa;font-size:15px}}
+.toast{{position:fixed;bottom:24px;right:24px;background:#2D5016;color:white;padding:10px 20px;border-radius:10px;font-size:13px;opacity:0;transition:opacity .3s;pointer-events:none;z-index:999}}
+.toast.show{{opacity:1}}
+</style>
+</head>
+<body>
+<div class="hdr">
+  <div class="hdr-title">
+    <h1>🌮 Chilango Bot</h1>
+    <small>Panel de administración</small>
+  </div>
+</div>
+<nav class="nav">
+  <a href="/pedidos">📦 Pedidos</a>
+  <a href="/admin">💬 Conversaciones</a>
+  <a href="/admin/clientes" class="active">👥 Clientes</a>
+</nav>
+<div class="wrap">
+  <div class="stats-bar">
+    <div class="stat-chip"><div class="val">{total_clientes}</div><div class="lbl">Clientes registrados</div></div>
+    <div class="stat-chip"><div class="val">S/ {total_gastado_global:.2f}</div><div class="lbl">Facturación total</div></div>
+    <div class="stat-chip"><div class="val">S/ {(total_gastado_global/total_clientes if total_clientes else 0):.2f}</div><div class="lbl">Ticket promedio</div></div>
+  </div>
+  <div class="search-bar">
+    <input type="text" id="buscar" placeholder="🔍 Buscar por teléfono o nombre..." oninput="filtrar(this.value)">
+  </div>
+  <div class="tbl-wrap">
+    {"<div class='empty'>Aún no hay clientes registrados 🌮</div>" if not clientes else f"""
+    <table id="tablaClientes">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Teléfono</th>
+          <th>Nombre</th>
+          <th style="text-align:right">Pedidos</th>
+          <th style="text-align:right">Total gastado</th>
+          <th style="text-align:center">Puntos 🌟</th>
+          <th>Última actividad</th>
+        </tr>
+      </thead>
+      <tbody id="tbody">{filas}</tbody>
+    </table>"""}
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+<script>
+function showToast(msg) {{
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2200);
+}}
+
+async function guardarPuntos(phone, input) {{
+  input.classList.add('saving');
+  try {{
+    const r = await fetch('/api/clientes/puntos', {{
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {{'Content-Type':'application/json'}},
+      body: JSON.stringify({{phone, puntos: parseInt(input.value) || 0}})
+    }});
+    const d = await r.json();
+    if (d.status === 'ok') {{
+      input.classList.remove('saving');
+      input.classList.add('saved');
+      setTimeout(() => input.classList.remove('saved'), 1500);
+      showToast('✅ Puntos actualizados');
+    }} else {{
+      alert('Error: ' + (d.msg || 'No se pudo guardar'));
+    }}
+  }} catch(e) {{ alert('Error: ' + e.message); }}
+}}
+
+function filtrar(q) {{
+  q = q.toLowerCase();
+  document.querySelectorAll('#tbody tr').forEach(tr => {{
+    const txt = tr.textContent.toLowerCase();
+    tr.style.display = txt.includes(q) ? '' : 'none';
+  }});
+}}
+</script>
+</body>
+</html>"""
+
+
+@app.post("/api/clientes/puntos")
+async def api_actualizar_puntos(
+    request: Request,
+    credentials: HTTPBasicCredentials = Depends(verificar_admin)
+):
+    data  = await request.json()
+    phone = data.get("phone", "").strip()
+    puntos = int(data.get("puntos", 0))
+    if not phone:
+        return JSONResponse({"status": "error", "msg": "phone requerido"}, status_code=400)
+    db.update_customer_points(phone, puntos)
+    return JSONResponse({"status": "ok"})
+
+
 @app.get("/admin", response_class=HTMLResponse)
 async def admin(credentials: HTTPBasicCredentials = Depends(verificar_admin)):
     conversaciones_raw = db.get_conversations_with_status()
@@ -1632,6 +1803,7 @@ async def admin(credentials: HTTPBasicCredentials = Depends(verificar_admin)):
     <div style="background:#1b3a0e;display:flex;">
         <a href="/pedidos" style="color:rgba(255,255,255,.7);text-decoration:none;padding:10px 20px;font-size:14px;">📦 Pedidos <span id="adminNavBadge" style="background:#e53935;color:#fff;border-radius:10px;min-width:18px;height:18px;font-size:10px;font-weight:700;display:none;align-items:center;justify-content:center;padding:0 5px;margin-left:4px;vertical-align:middle;line-height:18px">0</span></a>
         <a href="/admin" style="color:white;text-decoration:none;padding:10px 20px;font-size:14px;background:rgba(255,255,255,.1);">💬 Conversaciones</a>
+        <a href="/admin/clientes" style="color:rgba(255,255,255,.7);text-decoration:none;padding:10px 20px;font-size:14px;">👥 Clientes</a>
     </div>
     <div class="container">
         <div class="sidebar">

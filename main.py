@@ -199,13 +199,31 @@ async def send_escalate_button(phone: str, sending_id: str = None):
 
 
 def _parse_delivery_cost(text: str):
-    """Extrae el monto numérico de la respuesta del motorizado. Ej: '7', 'S/7', '7 soles' → 7.0"""
+    """Extrae el monto numérico de la respuesta del motorizado.
+    Maneja: '7', 'S/7', '7 soles', 'el costo es 8 soles', 'son 10 para esa zona', etc.
+    Retorna None si no encuentra un número razonable (1–300 soles).
+    """
     import re
     t = text.strip().lower()
-    t = re.sub(r's\s*/?\s*', '', t)          # quitar S/
-    t = t.replace("soles", "").replace("sol", "").replace(",", ".")
-    m = re.search(r'\b(\d+(?:\.\d{1,2})?)\b', t)
-    return float(m.group(1)) if m else None
+
+    # 1. Patrón S/ XX.XX (más confiable)
+    m = re.search(r's\s*/\s*(\d+(?:[.,]\d{1,2})?)', t)
+    if m:
+        return float(m.group(1).replace(',', '.'))
+
+    # 2. Patrón "XX soles" o "XX sol"
+    m = re.search(r'(\d+(?:[.,]\d{1,2})?)\s*sol', t)
+    if m:
+        return float(m.group(1).replace(',', '.'))
+
+    # 3. Cualquier número entre 1 y 300 (rango razonable de delivery en Tacna)
+    numeros = re.findall(r'\b(\d+(?:[.,]\d{1,2})?)\b', t)
+    for n in numeros:
+        val = float(n.replace(',', '.'))
+        if 1 <= val <= 300:
+            return val
+
+    return None
 
 
 def _parse_amount(text: str) -> float:
@@ -257,6 +275,28 @@ async def handle_message(phone: str, message: str, phone_number_id: str = None):
                 db.delete_delivery_query(consulta["id"])
                 print(f"[DELIVERY COST] S/{costo_delivery} enviado a cliente +{client_phone} — total S/{total_num:.2f}")
                 return  # procesado como costo — no continuar
+
+            else:
+                # Hay consulta pendiente pero no se pudo extraer un número
+                # → avisar al dueño para gestión manual y notificar al cliente
+                client_phone = consulta["client_phone"]
+                aviso_dueño = (
+                    f"⚠️ *{delivery_name}* respondió a la consulta de costo "
+                    f"pero no se detectó un monto:\n\n\"{message}\"\n\n"
+                    f"Cliente: +{client_phone} — gestiona manualmente."
+                )
+                await send_whatsapp_message("51954713696", aviso_dueño, sending_id)
+                msg_cliente = (
+                    f"🙏 Estamos confirmando el costo de delivery con el motorizado, "
+                    f"en un momento te avisamos. ¡Gracias por tu paciencia!"
+                )
+                from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+                _ts = _dt.now(_tz(_td(hours=-5))).strftime("%H:%M")
+                db.append_message(client_phone, "assistant", msg_cliente, ts=_ts)
+                db.mark_unread(client_phone)
+                await send_whatsapp_message(client_phone, msg_cliente, sending_id)
+                print(f"[DELIVERY COST] No se pudo parsear costo de {delivery_name}: '{message}'")
+                return
 
         # Sin consulta pendiente O mensaje no es un costo → tratar como cliente normal
         # (el motorizado también puede hacer pedidos)
@@ -631,6 +671,8 @@ async def pedidos_panel(
 
     cards = "".join(_render_card(p) for p in pedidos) if pedidos else '<div class="empty">No hay pedidos hoy todavía 🌮</div>'
 
+    agotados_actual = db.get_config("productos_agotados", "")
+
     # Inject Python data as JS constants
     estados_js    = json.dumps(ESTADOS)
     badge_js      = json.dumps(ESTADO_BADGE)
@@ -819,6 +861,16 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgro
     {"".join(f'<option value="{f}" {"selected" if f == fecha_sel else ""}>{f}{" (hoy)" if f == hoy else ""}</option>' for f in fechas_disponibles)}
   </select>
   <button class="btn-test" onclick="probarNotif()">🔔 Probar notificación</button>
+</div>
+
+<div id="agotadosBar" style="background:#fff8e1;border-bottom:1px solid #ffe082;padding:8px 18px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+  <span style="font-size:13px;font-weight:600;color:#e65100">⚠️ Productos agotados hoy:</span>
+  <input id="agotadosInput" type="text" value="{html.escape(agotados_actual)}"
+    placeholder="ej: Chilangazo, Chamoyada de Mango  (dejar vacío si hay todo)"
+    style="flex:1;min-width:220px;border:1px solid #ffcc02;border-radius:8px;padding:6px 12px;font-size:13px;outline:none;background:#fffde7"
+    onkeydown="if(event.key==='Enter')guardarAgotados()">
+  <button onclick="guardarAgotados()" style="background:#e65100;color:white;border:none;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer">Guardar</button>
+  <span id="agotadosStatus" style="font-size:12px;color:#4caf50;display:none">✅ Guardado</span>
 </div>
 
 <div class="filters">
@@ -1236,6 +1288,24 @@ function probarNotif() {{
     .then(r=>r.json())
     .then(()=>alert('✅ Solicitud enviada — revisa logs de Railway'))
     .catch(e=>alert('Error: '+e));
+}}
+
+async function guardarAgotados() {{
+  const val = document.getElementById('agotadosInput').value.trim();
+  try {{
+    const r = await fetch('/api/config/agotados', {{
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {{'Content-Type':'application/json'}},
+      body: JSON.stringify({{value: val}})
+    }});
+    const d = await r.json();
+    if (d.status === 'ok') {{
+      const st = document.getElementById('agotadosStatus');
+      st.style.display = 'inline';
+      setTimeout(() => st.style.display = 'none', 2000);
+    }}
+  }} catch(e) {{ alert('Error: ' + e.message); }}
 }}
 
 // Iniciar polling cada 10 segundos
@@ -1661,6 +1731,18 @@ function filtrar(q) {{
 </script>
 </body>
 </html>"""
+
+
+@app.post("/api/config/agotados")
+async def api_guardar_agotados(
+    request: Request,
+    credentials: HTTPBasicCredentials = Depends(verificar_admin)
+):
+    data = await request.json()
+    value = data.get("value", "").strip()
+    db.set_config("productos_agotados", value)
+    print(f"[CONFIG] Productos agotados actualizados: '{value}'")
+    return JSONResponse({"status": "ok"})
 
 
 @app.post("/api/clientes/puntos")

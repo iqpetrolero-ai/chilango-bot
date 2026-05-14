@@ -57,6 +57,11 @@ DELIVERIES = [
     for _ in [None] if _d2_phone
 ]
 DELIVERY_PHONE = _d1_phone  # backward compat para código existente
+# Mapa rápido phone_clean → nombre para mostrar en panel
+DELIVERY_NAME_MAP: dict[str, str] = {
+    d["phone"].replace("+", "").strip(): d["name"]
+    for d in DELIVERIES if d["phone"]
+}
 
 PALABRAS_CARTA = ["carta", "menu", "menú", "ver carta", "ver menu", "qué tienen", "que tienen"]
 
@@ -298,8 +303,32 @@ async def handle_message(phone: str, message: str, phone_number_id: str = None):
                 print(f"[DELIVERY COST] No se pudo parsear costo de {delivery_name}: '{message}'")
                 return
 
-        # Sin consulta pendiente O mensaje no es un costo → tratar como cliente normal
-        # (el motorizado también puede hacer pedidos)
+        # Sin consulta pendiente → detectar si es confirmación de asignación de delivery
+        # Palabras y frases que indican que el motorizado aceptó el viaje
+        _CONFIRM_WORDS = {
+            "ok", "okay", "okey", "dale", "si", "sí", "listo", "ya", "bueno",
+            "voy", "entendido", "recibido", "confirmado", "vamos", "claro",
+        }
+        _CONFIRM_PHRASES = [
+            "ya voy", "en camino", "ya salgo", "ahí voy", "para alla",
+            "para allá", "saliendo", "voy para", "ya estoy",
+            "en ruta", "ya sali", "ya salí",
+        ]
+        _msg_norm = msg_lower.strip().rstrip("!.¡ ")
+        _es_confirmacion = (
+            _msg_norm in _CONFIRM_WORDS
+            or any(frase in msg_lower for frase in _CONFIRM_PHRASES)
+        )
+        if _es_confirmacion:
+            from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+            _ts = _dt.now(_tz(_td(hours=-5))).strftime("%H:%M")
+            # Guardar en panel de conversaciones como no leído (aparece con punto rojo)
+            db.append_message(phone_clean, "user", f"✅ {message}", ts=_ts)
+            db.mark_unread(phone_clean)
+            print(f"[DELIVERY CONFIRM] {delivery_name} confirmó asignación: '{message}' → visible en panel")
+            return  # Confirmación procesada — no tratar como cliente
+
+        # Ninguna coincidencia → tratar como cliente normal (puede estar pidiendo comida)
         print(f"[DELIVERY MSG] {delivery_name} tratado como cliente para este mensaje")
 
     # Enviar carta como PDF o texto
@@ -1552,10 +1581,13 @@ async def api_conversations(credentials: HTTPBasicCredentials = Depends(verifica
         preview = html.escape(str(preview)[:50])
         badge = "" if leida else f'<div class="contact-unread">{sum(1 for m in mensajes if m["role"] == "user")}</div>'
         unread_class = "" if leida else " unread"
+        es_delivery = phone in DELIVERY_NAME_MAP
+        display_name = f"🛵 {DELIVERY_NAME_MAP[phone]}" if es_delivery else f"+{phone}"
+        avatar = "🛵" if es_delivery else "👤"
         contacts_html += (
             f'<div class="contact{unread_class}" id="c_{html.escape(phone)}" onclick="showChat(\'{html.escape(phone)}\')">'
-            f'<div class="avatar">👤</div>'
-            f'<div class="contact-info"><div class="contact-name">+{html.escape(phone)}</div>'
+            f'<div class="avatar">{avatar}</div>'
+            f'<div class="contact-info"><div class="contact-name">{html.escape(display_name)}</div>'
             f'<div class="contact-preview">{preview}</div></div>{badge}</div>'
         )
     # Mensajes limpios (sin imágenes) + timestamp si existe
@@ -1780,11 +1812,15 @@ async def admin(credentials: HTTPBasicCredentials = Depends(verificar_admin)):
         preview = html.escape(str(preview)[:50])
         badge = "" if leida else f'<div class="contact-unread">{sum(1 for m in mensajes if m["role"] == "user")}</div>'
         unread_class = "" if leida else " unread"
+        # Mostrar nombre del motorizado si es delivery, si no mostrar número
+        es_delivery = phone in DELIVERY_NAME_MAP
+        display_name = f"🛵 {DELIVERY_NAME_MAP[phone]}" if es_delivery else f"+{phone}"
+        avatar = "🛵" if es_delivery else "👤"
         contacts_html += f"""
         <div class="contact{unread_class}" id="c_{html.escape(phone)}" onclick="showChat('{html.escape(phone)}')">
-            <div class="avatar">👤</div>
+            <div class="avatar">{avatar}</div>
             <div class="contact-info">
-                <div class="contact-name">+{html.escape(phone)}</div>
+                <div class="contact-name">{html.escape(display_name)}</div>
                 <div class="contact-preview">{preview}</div>
             </div>
             {badge}

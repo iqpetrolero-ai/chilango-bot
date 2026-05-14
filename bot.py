@@ -309,6 +309,50 @@ Si es de las incluidas → no la cobres por separado. Si es adicional → agrég
 
 IMPORTANTE: Nunca inventes precios ni productos que no estén en la carta.
 
+━━━ REGLAS DE INGREDIENTES Y DISPONIBILIDAD ━━━
+Estas reglas aplican SIEMPRE que un ingrediente esté agotado (ver sección PRODUCTOS AGOTADOS HOY):
+
+REGLA 1 — Sin PASTOR:
+  ❌ Taco de Pastor
+  ❌ Gringa de Pastor
+  ❌ Combo De Compas (incluye Gringa de Pastor)
+  ❌ Plato Chingón (incluye Gringa de Pastor)
+  ❌ Chilangazo (lleva pastor entre sus ingredientes)
+  ✅ Todo lo demás disponible normalmente
+
+REGLA 2 — Sin SUADERO:
+  ❌ Taco de Suadero
+  ❌ Taco Campechano (lleva carne de res/suadero + chorizo)
+  ✅ Combos De Compas y Plato Chingón SÍ se pueden ofrecer — el cliente
+     elige sus tacos entre las opciones disponibles: Pastor, Choriqueso
+  ⚠️ Chilangazo: ofrecer con Birria en lugar de Suadero, SIN modificar el precio (S/ 26.00)
+
+REGLA 3 — Sin CHORIZO o sin SALCHICHA HUACHANA:
+  ❌ Taco de Choriqueso (necesita chorizo)
+  ❌ Taco Campechano (necesita chorizo)
+  ❌ Chilangazo (necesita salchicha huachana y chorizo)
+  ✅ Combos De Compas y Plato Chingón SÍ se pueden ofrecer — el cliente
+     elige sus tacos entre las opciones disponibles: Suadero, Pastor
+
+REGLA 4 — Sin BIRRIA:
+  ❌ Quesabirria
+  ❌ Nachos Chilangos (lleva birria)
+  ❌ Combo Pa' Ti Solito (solo incluye quesabirrias)
+  ❌ Combo De Compas (incluye quesabirrias)
+  ❌ Plato Chingón (incluye quesabirrias y nachos)
+  ✅ Chilangazo SÍ está disponible
+  ✅ Tacos individuales (Suadero, Campechano, Pastor, Choriqueso) disponibles
+  ✅ Quesadillas, Esquites, Guacamole disponibles
+
+REGLA GENERAL DE COMBOS AFECTADOS:
+  - Si un combo aún es posible (solo algunos tacos no están), ofrécelo indicando
+    las opciones de taco disponibles para que el cliente elija.
+  - Si un combo es imposible de armar (le falta un ingrediente fijo del combo),
+    no lo ofrezcas. Sugiere el combo más cercano disponible o armar a la carta
+    sumando precios individuales de la carta.
+  - NUNCA modifiques el precio de un combo ni de un producto existente.
+  - NUNCA incluyas en el pedido un producto que requiera un ingrediente agotado.
+
 ━━━ MEMORIA DE CLIENTES ━━━
 Si el cliente menciona EXPLÍCITAMENTE su propio nombre en la conversación
 (frases como "me llamo X", "soy X", "mi nombre es X"), guárdalo UNA SOLA VEZ con el tag:
@@ -577,11 +621,34 @@ async def _call_claude(phone: str, messages: list) -> str:
         if agotados:
             agotados_ctx = (
                 f"\n\n━━━ PRODUCTOS AGOTADOS HOY ━━━"
-                f"\nLos siguientes productos NO están disponibles hoy: {agotados}"
-                f"\nSi el cliente pide alguno de estos productos:"
-                f"\n- Discúlpate brevemente: 'Hoy no contamos con [producto], disculpa.'"
-                f"\n- Sugiere una alternativa similar del menú."
-                f"\n- NUNCA confirmes ni incluyas en el pedido un producto agotado."
+                f"\nLos siguientes productos o ingredientes NO están disponibles hoy: {agotados}"
+                f"\n"
+                f"\nREGLAS ESTRICTAS — aplica razonamiento en cadena:"
+                f"\n1. PRODUCTOS DIRECTOS: Si el cliente pide un producto agotado, avísale y sugiere alternativa."
+                f"\n2. PRODUCTOS DERIVADOS: Si un ingrediente está agotado, TODOS los productos que lo usan"
+                f"\n   también están agotados. Ejemplos:"
+                f"\n   - Sin Pastor → sin Taco de Pastor, sin Gringa de Pastor"
+                f"\n   - Sin Birria → sin Quesabirria, sin Nachos Chilangos"
+                f"\n   - Sin Chorizo → sin Taco Campechano, sin Taco de Choriqueso"
+                f"\n3. COMBOS AFECTADOS: Si un combo incluye un producto agotado, el combo completo"
+                f"\n   NO puede ofrecerse tal como está. Debes:"
+                f"\n   - Informar cuál componente falta."
+                f"\n   - NUNCA uses el precio del combo ni inventes un precio ajustado."
+                f"\n   - Ofrece DOS opciones al cliente:"
+                f"\n     A) Un combo alternativo DISPONIBLE del menú."
+                f"\n     B) Armar el pedido a la carta con los ítems que sí hay,"
+                f"\n        calculando el total con los precios INDIVIDUALES de la carta."
+                f"\n   - Si el cliente elige la opción B y quiere reemplazar el ítem agotado:"
+                f"\n     * Pregunta qué producto quiere en su lugar (solo entre los disponibles)."
+                f"\n     * Suma los precios individuales de TODOS los ítems elegidos desde la carta."
+                f"\n     * Muestra el desglose completo ítem por ítem con sus precios individuales."
+                f"\n     * NUNCA uses el precio del combo como base — siempre precio individual de carta."
+                f"\n   Ej: Cliente quiere De Compas sin Gringa + reemplazar por Esquites:"
+                f"\n   '2x Taco Suadero S/6.50 c/u + 2x Quesabirria S/10.00 c/u +"
+                f"\n   1x Esquites S/8.00 + 1x Guacamole S/4.00 + 2x Agua S/7.00 c/u"
+                f"\n   = Total S/ 59.00 + empaque S/2.00 = S/ 61.00'"
+                f"\n4. NUNCA confirmes un combo que incluya un producto agotado."
+                f"\n5. NUNCA incluyas un producto agotado en el resumen del pedido ni en los tags."
             )
     except Exception as e:
         print(f"[AGOTADOS] Error al leer config: {e}")

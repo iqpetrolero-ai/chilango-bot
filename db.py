@@ -96,6 +96,19 @@ def init_db():
             )
         """)
 
+        # ── Historial de costos de delivery (aprendizaje de zonas) ────
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS delivery_costs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                phone TEXT,
+                direccion TEXT,
+                costo REAL,
+                subtotal TEXT,
+                items TEXT,
+                fecha TEXT
+            )
+        """)
+
         # ── Solicitudes de motorizado desde el panel ────────────────
         c.execute("""
             CREATE TABLE IF NOT EXISTS moto_requests (
@@ -397,6 +410,81 @@ def delete_delivery_query(query_id: int):
     """Elimina la consulta resuelta."""
     with _conn() as c:
         c.execute("DELETE FROM delivery_queries WHERE id=?", (query_id,))
+
+
+# ── Consultas de costo pendientes (gestión manual por el dueño) ──
+
+def save_pending_cost_query(client_phone: str, subtotal: str, items: str,
+                             pago: str, direccion: str):
+    """Guarda una consulta de costo pendiente para que el dueño la resuelva desde el panel."""
+    now = datetime.now(PERU_TZ).strftime("%d/%m/%Y %H:%M")
+    with _conn() as c:
+        # Solo una consulta activa por cliente
+        c.execute(
+            "DELETE FROM delivery_queries WHERE client_phone=? AND delivery_phone='owner'",
+            (client_phone,)
+        )
+        c.execute(
+            "INSERT INTO delivery_queries (delivery_phone, client_phone, subtotal, items, pago, direccion, created_at)"
+            " VALUES ('owner',?,?,?,?,?,?)",
+            (client_phone, subtotal, items, pago, direccion, now),
+        )
+
+
+def get_all_pending_cost_queries() -> list[dict]:
+    """Retorna todas las consultas de costo pendientes para el dueño."""
+    with _conn() as c:
+        rows = c.execute(
+            "SELECT * FROM delivery_queries WHERE delivery_phone='owner' ORDER BY created_at ASC"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def delete_pending_cost_query(client_phone: str):
+    """Elimina la consulta de costo una vez enviada al cliente."""
+    with _conn() as c:
+        c.execute(
+            "DELETE FROM delivery_queries WHERE client_phone=? AND delivery_phone='owner'",
+            (client_phone,)
+        )
+
+
+# ── Historial de costos de delivery (aprendizaje de zonas) ───────
+
+def save_delivery_cost(phone: str, direccion: str, costo: float,
+                        subtotal: str, items: str):
+    """Guarda el costo de delivery histórico para aprendizaje de zonas."""
+    now = datetime.now(PERU_TZ).strftime("%d/%m/%Y %H:%M")
+    with _conn() as c:
+        c.execute(
+            "INSERT INTO delivery_costs (phone, direccion, costo, subtotal, items, fecha)"
+            " VALUES (?,?,?,?,?,?)",
+            (phone, direccion, costo, subtotal, items, now),
+        )
+
+
+def get_delivery_cost_suggestion(direccion: str) -> dict | None:
+    """Busca el costo más frecuente para direcciones similares (aprendizaje automático)."""
+    if not direccion or len(direccion.strip()) < 5:
+        return None
+    # Palabras clave de más de 4 letras para buscar similitudes de zona
+    words = [w.strip() for w in direccion.lower().split() if len(w.strip()) > 4]
+    if not words:
+        return None
+    with _conn() as c:
+        conditions = " OR ".join(["LOWER(direccion) LIKE ?" for _ in words])
+        params = [f"%{w}%" for w in words]
+        rows = c.execute(
+            f"SELECT costo FROM delivery_costs WHERE {conditions} ORDER BY id DESC LIMIT 30",
+            params,
+        ).fetchall()
+    if not rows:
+        return None
+    from collections import Counter
+    costs = [round(r["costo"], 1) for r in rows]
+    counter = Counter(costs)
+    most_common_cost, count = counter.most_common(1)[0]
+    return {"costo": most_common_cost, "count": count}
 
 
 # ── Clientes / Programa de puntos ────────────────────────────

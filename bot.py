@@ -45,7 +45,8 @@ def mensaje_fuera_horario() -> str:
         "🕒 Atendemos:\n"
         "*Viernes, Sábado y Domingo*\n"
         "de *5:00 pm a 11:00 pm*\n\n"
-        "¡Te esperamos pronto para taquear rico! 🌮"
+        "Si quieres, escribe *carta* para ver nuestro menú mientras tanto. 🌮\n\n"
+        "¡Te esperamos pronto para taquear rico!"
     )
 
 
@@ -353,6 +354,14 @@ REGLA GENERAL DE COMBOS AFECTADOS:
   - NUNCA modifiques el precio de un combo ni de un producto existente.
   - NUNCA incluyas en el pedido un producto que requiera un ingrediente agotado.
 
+━━━ RECORDATORIO DE CONFIRMACIÓN PENDIENTE ━━━
+Si en el historial ves que ya presentaste el resumen del pedido con total y método de pago,
+pero el cliente no ha confirmado (no hay [PEDIDO_OK] ni respuesta clara de confirmación),
+y el cliente ahora escribe algo genérico (ej: "hola", "?", "oye"), recuérdale amablemente:
+"¡Hola! 😊 Quedamos en que ibas a confirmar tu pedido:
+[resumen breve]. ¿Lo confirmamos? Cualquier cambio también puedes decirme 🌮"
+No lo hagas si el cliente está activamente hablando del pedido.
+
 ━━━ MEMORIA DE CLIENTES ━━━
 Si el cliente menciona EXPLÍCITAMENTE su propio nombre en la conversación
 (frases como "me llamo X", "soy X", "mi nombre es X"), guárdalo UNA SOLA VEZ con el tag:
@@ -376,7 +385,7 @@ async def _notify_queja(phone_clean: str, desc: str):
     try:
         token = os.environ.get("META_ACCESS_TOKEN", "").strip()
         pid = os.environ.get("META_PHONE_NUMBER_ID", "").strip()
-        owner = "51954713696"
+        owner = "51955500153"
         if not token or not pid:
             print(f"[QUEJA] No se puede notificar: faltan vars de entorno")
             return
@@ -531,14 +540,34 @@ async def _parse_and_save_order(phone: str, reply: str) -> tuple[str, bool]:
 
 
 def _estimar_espera(pedidos_activos: int) -> str:
-    if pedidos_activos <= 2:
-        return "35 minutos"
-    elif pedidos_activos <= 4:
-        return "40 minutos"
-    elif pedidos_activos <= 6:
-        return "45 minutos"
+    """Tiempo base de cola según pedidos activos."""
+    if pedidos_activos <= 1:
+        return "0"
+    elif pedidos_activos <= 3:
+        return "10"
+    elif pedidos_activos <= 5:
+        return "15"
     else:
-        return "50 minutos o más"
+        return "20"
+
+
+def _estimar_tiempo_por_items(items_str: str, pedidos_activos: int) -> str:
+    """Estima el tiempo total según la complejidad del pedido + cola actual."""
+    s = items_str.lower()
+    # Tiempo base por complejidad del plato
+    if "plato chingón" in s or "plato chingon" in s:
+        base = 40
+    elif "de compas" in s or "chilangazo" in s:
+        base = 30
+    elif "combo" in s or "nachos" in s:
+        base = 25
+    elif "quesabirria" in s or "gringa" in s:
+        base = 20
+    else:
+        base = 15  # tacos, quesadillas, esquites simples
+    extra = int(_estimar_espera(pedidos_activos))
+    total = base + extra
+    return f"{total}-{total + 5} minutos"
 
 
 async def _call_claude(phone: str, messages: list) -> str:
@@ -593,24 +622,26 @@ async def _call_claude(phone: str, messages: list) -> str:
     except Exception as e:
         print(f"[PEDIDO-CTX] Error: {e}")
 
-    # Tiempo estimado — con fallback directo a SQLite si db.py es versión antigua
-    tiempo_ctx = "\nTiempo estimado de preparación: 35-40 minutos"
+    # Tiempo estimado por plato + cola actual
+    tiempo_ctx = "\nTiempo estimado de preparación: 20-25 minutos"
     try:
-        if hasattr(db, "get_active_orders_count"):
-            activos = db.get_active_orders_count()
-        else:
-            # Fallback: consulta directa sin depender de la función
-            import sqlite3 as _sqlite3
-            _today = datetime.now(PERU_TZ).strftime("%d/%m/%Y")
-            _db_path = db.DB_PATH
-            with _sqlite3.connect(_db_path) as _c:
-                _row = _c.execute(
-                    "SELECT COUNT(*) FROM orders WHERE fecha=? AND estado IN ('Nuevo 🆕','En preparación 👨‍🍳')",
-                    (_today,)
-                ).fetchone()
-            activos = _row[0] if _row else 0
-        espera = _estimar_espera(activos)
-        tiempo_ctx = f"\nPedidos activos ahora: {activos}\nTiempo estimado de preparación: {espera}"
+        activos = db.get_active_orders_count() if hasattr(db, "get_active_orders_count") else 0
+        # Detectar items del pedido actual en el historial de mensajes
+        items_en_curso = ""
+        for m in reversed(messages[-10:]):
+            content = str(m.get("content", ""))
+            if m.get("role") == "assistant" and any(
+                k in content.lower() for k in ["total:", "pedido:", "quesabirria", "taco", "combo", "nachos", "gringa", "chilangazo"]
+            ):
+                items_en_curso = content
+                break
+        espera = _estimar_tiempo_por_items(items_en_curso, activos) if items_en_curso else f"{30 + int(_estimar_espera(activos))}-{35 + int(_estimar_espera(activos))} minutos"
+        tiempo_ctx = (
+            f"\nPedidos activos ahora: {activos}"
+            f"\nTiempo estimado de preparación: {espera}"
+            f"\n(Tacos/Quesadillas: ~15-20 min · Quesabirrias/Gringa: ~20-25 min · "
+            f"Combos De Compas/Chilangazo: ~30-35 min · Plato Chingón: ~40-45 min)"
+        )
     except Exception as e:
         print(f"[ESPERA] Error al calcular tiempo estimado: {e}")
 
@@ -680,14 +711,38 @@ def mensaje_pausado() -> str:
     )
 
 
+def mensaje_saturado() -> str:
+    return (
+        "¡Hola! 🌮 Gracias por escribirnos.\n\n"
+        "En este momento estamos con *máxima capacidad en cocina* 🔥 y no podemos recibir más pedidos por ahora.\n\n"
+        "Por favor escríbenos en unos minutos, ¡te atendemos con gusto! 🙏"
+    )
+
+
 async def process_message(phone: str, message: str) -> tuple[str, bool]:
     """Retorna (reply_text, needs_escalate)."""
     if not esta_en_horario():
         return mensaje_fuera_horario(), False
 
-    # Verificar si el bot está pausado
+    # Verificar si el bot está pausado (pausa manual)
     if db.get_config("bot_pausado", "0") == "1":
         return mensaje_pausado(), False
+
+    # Auto-pausa por saturación: 4+ pedidos activos
+    try:
+        _activos = db.get_active_orders_count()
+        if _activos >= 4:
+            if db.get_config("bot_pausado", "0") != "1":
+                db.set_config("bot_pausado", "1")
+                print(f"[AUTO-PAUSA] Activada — {_activos} pedidos activos")
+            return mensaje_saturado(), False
+    except Exception as _e:
+        print(f"[AUTO-PAUSA] Error: {_e}")
+
+    # Verificar si esta conversación está escalada al equipo humano
+    phone_clean_esc = phone.replace("whatsapp:", "").replace("+", "")
+    if db.is_escalated(phone_clean_esc):
+        return "Nuestro equipo ya está atento a tu mensaje, en un momento te responden 🙏", False
 
     now_ts = datetime.now(PERU_TZ).strftime("%H:%M")
     messages = db.get_messages(phone)
@@ -708,6 +763,9 @@ async def process_message_with_image(phone: str, image_bytes: bytes, mime_type: 
         return mensaje_fuera_horario(), False
     if db.get_config("bot_pausado", "0") == "1":
         return mensaje_pausado(), False
+    phone_clean_esc = phone.replace("whatsapp:", "").replace("+", "")
+    if db.is_escalated(phone_clean_esc):
+        return "Nuestro equipo ya está atento a tu mensaje, en un momento te responden 🙏", False
 
     now_ts = datetime.now(PERU_TZ).strftime("%H:%M")
     image_b64 = base64.standard_b64encode(image_bytes).decode("utf-8")

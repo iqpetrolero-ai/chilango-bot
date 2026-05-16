@@ -19,6 +19,35 @@ import db
 
 app = FastAPI(title="Chilango Bot 🌮")
 
+
+@app.on_event("startup")
+async def _start_reminder_task():
+    """Tarea en background: recuerda a clientes que tienen un pedido pendiente de confirmar."""
+    import asyncio as _asyncio
+
+    async def _reminder_loop():
+        await _asyncio.sleep(60)  # Esperar 1 min al arrancar antes del primer chequeo
+        while True:
+            try:
+                pendientes = db.get_pending_reminders(minutos=5)
+                for p in pendientes:
+                    phone = p["phone"]
+                    # Enviar recordatorio por WhatsApp
+                    recordatorio = (
+                        "¡Hola! 😊 Solo para recordarte que quedamos en confirmar tu pedido.\n\n"
+                        "¿Lo confirmamos o quieres hacer algún cambio? 🌮"
+                    )
+                    await send_whatsapp_message(phone, recordatorio)
+                    from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+                    _ts = _dt.now(_tz(_td(hours=-5))).strftime("%H:%M")
+                    db.append_message(phone, "assistant", recordatorio, ts=_ts)
+                    print(f"[RECORDATORIO] Enviado a {phone}")
+            except Exception as _e:
+                print(f"[RECORDATORIO] Error: {_e}")
+            await _asyncio.sleep(300)  # Chequear cada 5 minutos
+
+    _asyncio.create_task(_reminder_loop())
+
 import os as _os
 if _os.path.exists("static"):
     app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -43,20 +72,18 @@ META_PHONE_NUMBER_ID = os.environ.get("META_PHONE_NUMBER_ID", "").strip()
 META_VERIFY_TOKEN = os.environ.get("META_VERIFY_TOKEN", "").strip()
 BASE_URL = os.environ.get("RAILWAY_PUBLIC_DOMAIN", "")
 PDF_URL = f"https://{BASE_URL}/static/carta.pdf" if BASE_URL else ""
-# ── Servicios de delivery (1 o 2) ────────────────────────────
-# Backward compat: DELIVERY_PHONE se toma como delivery 1 si no hay DELIVERY_1_PHONE
-_d1_phone = (os.environ.get("DELIVERY_1_PHONE") or os.environ.get("DELIVERY_PHONE", "")).strip()
-_d1_name  = os.environ.get("DELIVERY_1_NAME", "Delivery 1").strip()
-_d2_phone = os.environ.get("DELIVERY_2_PHONE", "").strip()
-_d2_name  = os.environ.get("DELIVERY_2_NAME", "Delivery 2").strip()
-DELIVERIES = [
-    {"phone": _d1_phone, "name": _d1_name}
-    for _ in [None] if _d1_phone
-] + [
-    {"phone": _d2_phone, "name": _d2_name}
-    for _ in [None] if _d2_phone
+# ── Servicios de delivery (hasta 4 motorizados) ──────────────
+# Variables: DELIVERY_1_PHONE / DELIVERY_1_NAME ... DELIVERY_4_PHONE / DELIVERY_4_NAME
+# Backward compat: DELIVERY_PHONE → DELIVERY_1_PHONE
+_RAW_DELIVERIES = [
+    {
+        "phone": (os.environ.get(f"DELIVERY_{i}_PHONE") or (os.environ.get("DELIVERY_PHONE","") if i==1 else "")).strip(),
+        "name":  os.environ.get(f"DELIVERY_{i}_NAME", f"Motorizado {i}").strip(),
+    }
+    for i in range(1, 5)
 ]
-DELIVERY_PHONE = _d1_phone  # backward compat para código existente
+DELIVERIES = [d for d in _RAW_DELIVERIES if d["phone"]]
+DELIVERY_PHONE = DELIVERIES[0]["phone"] if DELIVERIES else ""  # backward compat para código existente
 # Mapa rápido phone_clean → nombre para mostrar en panel
 DELIVERY_NAME_MAP: dict[str, str] = {
     d["phone"].replace("+", "").strip(): d["name"]
@@ -278,6 +305,11 @@ async def handle_message(phone: str, message: str, phone_number_id: str = None):
                 db.mark_unread(client_phone)
                 await send_whatsapp_message(client_phone, msg_cliente, sending_id)
                 db.delete_delivery_query(consulta["id"])
+                # Cancelar consultas de otros motorizados para el mismo cliente (broadcast)
+                for _d in DELIVERIES:
+                    _op = db.get_pending_delivery_query(_d["phone"].replace("+",""))
+                    if _op and _op.get("client_phone") == client_phone and _op["id"] != consulta["id"]:
+                        db.delete_delivery_query(_op["id"])
                 print(f"[DELIVERY COST] S/{costo_delivery} enviado a cliente +{client_phone} — total S/{total_num:.2f}")
                 return  # procesado como costo — no continuar
 
@@ -290,7 +322,7 @@ async def handle_message(phone: str, message: str, phone_number_id: str = None):
                     f"pero no se detectó un monto:\n\n\"{message}\"\n\n"
                     f"Cliente: +{client_phone} — gestiona manualmente."
                 )
-                await send_whatsapp_message("51954713696", aviso_dueño, sending_id)
+                await send_whatsapp_message("51955500153", aviso_dueño, sending_id)
                 msg_cliente = (
                     f"🙏 Estamos confirmando el costo de delivery con el motorizado, "
                     f"en un momento te avisamos. ¡Gracias por tu paciencia!"
@@ -459,8 +491,9 @@ async def receive_message(request: Request):
                 db.append_message(phone, "user",      "Sí, quiero hablar con el equipo", ts=now_ts)
                 db.append_message(phone, "assistant", respuesta, ts=now_ts)
                 db.mark_unread(phone)
+                db.mark_escalated(phone_clean)   # ← bot en silencio hasta que el equipo libere
                 await send_whatsapp_message(phone, respuesta, phone_number_id)
-                print(f"[ESCALATE] {phone} solicitó hablar con el equipo")
+                print(f"[ESCALATE] {phone} solicitó hablar con el equipo — bot pausado para esta conv")
             elif btn_id == "equipo_no":
                 respuesta = "Entendido. Cualquier cosa, aquí estamos 🌮"
                 db.append_message(phone, "user",      "No, gracias", ts=now_ts)
@@ -1078,7 +1111,26 @@ function _openDlvModal(orderId, mode) {{
   }}, 100);
 }}
 
-function llamarDelivery(orderId) {{ _openDlvModal(orderId, 'delivery'); }}
+async function llamarDelivery(orderId) {{
+  // Notifica directamente al dueño — él gestionará el motorizado manualmente
+  try {{
+    const r = await fetch('/api/pedidos/llamar-delivery', {{
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {{'Content-Type':'application/json'}},
+      body: JSON.stringify({{order_id: orderId}})
+    }});
+    if (r.status === 401) {{ location.reload(); return; }}
+    const data = await r.json();
+    if (data.status === 'ok') {{
+      showToast('Solicitud de delivery en curso');
+    }} else {{
+      alert('Error: ' + (data.msg || 'No se pudo enviar'));
+    }}
+  }} catch(e) {{
+    alert('Error: ' + e.message);
+  }}
+}}
 function consultarCostoDelivery(orderId) {{ _openDlvModal(orderId, 'cost'); }}
 
 async function _enviarDelivery(orderId, phone, name, endpoint, toastPrefix) {{
@@ -1441,10 +1493,11 @@ async def api_llamar_delivery(
     request: Request,
     credentials: HTTPBasicCredentials = Depends(verificar_admin)
 ):
-    """Envía un mensaje WhatsApp al servicio de delivery elegido con los datos del pedido."""
+    """Notifica al dueño que debe gestionar el motorizado manualmente para este pedido."""
     data = await request.json()
-    order_id      = int(data.get("order_id", 0))
-    delivery_phone = data.get("delivery_phone", "").strip()
+    order_id = int(data.get("order_id", 0))
+    # delivery_phone mantenida por compatibilidad (ya no se usa en este flujo)
+    # delivery_phone = data.get("delivery_phone", "").strip()
 
     if not order_id:
         return JSONResponse({"status": "error", "msg": "order_id requerido"}, status_code=400)
@@ -1453,37 +1506,37 @@ async def api_llamar_delivery(
     if not order:
         return JSONResponse({"status": "error", "msg": "Pedido no encontrado"}, status_code=404)
 
-    if not DELIVERIES:
-        return JSONResponse({"status": "error", "msg": "No hay delivery configurado en Railway (DELIVERY_1_PHONE)"}, status_code=500)
-
-    # Si el frontend envió un número específico, úsalo (y valida que esté en la lista)
-    valid_phones = {d["phone"] for d in DELIVERIES}
-    target_phone = delivery_phone if delivery_phone in valid_phones else DELIVERIES[0]["phone"]
-    target_name  = next((d["name"] for d in DELIVERIES if d["phone"] == target_phone), "Delivery")
-
     from datetime import datetime, timezone, timedelta
     _PERU_TZ = timezone(timedelta(hours=-5))
     hora = datetime.now(_PERU_TZ).strftime("%d/%m · %I:%M %p")
 
-    mensaje = (
-        f"Un motorizado porfavor - Chilango 🛵\n"
-        f"Cliente: +{order['phone']}\n"
-        f"📍 {order.get('direccion') or 'Sin dirección'}\n"
-        f"🕒 {hora}"
-    )
-    if order.get("notas"):
-        mensaje += f"\n📝 {order['notas']}"
+    # ── Líneas de notificación a motorizado (mantenidas, no activas en este flujo) ──
+    # valid_phones = {d["phone"] for d in DELIVERIES}
+    # target_phone = delivery_phone if delivery_phone in valid_phones else (DELIVERIES[0]["phone"] if DELIVERIES else "")
+    # target_name  = next((d["name"] for d in DELIVERIES if d["phone"] == target_phone), "Delivery")
+    # msg_tg = f"🛵 *Pedido #{order_id} — Chilango*\n👤 +{order['phone']}\n📍 {order.get('direccion') or 'Sin dirección'}\n🕒 {hora}"
+    # target_index = next((i+1 for i, d in enumerate(DELIVERIES) if d["phone"] == target_phone), 1)
+    # tg_id = os.environ.get(f"DELIVERY_{target_index}_TELEGRAM_ID", "").strip()
+    # ── Fin líneas motorizado ─────────────────────────────────────────────
 
-    # Normalizar número: quitar "+" para la API Meta
-    target_phone_clean = target_phone.replace("+", "").strip()
-    token_ok = bool(os.environ.get("META_ACCESS_TOKEN", "").strip() or META_ACCESS_TOKEN)
-    pid_ok   = bool(os.environ.get("META_PHONE_NUMBER_ID", "").strip() or META_PHONE_NUMBER_ID)
-    print(f"[DELIVERY] Enviando a {target_name} ({target_phone_clean}) | token={token_ok} | pid={pid_ok}")
-    ok = await send_whatsapp_message(target_phone_clean, mensaje)
+    # Notificar al dueño para gestión manual
+    msg_owner = (
+        f"🛵 *Delivery solicitado — Panel*\n"
+        f"📦 Pedido #{order_id}\n"
+        f"👤 Cliente: +{order['phone']}\n"
+        f"📍 {order.get('direccion') or 'Sin dirección'}\n"
+        f"🛒 {order.get('items', '')}\n"
+        f"💰 {order.get('total', '')}\n"
+        f"🕒 {hora}\n"
+        f"_(Gestionar motorizado manualmente)_"
+    )
+    OWNER_PHONE = "51955500153"
+    ok = await send_whatsapp_message(OWNER_PHONE, msg_owner)
     if not ok:
-        return JSONResponse({"status": "error", "msg": f"No se pudo enviar WA a {target_name} ({target_phone_clean}) — revisa logs de Railway"}, status_code=500)
-    print(f"[DELIVERY] ✅ Solicitud enviada para pedido #{order_id} → {target_name} ({target_phone_clean})")
-    return JSONResponse({"status": "ok", "delivery": target_name})
+        return JSONResponse({"status": "error", "msg": "No se pudo notificar al dueño"}, status_code=500)
+
+    print(f"[DELIVERY] ✅ Dueño notificado para pedido #{order_id}")
+    return JSONResponse({"status": "ok", "delivery": "Dueño"})
 
 
 @app.post("/api/pedidos/consultar-delivery")
@@ -1491,10 +1544,11 @@ async def api_consultar_delivery(
     request: Request,
     credentials: HTTPBasicCredentials = Depends(verificar_admin)
 ):
-    """Envía consulta de costo de delivery al motorizado."""
+    """Notifica al dueño para que consulte el costo de delivery manualmente."""
     data = await request.json()
     order_id       = int(data.get("order_id", 0))
-    delivery_phone = data.get("delivery_phone", "").strip()
+    # delivery_phone mantenida por compatibilidad (ya no se usa en este flujo)
+    # delivery_phone = data.get("delivery_phone", "").strip()
 
     if not order_id:
         return JSONResponse({"status": "error", "msg": "order_id requerido"}, status_code=400)
@@ -1503,25 +1557,30 @@ async def api_consultar_delivery(
     if not order:
         return JSONResponse({"status": "error", "msg": "Pedido no encontrado"}, status_code=404)
 
-    if not DELIVERIES:
-        return JSONResponse({"status": "error", "msg": "No hay delivery configurado en Railway"}, status_code=500)
-
-    valid_phones = {d["phone"] for d in DELIVERIES}
-    target_phone = delivery_phone if delivery_phone in valid_phones else DELIVERIES[0]["phone"]
-    target_name  = next((d["name"] for d in DELIVERIES if d["phone"] == target_phone), "Delivery")
-
     from datetime import datetime, timezone, timedelta
     _PERU_TZ = timezone(timedelta(hours=-5))
     hora = datetime.now(_PERU_TZ).strftime("%d/%m · %I:%M %p")
 
-    consulta = (
-        f"¿Cual es el costo a la siguiente dirección?\n"
-        f"Dirección: {order.get('direccion') or 'Sin dirección'}"
-    )
+    # ── Líneas de consulta a motorizado (mantenidas, no activas en este flujo) ──
+    # valid_phones = {d["phone"] for d in DELIVERIES}
+    # target_phone = delivery_phone if delivery_phone in valid_phones else (DELIVERIES[0]["phone"] if DELIVERIES else "")
+    # consulta = f"¿Cual es el costo a la siguiente dirección?\nDirección: {order.get('direccion') or 'Sin dirección'}"
+    # await send_whatsapp_message(target_phone, consulta)
+    # ── Fin líneas motorizado ─────────────────────────────────────────────
 
-    await send_whatsapp_message(target_phone, consulta)
-    print(f"[COSTO DELIVERY] Consulta enviada para pedido #{order_id} → {target_name} ({target_phone})")
-    return JSONResponse({"status": "ok", "delivery": target_name})
+    # Notificar al dueño para gestión manual
+    msg_owner = (
+        f"💰 *Consultar costo delivery — Panel*\n"
+        f"📦 Pedido #{order_id}\n"
+        f"👤 Cliente: +{order['phone']}\n"
+        f"📍 {order.get('direccion') or 'Sin dirección'}\n"
+        f"🕒 {hora}\n"
+        f"_(Consultar costo con motorizado manualmente)_"
+    )
+    OWNER_PHONE = "51955500153"
+    await send_whatsapp_message(OWNER_PHONE, msg_owner)
+    print(f"[COSTO DELIVERY] Dueño notificado para pedido #{order_id}")
+    return JSONResponse({"status": "ok", "delivery": "Dueño"})
 
 
 @app.post("/pedidos/estado")
@@ -1585,6 +1644,36 @@ async def send_manual_message(
     return JSONResponse({"status": "ok"})
 
 
+@app.post("/api/conversations/delete")
+async def delete_conversation(
+    request: Request,
+    credentials: HTTPBasicCredentials = Depends(verificar_admin)
+):
+    """Elimina el historial de chat de un contacto."""
+    data = await request.json()
+    phone = data.get("phone", "").strip()
+    if not phone:
+        return JSONResponse({"status": "error"}, status_code=400)
+    db.delete_conversation(phone)
+    print(f"[ADMIN] Chat eliminado: {phone}")
+    return JSONResponse({"status": "ok"})
+
+
+@app.post("/api/conversations/reactivar")
+async def reactivar_bot_conv(
+    request: Request,
+    credentials: HTTPBasicCredentials = Depends(verificar_admin)
+):
+    """El equipo libera la conversación para que el bot vuelva a responder."""
+    data = await request.json()
+    phone = data.get("phone", "").strip()
+    if not phone:
+        return JSONResponse({"status": "error"}, status_code=400)
+    db.reset_escalation(phone)
+    print(f"[ESCALATE] Bot reactivado para {phone}")
+    return JSONResponse({"status": "ok"})
+
+
 @app.get("/api/conversations")
 async def api_conversations(credentials: HTTPBasicCredentials = Depends(verificar_admin)):
     """Endpoint JSON para polling del panel admin sin recargar la página."""
@@ -1616,8 +1705,10 @@ async def api_conversations(credentials: HTTPBasicCredentials = Depends(verifica
         )
     # Mensajes limpios (sin imágenes) + timestamp si existe
     conv_clean = {}
+    conv_escalado = {}
     for phone, data in conversaciones_raw.items():
         conv_clean[phone] = []
+        conv_escalado[phone] = data.get("escalado", False)
         for m in data["messages"]:
             c = m["content"]
             if isinstance(c, list):
@@ -1630,7 +1721,7 @@ async def api_conversations(credentials: HTTPBasicCredentials = Depends(verifica
                 "ts": m.get("ts", ""),
                 "manual": m.get("manual", False),
             })
-    return JSONResponse({"contacts_html": contacts_html, "convs": conv_clean})
+    return JSONResponse({"contacts_html": contacts_html, "convs": conv_clean, "escalado": conv_escalado})
 
 
 @app.get("/admin/clientes", response_class=HTMLResponse)
@@ -1868,8 +1959,10 @@ async def admin(credentials: HTTPBasicCredentials = Depends(verificar_admin)):
 
     # Serializar conversaciones para JS (imágenes excluidas por tamaño, timestamps incluidos)
     conv_clean = {}
+    conv_escalado = {}
     for phone, data in conversaciones_raw.items():
         conv_clean[phone] = []
+        conv_escalado[phone] = data.get("escalado", False)
         for m in data["messages"]:
             c = m["content"]
             if isinstance(c, list):
@@ -1883,6 +1976,7 @@ async def admin(credentials: HTTPBasicCredentials = Depends(verificar_admin)):
                 "manual": m.get("manual", False),
             })
     conv_json = json.dumps(conv_clean, ensure_ascii=False)
+    escalado_json = json.dumps(conv_escalado, ensure_ascii=False)
 
     return f"""<!DOCTYPE html>
 <html>
@@ -1970,6 +2064,7 @@ async def admin(credentials: HTTPBasicCredentials = Depends(verificar_admin)):
 
     <script>
         const convs = {conv_json};
+        let escaladoMap = {escalado_json};
 
         function esc(s) {{
             return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\\n/g,'<br>');
@@ -2000,15 +2095,26 @@ async def admin(credentials: HTTPBasicCredentials = Depends(verificar_admin)):
             const msgs = convs[phone] || [];
             const bubbles = msgs.map(buildBubble).join('');
 
+            const isEscalado = escaladoMap[phone] || false;
+            const escaladoBadge = isEscalado
+                ? `<span style="background:#e53935;color:#fff;font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;margin-left:8px">🤝 Equipo activo</span>
+                   <button onclick="reactivarBot('${{esc(phone)}}')" style="background:#2D5016;color:#fff;border:none;border-radius:20px;padding:4px 12px;font-size:11px;font-weight:700;cursor:pointer;margin-left:6px">🤖 Reactivar bot</button>`
+                : '';
+            const avatarIcon = (window.deliveryPhones && window.deliveryPhones[phone]) ? '🛵' : '👤';
+            const displayName = (window.deliveryNames && window.deliveryNames[phone]) ? '🛵 ' + window.deliveryNames[phone] : '+' + esc(phone);
             document.getElementById('chatPanel').innerHTML = `
-                <div class="chat-header">
-                    <div class="avatar">👤</div>
-                    <div class="chat-header-name">+${{esc(phone)}}</div>
+                <div class="chat-header" style="flex-wrap:wrap;gap:6px">
+                    <div class="avatar">${{avatarIcon}}</div>
+                    <div class="chat-header-name" style="flex:1">${{displayName}}</div>
+                    ${{escaladoBadge}}
+                    <button onclick="eliminarChat('${{esc(phone)}}')" title="Eliminar chat"
+                        style="background:none;border:none;cursor:pointer;font-size:16px;color:#aaa;padding:4px 8px"
+                        onmouseover="this.style.color='#e53935'" onmouseout="this.style.color='#aaa'">🗑️</button>
                 </div>
                 <div class="chat-messages" id="msgs">${{bubbles}}</div>
                 <div class="chat-input-area">
                     <input type="text" id="manualInput" class="chat-input"
-                           placeholder="Escribe un mensaje al cliente (ej: el delivery a tu zona es S/ 5.00)..."
+                           placeholder="Escribe un mensaje al cliente..."
                            onkeydown="if(event.key==='Enter' && !event.shiftKey){{ event.preventDefault(); sendManual('${{esc(phone)}}'); }}">
                     <button id="sendBtn" class="chat-send-btn" onclick="sendManual('${{esc(phone)}}')" title="Enviar">➤</button>
                 </div>`;
@@ -2016,6 +2122,31 @@ async def admin(credentials: HTTPBasicCredentials = Depends(verificar_admin)):
             const msgsEl = document.getElementById('msgs');
             if (msgsEl) msgsEl.scrollTop = msgsEl.scrollHeight;
             sessionStorage.setItem('activePhone', phone);
+        }}
+
+        async function eliminarChat(phone) {{
+            if (!confirm(`¿Eliminar el historial de chat de +${{phone}}? Esta acción no se puede deshacer.`)) return;
+            const r = await fetch('/api/conversations/delete', {{
+                method: 'POST', credentials: 'same-origin',
+                headers: {{'Content-Type':'application/json'}},
+                body: JSON.stringify({{phone}})
+            }});
+            if ((await r.json()).status === 'ok') {{
+                document.getElementById('chatPanel').innerHTML = '<div style="padding:40px;text-align:center;color:#aaa">Selecciona una conversación</div>';
+                sessionStorage.removeItem('activePhone');
+                pollConversaciones();
+            }}
+        }}
+
+        async function reactivarBot(phone) {{
+            if (!confirm('¿Reactivar el bot para este cliente? Volverá a responder automáticamente.')) return;
+            await fetch('/api/conversations/reactivar', {{
+                method: 'POST', credentials: 'same-origin',
+                headers: {{'Content-Type':'application/json'}},
+                body: JSON.stringify({{phone}})
+            }});
+            escaladoMap[phone] = false;
+            showChat(phone);
         }}
 
         async function sendManual(phone) {{
@@ -2057,6 +2188,8 @@ async def admin(credentials: HTTPBasicCredentials = Depends(verificar_admin)):
                 const r = await fetch('/api/conversations', {{credentials:'same-origin'}});
                 if (!r.ok) return;
                 const data = await r.json();
+                // Sincronizar mapa de escalados
+                if (data.escalado) Object.assign(escaladoMap, data.escalado);
                 // Actualizar sidebar
                 const lista = document.querySelector('.sidebar-list');
                 if (!lista) return;

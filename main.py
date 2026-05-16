@@ -322,7 +322,7 @@ async def handle_message(phone: str, message: str, phone_number_id: str = None):
                     f"pero no se detectó un monto:\n\n\"{message}\"\n\n"
                     f"Cliente: +{client_phone} — gestiona manualmente."
                 )
-                await send_whatsapp_message("51955500153", aviso_dueño, sending_id)
+                await send_whatsapp_message("51954713696", aviso_dueño, sending_id)
                 msg_cliente = (
                     f"🙏 Estamos confirmando el costo de delivery con el motorizado, "
                     f"en un momento te avisamos. ¡Gracias por tu paciencia!"
@@ -883,6 +883,22 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgro
 .empty{{text-align:center;padding:60px 20px;color:#aaa;font-size:15px;grid-column:1/-1}}
 .footer-note{{text-align:center;font-size:11px;color:#bbb;padding:12px}}
 
+/* ── Banner de consultas de costo pendientes ── */
+.cost-banner{{background:#E3F2FD;border-bottom:2px solid #1565C0;padding:12px 18px;display:none}}
+.cost-banner-title{{font-size:13px;font-weight:800;color:#1565C0;margin-bottom:10px;display:flex;align-items:center;gap:6px}}
+.cost-badge{{background:#1565C0;color:#fff;border-radius:20px;padding:2px 9px;font-size:11px}}
+.cost-card{{background:#fff;border-radius:10px;padding:12px 14px;margin-bottom:8px;border:1px solid #BBDEFB;display:flex;flex-wrap:wrap;align-items:flex-start;gap:10px}}
+.cost-card:last-child{{margin-bottom:0}}
+.cost-info{{flex:1;min-width:200px;font-size:13px;color:#333;line-height:1.7}}
+.cost-info strong{{color:#1565C0}}
+.cost-sugg{{font-size:11px;background:#E8F5E9;color:#2E7D32;border-radius:6px;padding:3px 8px;display:inline-block;margin-top:2px;font-weight:700}}
+.cost-actions{{display:flex;gap:8px;align-items:center;flex-wrap:wrap}}
+.cost-input{{border:1px solid #90CAF9;border-radius:8px;padding:8px 12px;font-size:14px;width:130px;outline:none;font-weight:700;color:#1565C0}}
+.cost-input:focus{{border-color:#1565C0;box-shadow:0 0 0 2px rgba(21,101,192,.15)}}
+.cost-btn{{background:#1565C0;color:#fff;border:none;border-radius:8px;padding:9px 18px;font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap}}
+.cost-btn:hover{{background:#1976D2}}
+.cost-btn:active{{opacity:.8}}
+
 /* ── Toast ── */
 .toast{{position:fixed;bottom:24px;right:24px;background:#2D5016;color:#fff;padding:12px 22px;border-radius:30px;font-size:14px;font-weight:700;box-shadow:0 4px 20px rgba(0,0,0,.3);z-index:200;transform:translateY(80px);opacity:0;transition:all .35s cubic-bezier(.34,1.56,.64,1)}}
 .toast.show{{transform:translateY(0);opacity:1}}
@@ -941,6 +957,13 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgro
     onkeydown="if(event.key==='Enter')guardarAgotados()">
   <button onclick="guardarAgotados()" style="background:#e65100;color:white;border:none;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer">Guardar</button>
   <span id="agotadosStatus" style="font-size:12px;color:#4caf50;display:none">✅ Guardado</span>
+</div>
+
+<div class="cost-banner" id="costBanner">
+  <div class="cost-banner-title">
+    🛵 Consultas de costo pendientes <span class="cost-badge" id="costBadge">0</span>
+  </div>
+  <div id="costList"></div>
 </div>
 
 <div class="filters">
@@ -1416,6 +1439,83 @@ async function togglePausa() {{
 // Iniciar polling cada 10 segundos
 setInterval(refreshOrders, 10000);
 
+/* ── Consultas de costo pendientes ── */
+async function checkPendingCostQueries() {{
+  try {{
+    const r = await fetch('/api/delivery/pendientes', {{credentials:'same-origin'}});
+    if (!r.ok) return;
+    const data = await r.json();
+    renderPendingCostQueries(data.pendientes || []);
+  }} catch(e) {{ console.warn('CostQueries error:', e); }}
+}}
+
+function renderPendingCostQueries(queries) {{
+  const banner = document.getElementById('costBanner');
+  const list   = document.getElementById('costList');
+  const badge  = document.getElementById('costBadge');
+  if (!banner || !list) return;
+  if (queries.length === 0) {{
+    banner.style.display = 'none';
+    return;
+  }}
+  banner.style.display = 'block';
+  badge.textContent = queries.length;
+  list.innerHTML = queries.map(q => {{
+    const sugg = q.sugerencia
+      ? `<span class="cost-sugg">💡 Zona similar: S/ ${{q.sugerencia.costo.toFixed(2)}} (${{q.sugerencia.count}} ${{q.sugerencia.count === 1 ? 'vez' : 'veces'}})</span>`
+      : '';
+    const inputId = 'costInput_' + q.client_phone;
+    return `<div class="cost-card">
+      <div class="cost-info">
+        <strong>👤 +${{q.client_phone}}</strong><br>
+        📍 ${{q.direccion || 'Sin especificar'}}<br>
+        🛒 ${{q.items || '—'}}<br>
+        💰 Subtotal: <strong>${{q.subtotal || '—'}}</strong>
+        ${{sugg}}
+      </div>
+      <div class="cost-actions">
+        <input class="cost-input" id="${{inputId}}" type="number" min="0" step="0.5"
+          placeholder="S/ costo..."
+          value="${{q.sugerencia ? q.sugerencia.costo : ''}}"
+          onkeydown="if(event.key==='Enter')enviarCostoCliente('${{q.client_phone}}','${{q.subtotal}}')">
+        <button class="cost-btn" onclick="enviarCostoCliente('${{q.client_phone}}','${{q.subtotal}}')">
+          ✅ Enviar al cliente
+        </button>
+      </div>
+    </div>`;
+  }}).join('');
+}}
+
+async function enviarCostoCliente(phone, subtotalStr) {{
+  const inputEl = document.getElementById('costInput_' + phone);
+  const monto = parseFloat((inputEl ? inputEl.value : '') || '');
+  if (isNaN(monto) || monto <= 0) {{
+    alert('Ingresa un monto de delivery válido (ej: 7)');
+    if (inputEl) inputEl.focus();
+    return;
+  }}
+  try {{
+    const r = await fetch('/api/delivery/enviar-costo', {{
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {{'Content-Type':'application/json'}},
+      body: JSON.stringify({{phone, monto, subtotal: subtotalStr}})
+    }});
+    if (r.status === 401) {{ location.reload(); return; }}
+    const data = await r.json();
+    if (data.status === 'ok') {{
+      showToast('✅ Costo enviado al cliente +' + phone);
+      checkPendingCostQueries();
+    }} else {{
+      alert('Error: ' + (data.msg || 'No se pudo enviar'));
+    }}
+  }} catch(e) {{ alert('Error: ' + e.message); }}
+}}
+
+// Polling de consultas pendientes cada 15 segundos
+checkPendingCostQueries();
+setInterval(checkPendingCostQueries, 15000);
+
 // Inicializar burbuja nav al cargar la página
 (function initNavBadge() {{
   const nNuevos = document.querySelectorAll('.card[data-estado^="Nuevo"]').length;
@@ -1530,7 +1630,7 @@ async def api_llamar_delivery(
         f"🕒 {hora}\n"
         f"_(Gestionar motorizado manualmente)_"
     )
-    OWNER_PHONE = "51955500153"
+    OWNER_PHONE = "51954713696"
     ok = await send_whatsapp_message(OWNER_PHONE, msg_owner)
     if not ok:
         return JSONResponse({"status": "error", "msg": "No se pudo notificar al dueño"}, status_code=500)
@@ -1577,10 +1677,90 @@ async def api_consultar_delivery(
         f"🕒 {hora}\n"
         f"_(Consultar costo con motorizado manualmente)_"
     )
-    OWNER_PHONE = "51955500153"
+    OWNER_PHONE = "51954713696"
     await send_whatsapp_message(OWNER_PHONE, msg_owner)
     print(f"[COSTO DELIVERY] Dueño notificado para pedido #{order_id}")
     return JSONResponse({"status": "ok", "delivery": "Dueño"})
+
+
+@app.get("/api/delivery/pendientes")
+async def api_delivery_pendientes(
+    credentials: HTTPBasicCredentials = Depends(verificar_admin)
+):
+    """Retorna todas las consultas de costo de delivery pendientes con sugerencia de zona."""
+    queries = db.get_all_pending_cost_queries()
+    result = []
+    for q in queries:
+        sugg = db.get_delivery_cost_suggestion(q.get("direccion", ""))
+        result.append({
+            "client_phone": q["client_phone"],
+            "direccion":    q.get("direccion", ""),
+            "subtotal":     q.get("subtotal", ""),
+            "items":        q.get("items", ""),
+            "pago":         q.get("pago", ""),
+            "created_at":   q.get("created_at", ""),
+            "sugerencia":   sugg,
+        })
+    return JSONResponse({"pendientes": result})
+
+
+@app.post("/api/delivery/enviar-costo")
+async def api_enviar_costo_delivery(
+    request: Request,
+    credentials: HTTPBasicCredentials = Depends(verificar_admin)
+):
+    """El dueño ingresa el costo desde el panel — el bot lo envía al cliente automáticamente."""
+    data = await request.json()
+    phone    = (data.get("phone") or "").strip().replace("+", "")
+    monto    = float(data.get("monto") or 0)
+    subtotal_str = (data.get("subtotal") or "").strip()
+
+    if not phone or monto <= 0:
+        return JSONResponse({"status": "error", "msg": "phone y monto requeridos"}, status_code=400)
+
+    # Calcular total: extraer número del subtotal + monto delivery
+    import re as _re
+    subtotal_num = 0.0
+    m = _re.search(r"(\d+(?:[.,]\d{1,2})?)", subtotal_str)
+    if m:
+        subtotal_num = float(m.group(1).replace(",", "."))
+    total = round(subtotal_num + monto, 2)
+
+    # Mensaje al cliente
+    monto_fmt   = f"{monto:.2f}".rstrip("0").rstrip(".")
+    total_fmt   = f"{total:.2f}".rstrip("0").rstrip(".")
+    mensaje = (
+        f"¡Ya tenemos el costo! 🛵\n"
+        f"El delivery a tu zona es *S/ {monto_fmt}*.\n"
+        f"El total de tu pedido sería *S/ {total_fmt}*.\n\n"
+        f"¿Confirmamos? 🌮"
+    )
+
+    ok = await send_whatsapp_message(phone, mensaje)
+    if not ok:
+        return JSONResponse({"status": "error", "msg": "No se pudo enviar el mensaje al cliente"}, status_code=500)
+
+    # Agregar al historial de conversación para que el bot procese la confirmación
+    from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+    _ts = _dt.now(_tz(_td(hours=-5))).strftime("%H:%M")
+    db.append_message(phone, "assistant", mensaje, ts=_ts)
+
+    # Guardar en historial de costos (aprendizaje de zonas)
+    query = next((q for q in db.get_all_pending_cost_queries() if q["client_phone"] == phone), None)
+    if query:
+        db.save_delivery_cost(
+            phone,
+            query.get("direccion", ""),
+            monto,
+            query.get("subtotal", ""),
+            query.get("items", ""),
+        )
+
+    # Eliminar la consulta pendiente
+    db.delete_pending_cost_query(phone)
+
+    print(f"[COSTO DELIVERY] ✅ S/{monto_fmt} enviado a +{phone} — total S/{total_fmt}")
+    return JSONResponse({"status": "ok"})
 
 
 @app.post("/pedidos/estado")

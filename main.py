@@ -701,6 +701,7 @@ async def pedidos_panel(
     cards = "".join(_render_card(p) for p in pedidos) if pedidos else '<div class="empty">No hay pedidos hoy todavía 🌮</div>'
 
     agotados_actual = db.get_config("productos_agotados", "")
+    bot_pausado = db.get_config("bot_pausado", "0") == "1"
 
     # Inject Python data as JS constants
     estados_js    = json.dumps(ESTADOS)
@@ -890,7 +891,14 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgro
     {"".join(f'<option value="{f}" {"selected" if f == fecha_sel else ""}>{f}{" (hoy)" if f == hoy else ""}</option>' for f in fechas_disponibles)}
   </select>
   <button class="btn-test" onclick="probarNotif()">🔔 Probar notificación</button>
+  <button id="btnPausa" onclick="togglePausa()"
+    style="border:none;padding:7px 18px;border-radius:20px;cursor:pointer;font-size:13px;font-weight:700;
+           background:{'#e53935' if bot_pausado else '#2D5016'};color:#fff"
+    data-pausado="{'1' if bot_pausado else '0'}">
+    {'▶️ Reanudar bot' if bot_pausado else '⏸️ Pausar bot'}
+  </button>
 </div>
+{'<div style="background:#e53935;color:#fff;text-align:center;padding:8px;font-weight:700;font-size:13px;letter-spacing:.3px">⏸️ BOT PAUSADO — Los clientes reciben mensaje de capacidad máxima</div>' if bot_pausado else ''}
 
 <div id="agotadosBar" style="background:#fff8e1;border-bottom:1px solid #ffe082;padding:8px 18px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
   <span style="font-size:13px;font-weight:600;color:#e65100">⚠️ Productos agotados hoy:</span>
@@ -1337,6 +1345,22 @@ async function guardarAgotados() {{
   }} catch(e) {{ alert('Error: ' + e.message); }}
 }}
 
+async function togglePausa() {{
+  const btn = document.getElementById('btnPausa');
+  const pausado = btn.dataset.pausado === '1';
+  const nuevo = pausado ? '0' : '1';
+  try {{
+    const r = await fetch('/api/config/pausa', {{
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {{'Content-Type':'application/json'}},
+      body: JSON.stringify({{value: nuevo}})
+    }});
+    const d = await r.json();
+    if (d.status === 'ok') location.reload();
+  }} catch(e) {{ alert('Error: ' + e.message); }}
+}}
+
 // Iniciar polling cada 10 segundos
 setInterval(refreshOrders, 10000);
 
@@ -1775,6 +1799,19 @@ async def api_guardar_agotados(
     db.set_config("productos_agotados", value)
     print(f"[CONFIG] Productos agotados actualizados: '{value}'")
     return JSONResponse({"status": "ok"})
+
+
+@app.post("/api/config/pausa")
+async def api_toggle_pausa(
+    request: Request,
+    credentials: HTTPBasicCredentials = Depends(verificar_admin)
+):
+    data = await request.json()
+    value = "1" if data.get("value") == "1" else "0"
+    db.set_config("bot_pausado", value)
+    estado = "PAUSADO" if value == "1" else "ACTIVO"
+    print(f"[CONFIG] Bot {estado}")
+    return JSONResponse({"status": "ok", "bot_pausado": value == "1"})
 
 
 @app.post("/api/clientes/puntos")

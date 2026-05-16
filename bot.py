@@ -26,17 +26,16 @@ def get_client() -> AsyncAnthropic:
 
 
 def esta_en_horario() -> bool:
-    return True  # ⚠️ MODO PRUEBA — restricción de horario desactivada temporalmente
-    # ahora = datetime.now(PERU_TZ)
-    # if ahora.weekday() not in (4, 5, 6):
-    #     return False
-    # hora, minuto = ahora.hour, ahora.minute
-    # if hora < 17:
-    #     return False
-    # # Último pedido a las 10:45pm
-    # if hora > 22 or (hora == 22 and minuto >= 45):
-    #     return False
-    # return True
+    ahora = datetime.now(PERU_TZ)
+    if ahora.weekday() not in (4, 5, 6):
+        return False
+    hora, minuto = ahora.hour, ahora.minute
+    if hora < 17:
+        return False
+    # Último pedido a las 10:45pm
+    if hora > 22 or (hora == 22 and minuto >= 45):
+        return False
+    return True
 
 
 def mensaje_fuera_horario() -> str:

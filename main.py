@@ -1619,19 +1619,14 @@ async def api_llamar_delivery(
     # tg_id = os.environ.get(f"DELIVERY_{target_index}_TELEGRAM_ID", "").strip()
     # ── Fin líneas motorizado ─────────────────────────────────────────────
 
-    # Notificar al dueño para gestión manual
-    msg_owner = (
-        f"🛵 *Delivery solicitado — Panel*\n"
-        f"📦 Pedido #{order_id}\n"
+    # Notificar al servicio de delivery
+    DELIVERY_PHONE = "525513781963"
+    msg_delivery = (
+        f"🛵 Delivery solicitado\n"
         f"👤 Cliente: +{order['phone']}\n"
-        f"📍 {order.get('direccion') or 'Sin dirección'}\n"
-        f"🛒 {order.get('items', '')}\n"
-        f"💰 {order.get('total', '')}\n"
-        f"🕒 {hora}\n"
-        f"_(Gestionar motorizado manualmente)_"
+        f"📍 {order.get('direccion') or 'Sin dirección'}"
     )
-    OWNER_PHONE = "51954713696"
-    ok = await send_whatsapp_message(OWNER_PHONE, msg_owner)
+    ok = await send_whatsapp_message(DELIVERY_PHONE, msg_delivery)
     if not ok:
         return JSONResponse({"status": "error", "msg": "No se pudo notificar al dueño"}, status_code=500)
 
@@ -1668,17 +1663,14 @@ async def api_consultar_delivery(
     # await send_whatsapp_message(target_phone, consulta)
     # ── Fin líneas motorizado ─────────────────────────────────────────────
 
-    # Notificar al dueño para gestión manual
-    msg_owner = (
-        f"💰 *Consultar costo delivery — Panel*\n"
-        f"📦 Pedido #{order_id}\n"
+    # Notificar al servicio de delivery para consultar costo
+    DELIVERY_PHONE = "525513781963"
+    msg_delivery = (
+        f"💰 Consulta de costo delivery\n"
         f"👤 Cliente: +{order['phone']}\n"
-        f"📍 {order.get('direccion') or 'Sin dirección'}\n"
-        f"🕒 {hora}\n"
-        f"_(Consultar costo con motorizado manualmente)_"
+        f"📍 {order.get('direccion') or 'Sin dirección'}"
     )
-    OWNER_PHONE = "51954713696"
-    await send_whatsapp_message(OWNER_PHONE, msg_owner)
+    await send_whatsapp_message(DELIVERY_PHONE, msg_delivery)
     print(f"[COSTO DELIVERY] Dueño notificado para pedido #{order_id}")
     return JSONResponse({"status": "ok", "delivery": "Dueño"})
 

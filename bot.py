@@ -670,10 +670,24 @@ async def _call_claude(phone: str, messages: list) -> str:
     return response.content[0].text
 
 
+def mensaje_pausado() -> str:
+    return (
+        "¡Hola! 🌮 Gracias por escribirnos.\n\n"
+        "🙏 *¡Gracias a todos! Agotamos stock por esta noche.*\n\n"
+        "Ha sido una noche increíble y nos quedamos sin ingredientes. "
+        "¡Nos vemos mañana con todo! 🔥\n\n"
+        "📲 Síguenos en Instagram *@chilangotacna* para estar al tanto."
+    )
+
+
 async def process_message(phone: str, message: str) -> tuple[str, bool]:
     """Retorna (reply_text, needs_escalate)."""
     if not esta_en_horario():
         return mensaje_fuera_horario(), False
+
+    # Verificar si el bot está pausado
+    if db.get_config("bot_pausado", "0") == "1":
+        return mensaje_pausado(), False
 
     now_ts = datetime.now(PERU_TZ).strftime("%H:%M")
     messages = db.get_messages(phone)
@@ -692,6 +706,8 @@ async def process_message_with_image(phone: str, image_bytes: bytes, mime_type: 
     """Retorna (reply_text, needs_escalate)."""
     if not esta_en_horario():
         return mensaje_fuera_horario(), False
+    if db.get_config("bot_pausado", "0") == "1":
+        return mensaje_pausado(), False
 
     now_ts = datetime.now(PERU_TZ).strftime("%H:%M")
     image_b64 = base64.standard_b64encode(image_bytes).decode("utf-8")

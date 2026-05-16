@@ -10,7 +10,7 @@ import db
 
 EXCEL_FILE = "pedidos_chilango.xlsx"
 PERU_TZ = timezone(timedelta(hours=-5))
-OWNER_PHONE = "51954713696"
+OWNER_PHONE = "51955500153"
 
 
 async def _send_whatsapp(to: str, body: str):
@@ -32,28 +32,83 @@ async def _send_whatsapp(to: str, body: str):
             print(f"[WA] ❌ Error al enviar a {to_clean}: {resp.status_code} {resp.text}")
 
 
+async def _send_telegram(chat_id: str, text: str):
+    """Envía un mensaje por Telegram. Sin restricción de 24 horas."""
+    token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+    if not token or not chat_id:
+        return False
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.post(url, json={
+            "chat_id": chat_id,
+            "text": text,
+            "parse_mode": "Markdown"
+        })
+        if resp.status_code == 200:
+            print(f"[TELEGRAM] ✅ Enviado a chat_id {chat_id}")
+            return True
+        else:
+            print(f"[TELEGRAM] ❌ Error a {chat_id}: {resp.status_code} {resp.text}")
+            return False
+
+
+async def _notify_delivery(delivery_phone: str, delivery_name: str,
+                            delivery_index: int, mensaje_wa: str, mensaje_tg: str):
+    """Envía notificación al motorizado por Telegram (preferido) o WhatsApp (fallback)."""
+    tg_id = os.environ.get(f"DELIVERY_{delivery_index}_TELEGRAM_ID", "").strip()
+    if tg_id:
+        sent = await _send_telegram(tg_id, mensaje_tg)
+        if sent:
+            return  # Telegram OK — no necesita WA
+    # Fallback a WhatsApp si no hay Telegram configurado o falló
+    print(f"[DELIVERY] Usando WhatsApp para {delivery_name} (sin Telegram configurado)")
+    await _send_whatsapp(delivery_phone, mensaje_wa)
+
+
 async def notify_delivery_cost_query(phone_client: str, direccion: str,
                                       subtotal: str = "", items: str = "", pago: str = ""):
-    """Envía consulta de costo de delivery al motorizado y guarda la consulta pendiente en BD."""
-    delivery_phone = (os.environ.get("DELIVERY_1_PHONE") or os.environ.get("DELIVERY_PHONE", "")).strip()
-    if not delivery_phone:
-        print("[CONSULTAR_COSTO] ⚠️ No hay DELIVERY_1_PHONE ni DELIVERY_PHONE configurado — no se envió consulta")
-        return
-    # Normalizar número: quitar "+" para la API Meta
-    delivery_phone_clean = delivery_phone.replace("+", "").strip()
-    delivery_name = (os.environ.get("DELIVERY_1_NAME") or os.environ.get("DELIVERY_NAME", "Delivery")).strip()
-    token_ok = bool(os.environ.get("META_ACCESS_TOKEN", "").strip())
-    pid_ok   = bool(os.environ.get("META_PHONE_NUMBER_ID", "").strip())
-    print(f"[CONSULTAR_COSTO] Enviando a {delivery_name} ({delivery_phone_clean}) | token={token_ok} | pid={pid_ok}")
-    mensaje = (
-        f"¿Cual es el costo a la siguiente dirección?\n"
-        f"Dirección: {direccion or 'Sin especificar'}\n"
-        f"Cliente: +{phone_client}"
+    """Notifica al dueño que un cliente necesita delivery — él gestionará manualmente el motorizado."""
+    # ── Líneas de delivery (mantenidas, no activas en este flujo) ──────────
+    # deliveries = []
+    # for i in range(1, 5):
+    #     ph = (os.environ.get(f"DELIVERY_{i}_PHONE") or (os.environ.get("DELIVERY_PHONE","") if i==1 else "")).strip()
+    #     name = os.environ.get(f"DELIVERY_{i}_NAME", f"Motorizado {i}").strip()
+    #     if ph:
+    #         deliveries.append({"phone": ph.replace("+",""), "name": name, "index": i})
+    # msg_wa = (
+    #     f"🛵 ¿Cuál es el costo de delivery?\n"
+    #     f"📍 {direccion or 'Sin especificar'}\n"
+    #     f"👤 Cliente: +{phone_client}\n"
+    #     f"(Responde solo con el monto, ej: 7 o S/7)"
+    # )
+    # msg_tg = (
+    #     f"🛵 *¿Cuál es el costo de delivery?*\n"
+    #     f"📍 {direccion or 'Sin especificar'}\n"
+    #     f"👤 Cliente: +{phone_client}\n"
+    #     f"_Responde por WhatsApp con el monto, ej: 7 o S/7_"
+    # )
+    # for d in deliveries:
+    #     await _notify_delivery(d["phone"], d["name"], d["index"], msg_wa, msg_tg)
+    #     db.save_delivery_query(d["phone"], phone_client, subtotal, items, pago, direccion)
+    # ── Fin líneas delivery ────────────────────────────────────────────────
+
+    # Notificar al dueño para que gestione el motorizado manualmente
+    subtotal_linea = f"\n💰 Subtotal: {subtotal}" if subtotal else ""
+    items_linea    = f"\n🛒 {items}" if items else ""
+    pago_linea     = f"\n💳 Pago: {pago}" if pago else ""
+
+    msg_owner = (
+        f"🛵 *Cliente necesita delivery*\n"
+        f"👤 +{phone_client}\n"
+        f"📍 {direccion or 'Sin especificar'}"
+        f"{items_linea}"
+        f"{subtotal_linea}"
+        f"{pago_linea}\n"
+        f"_(Gestionar motorizado manualmente)_"
     )
-    await _send_whatsapp(delivery_phone_clean, mensaje)
-    # Guardar consulta pendiente para poder auto-responder al cliente cuando el motorizado conteste
-    db.save_delivery_query(delivery_phone_clean, phone_client, subtotal, items, pago, direccion)
-    print(f"[CONSULTAR_COSTO] ✅ Consulta guardada — {delivery_name} ({delivery_phone_clean}) → cliente +{phone_client}")
+
+    await _send_whatsapp(OWNER_PHONE, msg_owner)
+    print(f"[CONSULTAR_COSTO] ✅ Dueño notificado para cliente +{phone_client}")
 
 
 def _init_excel():

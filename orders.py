@@ -10,7 +10,7 @@ import db
 
 EXCEL_FILE = "pedidos_chilango.xlsx"
 PERU_TZ = timezone(timedelta(hours=-5))
-OWNER_PHONE = "51955500153"
+OWNER_PHONE = "51954713696"
 
 
 async def _send_whatsapp(to: str, body: str):
@@ -108,7 +108,9 @@ async def notify_delivery_cost_query(phone_client: str, direccion: str,
     )
 
     await _send_whatsapp(OWNER_PHONE, msg_owner)
-    print(f"[CONSULTAR_COSTO] ✅ Dueño notificado para cliente +{phone_client}")
+    # Guardar consulta pendiente para gestión desde el panel
+    db.save_pending_cost_query(phone_client, subtotal, items, pago, direccion)
+    print(f"[CONSULTAR_COSTO] ✅ Dueño notificado y consulta guardada para cliente +{phone_client}")
 
 
 def _init_excel():

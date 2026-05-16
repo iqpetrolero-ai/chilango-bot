@@ -35,11 +35,16 @@ def init_db():
                 leida INTEGER NOT NULL DEFAULT 0
             )
         """)
-        # Migración: agregar columna leida si la BD ya existía sin ella
-        try:
-            c.execute("ALTER TABLE conversations ADD COLUMN leida INTEGER NOT NULL DEFAULT 0")
-        except Exception:
-            pass  # La columna ya existe
+        # Migraciones de conversations
+        for _m in [
+            "ALTER TABLE conversations ADD COLUMN leida INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE conversations ADD COLUMN escalado INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE conversations ADD COLUMN last_msg_at TEXT DEFAULT ''",
+        ]:
+            try:
+                c.execute(_m)
+            except Exception:
+                pass
         c.execute("""
             CREATE TABLE IF NOT EXISTS orders (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -87,6 +92,21 @@ def init_db():
                 items TEXT,
                 pago TEXT,
                 direccion TEXT,
+                created_at TEXT
+            )
+        """)
+
+        # ── Solicitudes de motorizado desde el panel ────────────────
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS moto_requests (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                order_id INTEGER,
+                client_phone TEXT,
+                direccion TEXT,
+                notas TEXT,
+                items TEXT,
+                estado TEXT DEFAULT 'pendiente',
+                accepted_by TEXT DEFAULT '',
                 created_at TEXT
             )
         """)
@@ -149,12 +169,13 @@ def get_messages(phone: str) -> list:
 
 
 def save_messages(phone: str, messages: list):
+    now = datetime.now(PERU_TZ).isoformat()
     with _conn() as c:
         c.execute("""
-            INSERT INTO conversations (phone, messages, welcomed)
-            VALUES (?, ?, 0)
-            ON CONFLICT(phone) DO UPDATE SET messages=excluded.messages
-        """, (phone, json.dumps(messages, ensure_ascii=False)))
+            INSERT INTO conversations (phone, messages, welcomed, last_msg_at)
+            VALUES (?, ?, 0, ?)
+            ON CONFLICT(phone) DO UPDATE SET messages=excluded.messages, last_msg_at=excluded.last_msg_at
+        """, (phone, json.dumps(messages, ensure_ascii=False), now))
 
 
 def is_welcomed(phone: str) -> bool:
@@ -173,6 +194,12 @@ def mark_welcomed(phone: str):
 
 
 def reset_conv(phone: str):
+    with _conn() as c:
+        c.execute("DELETE FROM conversations WHERE phone=?", (phone,))
+
+
+def delete_conversation(phone: str):
+    """Elimina completamente el historial de chat de un teléfono."""
     with _conn() as c:
         c.execute("DELETE FROM conversations WHERE phone=?", (phone,))
 
@@ -196,15 +223,19 @@ def get_all_conversations() -> dict[str, list]:
 
 
 def get_conversations_with_status() -> dict[str, dict]:
-    """Retorna {phone: {messages: [...], leida: bool}} para el panel admin."""
+    """Retorna {phone: {messages, leida, escalado, last_msg_at}} ordenado por actividad reciente."""
     with _conn() as c:
         rows = c.execute(
-            "SELECT phone, messages, leida FROM conversations WHERE welcomed=1 AND messages != '[]'"
+            "SELECT phone, messages, leida, escalado, last_msg_at "
+            "FROM conversations WHERE welcomed=1 AND messages != '[]' "
+            "ORDER BY last_msg_at DESC"
         ).fetchall()
         return {
             r["phone"]: {
                 "messages": json.loads(r["messages"]),
                 "leida": bool(r["leida"]),
+                "escalado": bool(r["escalado"]),
+                "last_msg_at": r["last_msg_at"] or "",
             }
             for r in rows
         }
@@ -212,6 +243,7 @@ def get_conversations_with_status() -> dict[str, dict]:
 
 def append_message(phone: str, role: str, content: str, ts: str = "", manual: bool = False):
     """Agrega un mensaje al historial sin reemplazarlo (para mensajes no procesados por Claude)."""
+    now = datetime.now(PERU_TZ).isoformat()
     with _conn() as c:
         row = c.execute("SELECT messages FROM conversations WHERE phone=?", (phone,)).fetchone()
         msgs = json.loads(row["messages"]) if row else []
@@ -222,10 +254,10 @@ def append_message(phone: str, role: str, content: str, ts: str = "", manual: bo
             entry["manual"] = True
         msgs.append(entry)
         c.execute("""
-            INSERT INTO conversations (phone, messages, welcomed)
-            VALUES (?, ?, 1)
-            ON CONFLICT(phone) DO UPDATE SET messages=excluded.messages
-        """, (phone, json.dumps(msgs, ensure_ascii=False)))
+            INSERT INTO conversations (phone, messages, welcomed, last_msg_at)
+            VALUES (?, ?, 1, ?)
+            ON CONFLICT(phone) DO UPDATE SET messages=excluded.messages, last_msg_at=excluded.last_msg_at
+        """, (phone, json.dumps(msgs, ensure_ascii=False), now))
 
 
 # ── Orders ────────────────────────────────────────────────────
@@ -427,3 +459,88 @@ def set_config(key: str, value: str):
             INSERT INTO config (key, value) VALUES (?,?)
             ON CONFLICT(key) DO UPDATE SET value=excluded.value
         """, (key, value))
+
+
+# ── Escalación (bot en pausa por conversación) ────────────────
+
+def mark_escalated(phone: str):
+    """Marca conversación como escalada — el bot no responderá hasta que el equipo la libere."""
+    with _conn() as c:
+        c.execute("UPDATE conversations SET escalado=1 WHERE phone=?", (phone,))
+
+
+def reset_escalation(phone: str):
+    """El equipo libera la conversación y el bot puede volver a responder."""
+    with _conn() as c:
+        c.execute("UPDATE conversations SET escalado=0 WHERE phone=?", (phone,))
+
+
+def is_escalated(phone: str) -> bool:
+    with _conn() as c:
+        row = c.execute("SELECT escalado FROM conversations WHERE phone=?", (phone,)).fetchone()
+        return bool(row and row["escalado"])
+
+
+# ── Recordatorios de confirmación pendiente ───────────────────
+
+def get_pending_reminders(minutos: int = 10) -> list[dict]:
+    """Retorna conversaciones donde el bot esperaba confirmación y el cliente no respondió."""
+    from datetime import datetime as _dt
+    cutoff = (_dt.now(PERU_TZ) - timedelta(minutes=minutos)).isoformat()
+    with _conn() as c:
+        rows = c.execute(
+            "SELECT phone, messages FROM conversations "
+            "WHERE welcomed=1 AND escalado=0 AND last_msg_at < ? AND last_msg_at != ''",
+            (cutoff,)
+        ).fetchall()
+    result = []
+    for r in rows:
+        msgs = json.loads(r["messages"])
+        if not msgs:
+            continue
+        last = msgs[-1]
+        # Solo si el último mensaje es del bot (assistant) y contiene palabras de confirmación
+        if last.get("role") != "assistant":
+            continue
+        content = str(last.get("content", "")).lower()
+        keywords = ["¿confirmamos", "confirmas", "yape", "yapea", "plina",
+                    "¿cómo pagas", "cómo pagas", "efectivo?", "total:"]
+        if any(k in content for k in keywords):
+            result.append({"phone": r["phone"], "last_msg": last.get("content", "")})
+    return result
+
+
+# ── Panel de motorizados ──────────────────────────────────────
+
+def create_moto_request(order_id: int, client_phone: str, direccion: str,
+                         notas: str, items: str) -> int:
+    now = datetime.now(PERU_TZ).strftime("%d/%m/%Y %H:%M")
+    with _conn() as c:
+        cur = c.execute(
+            "INSERT INTO moto_requests (order_id, client_phone, direccion, notas, items, created_at)"
+            " VALUES (?,?,?,?,?,?)",
+            (order_id, client_phone, direccion, notas, items, now)
+        )
+        return cur.lastrowid
+
+
+def get_pending_moto_requests() -> list[dict]:
+    with _conn() as c:
+        rows = c.execute(
+            "SELECT * FROM moto_requests WHERE estado='pendiente' ORDER BY id DESC"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def accept_moto_request(request_id: int, delivery_name: str):
+    with _conn() as c:
+        c.execute(
+            "UPDATE moto_requests SET estado='aceptado', accepted_by=? WHERE id=?",
+            (delivery_name, request_id)
+        )
+
+
+def get_moto_request(request_id: int) -> dict | None:
+    with _conn() as c:
+        row = c.execute("SELECT * FROM moto_requests WHERE id=?", (request_id,)).fetchone()
+        return dict(row) if row else None

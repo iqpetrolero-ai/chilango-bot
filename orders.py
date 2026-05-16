@@ -92,25 +92,18 @@ async def notify_delivery_cost_query(phone_client: str, direccion: str,
     #     db.save_delivery_query(d["phone"], phone_client, subtotal, items, pago, direccion)
     # ── Fin líneas delivery ────────────────────────────────────────────────
 
-    # Notificar al dueño para que gestione el motorizado manualmente
-    subtotal_linea = f"\n💰 Subtotal: {subtotal}" if subtotal else ""
-    items_linea    = f"\n🛒 {items}" if items else ""
-    pago_linea     = f"\n💳 Pago: {pago}" if pago else ""
+    DELIVERY_PHONE = "525513781963"
 
-    msg_owner = (
-        f"🛵 *Cliente necesita delivery*\n"
+    msg_delivery = (
+        f"🛵 Cliente necesita delivery\n"
         f"👤 +{phone_client}\n"
         f"📍 {direccion or 'Sin especificar'}"
-        f"{items_linea}"
-        f"{subtotal_linea}"
-        f"{pago_linea}\n"
-        f"_(Gestionar motorizado manualmente)_"
     )
+    await _send_whatsapp(DELIVERY_PHONE, msg_delivery)
 
-    await _send_whatsapp(OWNER_PHONE, msg_owner)
     # Guardar consulta pendiente para gestión desde el panel
     db.save_pending_cost_query(phone_client, subtotal, items, pago, direccion)
-    print(f"[CONSULTAR_COSTO] ✅ Dueño notificado y consulta guardada para cliente +{phone_client}")
+    print(f"[CONSULTAR_COSTO] ✅ Notificado a delivery ({DELIVERY_PHONE}), consulta guardada para +{phone_client}")
 
 
 def _init_excel():

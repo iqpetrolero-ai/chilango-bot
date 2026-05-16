@@ -12,7 +12,7 @@ db.init_db()
 _client = None
 
 PERU_TZ = timezone(timedelta(hours=-5))
-YAPE_PLIN_NUMBER = "954713696"
+YAPE_PLIN_NUMBER = "953038816"
 
 
 def get_client() -> AsyncAnthropic:
@@ -386,7 +386,7 @@ async def _notify_queja(phone_clean: str, desc: str):
     try:
         token = os.environ.get("META_ACCESS_TOKEN", "").strip()
         pid = os.environ.get("META_PHONE_NUMBER_ID", "").strip()
-        owner = "51955500153"
+        owner = "51954713696"
         if not token or not pid:
             print(f"[QUEJA] No se puede notificar: faltan vars de entorno")
             return

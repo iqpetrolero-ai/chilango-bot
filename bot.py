@@ -12,7 +12,7 @@ db.init_db()
 _client = None
 
 PERU_TZ = timezone(timedelta(hours=-5))
-YAPE_PLIN_NUMBER = "953038816"
+YAPE_PLIN_NUMBER = "954713696"
 
 
 def get_client() -> AsyncAnthropic:

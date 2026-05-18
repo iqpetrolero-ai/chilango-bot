@@ -44,7 +44,7 @@ def mensaje_fuera_horario() -> str:
         "En este momento estamos cerrados 😔\n\n"
         "🕒 Atendemos:\n"
         "*Viernes, Sábado y Domingo*\n"
-        "de *5:00 pm a 11:00 pm*\n\n"
+        "de *5:00 pm a 11:00 pm* · Último pedido: *10:45 pm*\n\n"
         "Si quieres, escribe *carta* para ver nuestro menú mientras tanto. 🌮\n\n"
         "¡Te esperamos pronto para taquear rico!"
     )
@@ -55,7 +55,7 @@ def mensaje_bienvenida() -> str:
         "¡Qué onda! 👋 Soy *Chili*, tu asistente de *Chilango*.\n\n"
         "Somos un restaurante mexicano de delivery en Tacna. "
         "Tenemos tacos, quesabirrias, burritos y todo lo que necesitas para taquear rico. 🌯\n\n"
-        "🕒 *Horario:* Viernes, Sábado y Domingo de 5:00 pm a 11:00 pm.\n\n"
+        "🕒 *Horario:* Viernes, Sábado y Domingo · 5:00 pm a 11:00 pm · Último pedido: 10:45 pm.\n\n"
         "¿Qué te apetece hoy?"
     )
 
@@ -104,9 +104,9 @@ Si es de las incluidas → no la cobres por separado. Si es adicional → agrég
 2. PREGUNTAS: Responde con detalle y entusiasmo sobre ingredientes, tamaños, sabores.
    - "¿Qué es la birria?" → Carne de res guisada en adobo especiado, jugosa y sabrosa
    - "¿Tienen opciones sin picante?" → Sí, puedes pedir tus tacos o birria sin salsa picante
-   - "¿Cuánto demora el delivery?" → El tiempo varía según la zona; el repartidor te confirmará al salir
+   - "¿Cuánto demora el delivery?" → El motorizado llega a nuestro local en unos 10-15 min y de ahí sale a tu dirección; el tiempo total depende de tu zona
    - "¿Tienen cobertura en mi zona?" → Sí, llegamos a todo Tacna
-   - "¿Cuánto cuesta el delivery?" → El costo varía según tu zona; el repartidor te lo informa al entregar
+   - "¿Cuánto cuesta el delivery?" → El costo varía según tu zona; te lo confirmamos antes de que salga el pedido
    - "¿Puedo pagar el delivery incluido en el pedido?" → ver punto 11
    - "¿La quesabirria incluye algo más?" → Sí, viene con consomé para dipping 🍲
    - "¿Puedo personalizar mi pedido?" → Sí: sin cebolla, sin cilantro o todo aparte
@@ -130,6 +130,11 @@ Si es de las incluidas → no la cobres por separado. Si es adicional → agrég
 
      ¿Te lo llevamos a domicilio o recoges en el local? Si es delivery, dime tu dirección (calle, número y referencia). ¿Y cómo pagas: Yape/Plin o efectivo?
 
+   - Si el perfil del cliente NO tiene nombre (campo nombre vacío), pídelo de forma natural
+     ANTES de confirmar el pedido, integrado en la misma pregunta de dirección/pago:
+     "¿Me dices tu nombre, a qué dirección lo llevamos y cómo pagas?"
+     Cuando el cliente lo mencione, guárdalo con [SAVE_NAME|nombre: X] al final del mensaje.
+     Si ya tiene nombre en el perfil (ver PERFIL DEL CLIENTE), NO lo pidas de nuevo.
    - Si el perfil ya tiene última dirección, sugiere: "¿Pedimos a [dir] o cambias la dirección?"
    - El cliente puede responder todo junto (ej: "delivery, Jr. Tacna 123, Yape/Plin").
      Procesa lo que dé. Si falta la dirección en delivery, pídela en un mensaje breve.
@@ -159,6 +164,30 @@ Si es de las incluidas → no la cobres por separado. Si es adicional → agrég
    Ejemplos:
    [PEDIDO_OK|items: 2x Taco Suadero, 1x Agua Jamaica|total: S/ 15.00|pago: Yape/Plin|dir: Av. Bolognesi 456|notas: sin cebolla]
    [PEDIDO_OK|items: 1x Quesabirria, 1x Esquites|total: S/ 20.00|pago: Efectivo|dir: Recojo|notas: ]
+
+   REGLA DE FORMATO PARA COMBOS — TANTO EN EL CHAT COMO EN EL TAG:
+   Cuando el pedido incluye un combo, escríbelo SIEMPRE con el nombre del combo seguido del detalle entre paréntesis.
+   NUNCA listes los componentes de un combo de forma individual con precios, ni en el resumen del chat ni en el tag.
+
+   FORMATO EN EL CHAT (resumen al cliente):
+   • 1x Combo Pa' Ti Solito — S/ 29.90
+     _(3x Quesabirria + 1x Agua Jamaica + 1x Guacamole)_
+   • 1x Combo De Compas — S/ 57.50
+     _(2x Taco Pastor + 2x Quesabirria + 1x Gringa + 1x Guacamole + 2x Agua)_
+
+   FORMATO EN EL TAG items:
+   "Combo Pa' Ti Solito (3x Quesabirria, 1x Agua Jamaica, 1x Guacamole)"
+   "De Compas (2x Taco Suadero, 2x Quesabirria, 1x Gringa de Pastor, 1x Guacamole, 2x Agua Horchata)"
+   "Plato Chingón (2x Quesabirria, 1x Gringa Pastor, 2x Taco Campechano, ½ Nachos, 1x Guacamole)"
+
+   Ejemplos INCORRECTOS (NUNCA hacer esto):
+   ✗ • 1x Taco Suadero — S/ 6.50 / • 1x Quesabirria — S/ 10.00 / ...  ← desglose con precios de combo
+   ✗ "2x Quesabirria, 1x Agua Jamaica, 1x Guacamole"  ← sin nombre del combo en el tag
+
+   REGLA DE NOTAS — PERSONALIZACIONES OBLIGATORIAS:
+   Toda personalización del cliente ("sin cebolla", "sin cilantro", "todo aparte", "extra queso",
+   "sin picante", etc.) DEBE registrarse en el campo notas del tag.
+   NUNCA omitas una personalización. Si no hay ninguna, deja notas vacío.
 
 5. MODIFICACIONES: Si el cliente ya tiene un pedido confirmado y quiere cambiarlo:
    - Escucha qué quiere modificar (agregar, quitar o cambiar ítems)
@@ -193,8 +222,18 @@ Si es de las incluidas → no la cobres por separado. Si es adicional → agrég
    SOLO si el cliente pregunta EXPLÍCITAMENTE por su pedido (ej: "¿ya salió?", "¿dónde está?",
    "¿cuánto falta?", "¿ya lo mandaron?"), responde de forma genérica y tranquilizadora:
    - "¡El equipo ya está en ello! En cuanto salga te avisamos 🌮"
-   - "¡Lo están preparando con todo el sabor! Te notificamos cuando esté en camino 🔥"
    Nunca menciones tiempos exactos. Máximo 2 líneas.
+
+   ⚠️ ESCALACIÓN AUTOMÁTICA POR DEMORA:
+   Si el cliente expresa frustración explícita por la espera con frases como:
+   "ya es una hora", "ya pasó mucho tiempo", "llevan mucho", "hace rato que espero",
+   "ya tardaron demasiado", "más de 45 minutos", "ya es tarde", o cualquier variante de
+   queja directa sobre el tiempo de espera:
+   → Responde con empatía, disculpa la demora y usa [ESCALATE] OBLIGATORIAMENTE.
+   Ejemplo: "Chilanguit@, tienes razón y te pedimos disculpas por la espera 🙏
+   Vamos a conectarte con alguien del equipo ahora mismo para darte una respuesta directa."
+   (Agrega [ESCALATE] al final sin mostrarlo)
+   ⛔ NUNCA respondas con "el equipo ya está en ello" cuando hay queja explícita de demora.
 
    Si el cliente dice "gracias", "ok", "perfecto", "listo" u otras frases de cierre → responde
    brevemente ("¡Con gusto! 😊") SIN mencionar nada del estado del pedido.
@@ -300,6 +339,21 @@ Si es de las incluidas → no la cobres por separado. Si es adicional → agrég
     - Confirma el cambio brevemente ("Anotado, pagamos en efectivo 💵") y emite
       [PEDIDO_OK] directamente con el total ya comunicado y el nuevo método de pago.
 
+    ⛔ PROHIBICIÓN ABSOLUTA — NUNCA ESTIMES EL COSTO DE DELIVERY:
+    Está terminantemente prohibido inventar, estimar, suponer o calcular el costo de delivery.
+    NO existe un costo "típico", "aproximado" ni "estándar" — TÚ NO SABES cuánto cuesta.
+    El único costo válido es el que aparece en el historial con el mensaje "¡Ya tenemos el costo!".
+    Si el cliente quiere pagar delivery incluido y ese mensaje NO está en el historial:
+    → Emite [CONSULTAR_COSTO] y espera. No hay otra opción válida.
+    Incluir un costo de delivery inventado en [PEDIDO_OK] es un error crítico que genera
+    cobros incorrectos al cliente y pérdidas al negocio.
+
+    ⛔ PROHIBICIÓN ADICIONAL — NUNCA ESCRIBAS "¡Ya tenemos el costo!":
+    La frase "¡Ya tenemos el costo!" es generada EXCLUSIVAMENTE por el sistema automático.
+    TÚ NUNCA debes escribirla. Si el cliente pregunta por el costo y no aparece en el historial,
+    responde: "Estamos consultando el costo de delivery a tu zona, en un momento te confirmamos. ⏳"
+    NUNCA incluyas una cifra de delivery si "¡Ya tenemos el costo!" no aparece en el historial.
+
 12. QUEJAS (sabor, temperatura, falta de producto, orden incorrecta):
     - Responde con ownership inmediato y empatía real. Sin excusas.
     - Pregunta brevemente qué estuvo mal para entender el problema.
@@ -378,6 +432,45 @@ al inicio de la conversación de forma natural. NO uses "Karla" como apelativo g
 Si el perfil ya tiene una dirección o método de pago habitual, sugiérelos cuando corresponda:
 "¿Pedimos a la misma dirección de siempre?" o "¿Pagamos igual que la vez anterior?"
 """
+
+
+async def _notify_reescalacion(phone_clean: str, user_msgs_sin_respuesta: int):
+    """Re-notifica al dueño que un cliente escalado sigue escribiendo sin respuesta manual."""
+    try:
+        token = os.environ.get("META_ACCESS_TOKEN", "").strip()
+        pid = os.environ.get("META_PHONE_NUMBER_ID", "").strip()
+        owner = "51954713696"
+        if not token or not pid:
+            print(f"[RE-ESCALATE] Faltan vars de entorno — no se re-notificó a {phone_clean}")
+            return
+        mensaje = (
+            f"🔴 *CLIENTE ESPERANDO — Chilango*\n"
+            f"👤 +{phone_clean}\n"
+            f"⚠️ Ha escrito {user_msgs_sin_respuesta} vez{'es' if user_msgs_sin_respuesta > 1 else ''} "
+            f"sin recibir respuesta del equipo.\n"
+            f"📲 Entra al chat y respóndele directamente.\n"
+            f"🕒 {datetime.now(PERU_TZ).strftime('%d/%m · %I:%M %p')}"
+        )
+        url = f"https://graph.facebook.com/v19.0/{pid}/messages"
+        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+        payload = {"messaging_product": "whatsapp", "to": owner, "type": "text", "text": {"body": mensaje}}
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(url, json=payload, headers=headers)
+            if resp.status_code == 200:
+                print(f"[RE-ESCALATE] ✅ Re-notificación enviada al dueño para +{phone_clean}")
+            else:
+                print(f"[RE-ESCALATE] ❌ Error: {resp.status_code} {resp.text}")
+    except Exception as e:
+        print(f"[RE-ESCALATE] Excepción: {e}")
+
+
+def _contar_mensajes_sin_respuesta_manual(messages: list) -> int:
+    """Cuenta mensajes del cliente enviados desde la última respuesta manual del equipo."""
+    last_manual_idx = -1
+    for i, m in enumerate(messages):
+        if m.get("manual"):
+            last_manual_idx = i
+    return sum(1 for m in messages[last_manual_idx + 1:] if m.get("role") == "user")
 
 
 async def _notify_queja(phone_clean: str, desc: str):
@@ -684,9 +777,8 @@ async def _call_claude(phone: str, messages: list) -> str:
     except Exception as e:
         print(f"[AGOTADOS] Error al leer config: {e}")
 
-    system = (
-        SYSTEM_PROMPT
-        + profile_ctx
+    dynamic_ctx = (
+        profile_ctx
         + agotados_ctx
         + f"\n\n━━━ CONTEXTO ACTUAL ━━━"
         + f"\nHora actual en Tacna: {hora_tacna}"
@@ -695,7 +787,12 @@ async def _call_claude(phone: str, messages: list) -> str:
     response = await get_client().messages.create(
         model="claude-haiku-4-5-20251001",
         max_tokens=1024,
-        system=system,
+        system=[
+            # Parte estática grande → se cachea entre llamadas (ahorro ~90% en tokens de sistema)
+            {"type": "text", "text": SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}},
+            # Parte dinámica (perfil, agotados, hora) → no se cachea, cambia por request
+            {"type": "text", "text": dynamic_ctx},
+        ],
         messages=history,
     )
     return response.content[0].text
@@ -704,10 +801,9 @@ async def _call_claude(phone: str, messages: list) -> str:
 def mensaje_pausado() -> str:
     return (
         "¡Hola! 🌮 Gracias por escribirnos.\n\n"
-        "🙏 *¡Gracias a todos! Agotamos stock por esta noche.*\n\n"
-        "Ha sido una noche increíble y nos quedamos sin ingredientes. "
-        "¡Nos vemos mañana con todo! 🔥\n\n"
-        "📲 Síguenos en Instagram *@chilangotacna* para estar al tanto."
+        "En este momento estamos con *máxima capacidad en cocina* 🔥\n\n"
+        "En unos minutos estaremos listos para tomar tu pedido. "
+        "¡Por favor escríbenos en un momento! 🙏"
     )
 
 
@@ -728,13 +824,11 @@ async def process_message(phone: str, message: str) -> tuple[str, bool]:
     if db.get_config("bot_pausado", "0") == "1":
         return mensaje_pausado(), False
 
-    # Auto-pausa por saturación: 4+ pedidos activos
+    # Auto-pausa por saturación: 4+ pedidos activos (transitoria, sin tocar config manual)
     try:
         _activos = db.get_active_orders_count()
         if _activos >= 4:
-            if db.get_config("bot_pausado", "0") != "1":
-                db.set_config("bot_pausado", "1")
-                print(f"[AUTO-PAUSA] Activada — {_activos} pedidos activos")
+            print(f"[AUTO-PAUSA] Saturado — {_activos} pedidos activos")
             return mensaje_saturado(), False
     except Exception as _e:
         print(f"[AUTO-PAUSA] Error: {_e}")
@@ -742,7 +836,18 @@ async def process_message(phone: str, message: str) -> tuple[str, bool]:
     # Verificar si esta conversación está escalada al equipo humano
     phone_clean_esc = phone.replace("whatsapp:", "").replace("+", "")
     if db.is_escalated(phone_clean_esc):
-        return "Nuestro equipo ya está atento a tu mensaje, en un momento te responden 🙏", False
+        msgs = db.get_messages(phone)
+        sin_respuesta = _contar_mensajes_sin_respuesta_manual(msgs)
+        if sin_respuesta >= 1 and db.check_reescalation_cooldown(phone_clean_esc, minutes=5):
+            await _notify_reescalacion(phone_clean_esc, sin_respuesta)
+            db.mark_reescalation_sent(phone_clean_esc)
+            reply_esc = (
+                "Entendemos tu impaciencia 🙏 Ya alertamos nuevamente al equipo — "
+                "te responden en breve directamente aquí."
+            )
+        else:
+            reply_esc = "Nuestro equipo ya está atento a tu mensaje, en un momento te responden 🙏"
+        return reply_esc, False
 
     now_ts = datetime.now(PERU_TZ).strftime("%H:%M")
     messages = db.get_messages(phone)
@@ -765,7 +870,18 @@ async def process_message_with_image(phone: str, image_bytes: bytes, mime_type: 
         return mensaje_pausado(), False
     phone_clean_esc = phone.replace("whatsapp:", "").replace("+", "")
     if db.is_escalated(phone_clean_esc):
-        return "Nuestro equipo ya está atento a tu mensaje, en un momento te responden 🙏", False
+        msgs = db.get_messages(phone)
+        sin_respuesta = _contar_mensajes_sin_respuesta_manual(msgs)
+        if sin_respuesta >= 1 and db.check_reescalation_cooldown(phone_clean_esc, minutes=5):
+            await _notify_reescalacion(phone_clean_esc, sin_respuesta)
+            db.mark_reescalation_sent(phone_clean_esc)
+            reply_esc = (
+                "Entendemos tu impaciencia 🙏 Ya alertamos nuevamente al equipo — "
+                "te responden en breve directamente aquí."
+            )
+        else:
+            reply_esc = "Nuestro equipo ya está atento a tu mensaje, en un momento te responden 🙏"
+        return reply_esc, False
 
     now_ts = datetime.now(PERU_TZ).strftime("%H:%M")
     image_b64 = base64.standard_b64encode(image_bytes).decode("utf-8")
@@ -791,7 +907,21 @@ async def process_message_with_image(phone: str, image_bytes: bytes, mime_type: 
     reply, escalate = await _parse_and_save_order(phone, reply)
 
     messages.append({"role": "assistant", "content": reply, "ts": now_ts})
-    db.save_messages(phone, messages)
+
+    # Guardar historial reemplazando el contenido de imagen con placeholder
+    # para no almacenar datos base64 grandes en SQLite en sesiones futuras
+    messages_to_save = []
+    for msg in messages:
+        if isinstance(msg.get("content"), list):
+            text_parts = [b["text"] for b in msg["content"] if b.get("type") == "text"]
+            messages_to_save.append({
+                "role": msg["role"],
+                "content": text_parts[0] if text_parts else "[📷 Captura de pago enviada]",
+                "ts": msg.get("ts", ""),
+            })
+        else:
+            messages_to_save.append(msg)
+    db.save_messages(phone, messages_to_save)
 
     return reply, escalate
 

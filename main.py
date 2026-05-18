@@ -1,7 +1,9 @@
 import os
 import html
 import json
+import time
 import httpx
+from collections import OrderedDict
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -12,7 +14,8 @@ import secrets
 from fastapi.responses import HTMLResponse, PlainTextResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from bot import process_message, process_message_with_image, reset_conversation, mensaje_bienvenida
+from bot import (process_message, process_message_with_image, reset_conversation,
+                 mensaje_bienvenida, esta_en_horario, mensaje_fuera_horario)
 from orders import get_orders_count
 from menu import MENU_TEXTO
 import db
@@ -29,7 +32,7 @@ async def _start_reminder_task():
         await _asyncio.sleep(60)  # Esperar 1 min al arrancar antes del primer chequeo
         while True:
             try:
-                pendientes = db.get_pending_reminders(minutos=5)
+                pendientes = db.get_pending_reminders(minutos=5, cooldown_min=30)
                 for p in pendientes:
                     phone = p["phone"]
                     # Enviar recordatorio por WhatsApp
@@ -41,12 +44,59 @@ async def _start_reminder_task():
                     from datetime import datetime as _dt, timezone as _tz, timedelta as _td
                     _ts = _dt.now(_tz(_td(hours=-5))).strftime("%H:%M")
                     db.append_message(phone, "assistant", recordatorio, ts=_ts)
+                    db.mark_reminder_sent(phone)
                     print(f"[RECORDATORIO] Enviado a {phone}")
             except Exception as _e:
                 print(f"[RECORDATORIO] Error: {_e}")
             await _asyncio.sleep(300)  # Chequear cada 5 minutos
 
     _asyncio.create_task(_reminder_loop())
+
+    async def _survey_loop():
+        await _asyncio.sleep(120)
+        while True:
+            try:
+                pedidos = db.get_orders_for_survey(minutes=60)
+                for p in pedidos:
+                    encuesta = (
+                        "¡Hola! 😊 Esperamos que hayas disfrutado tu pedido de Chilango.\n\n"
+                        "¿Cómo estuvo la experiencia? Tu opinión nos ayuda a mejorar 🙏\n\n"
+                        "⭐ Del 1 al 5, ¿qué nota le das?"
+                    )
+                    await send_whatsapp_message(p["phone"], encuesta)
+                    from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+                    _ts = _dt.now(_tz(_td(hours=-5))).strftime("%H:%M")
+                    db.append_message(p["phone"], "assistant", encuesta, ts=_ts)
+                    db.mark_survey_sent(p["id"])
+                    print(f"[ENCUESTA] Enviada a {p['phone']}")
+            except Exception as _e:
+                print(f"[ENCUESTA] Error: {_e}")
+            await _asyncio.sleep(600)  # Chequear cada 10 minutos
+
+    _asyncio.create_task(_survey_loop())
+
+    async def _carta_followup_loop():
+        await _asyncio.sleep(90)
+        while True:
+            try:
+                pendientes = db.get_pending_carta_followups(minutos=15)
+                for p in pendientes:
+                    followup = (
+                        "¡Hola! 😊 ¿Pudiste ver nuestra carta? 🌮\n\n"
+                        "Si te animaste con algo o tienes alguna duda, aquí estamos. "
+                        "¿Le entramos con un pedido?"
+                    )
+                    await send_whatsapp_message(p["phone"], followup)
+                    from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+                    _ts = _dt.now(_tz(_td(hours=-5))).strftime("%H:%M")
+                    db.append_message(p["phone"], "assistant", followup, ts=_ts)
+                    db.mark_carta_followup_sent(p["phone"])
+                    print(f"[CARTA FOLLOWUP] Enviado a {p['phone']}")
+            except Exception as _e:
+                print(f"[CARTA FOLLOWUP] Error: {_e}")
+            await _asyncio.sleep(300)  # Chequear cada 5 minutos
+
+    _asyncio.create_task(_carta_followup_loop())
 
 import os as _os
 if _os.path.exists("static"):
@@ -57,6 +107,28 @@ if not ADMIN_PASSWORD:
     raise RuntimeError("La variable de entorno ADMIN_PASSWORD no está configurada")
 
 security = HTTPBasic()
+
+
+def _format_contact_time(iso_str: str) -> str:
+    """Formatea last_msg_at al estilo WhatsApp: HH:MM hoy, Ayer, día semana, o DD/MM."""
+    if not iso_str:
+        return ""
+    try:
+        from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+        _PERU = _tz(_td(hours=-5))
+        ts = _dt.fromisoformat(iso_str).astimezone(_PERU)
+        now = _dt.now(_PERU)
+        delta = (now.date() - ts.date()).days
+        if delta == 0:
+            return ts.strftime("%I:%M %p").lstrip("0")
+        if delta == 1:
+            return "Ayer"
+        if delta < 7:
+            dias = ["lun.", "mar.", "mié.", "jue.", "vie.", "sáb.", "dom."]
+            return dias[ts.weekday()]
+        return ts.strftime("%d/%m")
+    except Exception:
+        return ""
 
 
 def verificar_admin(credentials: HTTPBasicCredentials = Depends(security)):
@@ -70,6 +142,8 @@ def verificar_admin(credentials: HTTPBasicCredentials = Depends(security)):
 META_ACCESS_TOKEN = os.environ.get("META_ACCESS_TOKEN", "").strip()
 META_PHONE_NUMBER_ID = os.environ.get("META_PHONE_NUMBER_ID", "").strip()
 META_VERIFY_TOKEN = os.environ.get("META_VERIFY_TOKEN", "").strip()
+DELIVERY_SERVICE_PHONE = os.environ.get("DELIVERY_SERVICE_PHONE", "525513781963").strip()
+OWNER_PHONE = os.environ.get("OWNER_PHONE", "51954713696").strip()
 BASE_URL = os.environ.get("RAILWAY_PUBLIC_DOMAIN", "")
 PDF_URL = f"https://{BASE_URL}/static/carta.pdf" if BASE_URL else ""
 # ── Servicios de delivery (hasta 4 motorizados) ──────────────
@@ -98,8 +172,24 @@ SALUDOS_GENERICOS = {"hola", "buenas", "buenos días", "buenas tardes", "buenas 
 
 # ── Deduplicación de webhooks ─────────────────────────────────
 # Meta reenvía el mismo mensaje si no recibe respuesta rápida.
-# Guardamos los últimos 500 message IDs para evitar procesar dos veces.
-_processed_msg_ids: set[str] = set()
+# Usamos OrderedDict como set ordenado: popitem(last=False) elimina el más antiguo.
+_processed_msg_ids: OrderedDict = OrderedDict()
+
+# ── Rate limiting por número de teléfono ──────────────────────
+# Máx 15 mensajes por minuto por número para proteger la API de Claude.
+_rate_limit: dict[str, list] = {}
+
+
+def _check_rate_limit(phone: str, max_msgs: int = 15, window_secs: int = 60) -> bool:
+    """Retorna True si el teléfono superó el límite de mensajes."""
+    now = time.time()
+    timestamps = _rate_limit.get(phone, [])
+    timestamps = [t for t in timestamps if now - t < window_secs]
+    if len(timestamps) >= max_msgs:
+        return True
+    timestamps.append(now)
+    _rate_limit[phone] = timestamps
+    return False
 
 
 async def send_whatsapp_message(to: str, text: str, phone_number_id: str = None) -> bool:
@@ -138,10 +228,11 @@ async def send_whatsapp_message(to: str, text: str, phone_number_id: str = None)
 
 
 async def send_whatsapp_document(to: str, caption: str, doc_url: str, phone_number_id: str = None):
-    pid = phone_number_id or META_PHONE_NUMBER_ID
+    token = os.environ.get("META_ACCESS_TOKEN", "").strip() or META_ACCESS_TOKEN
+    pid = phone_number_id or os.environ.get("META_PHONE_NUMBER_ID", "").strip() or META_PHONE_NUMBER_ID
     url = f"https://graph.facebook.com/v19.0/{pid}/messages"
     headers = {
-        "Authorization": f"Bearer {META_ACCESS_TOKEN}",
+        "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
     }
     payload = {
@@ -154,7 +245,7 @@ async def send_whatsapp_document(to: str, caption: str, doc_url: str, phone_numb
             "filename": "Carta_Chilango.pdf",
         },
     }
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=10) as client:
         resp = await client.post(url, json=payload, headers=headers)
         if resp.status_code != 200:
             print(f"[ERROR META DOC] {resp.status_code} {resp.text}")
@@ -271,8 +362,13 @@ async def handle_message(phone: str, message: str, phone_number_id: str = None):
     phone_clean = phone.replace("whatsapp:", "").replace("+", "")
     print(f"[MENSAJE] {phone}: {message}")
 
-    # ── Mensajes de números de delivery ─────────────────────────────────────────
+    # Rate limiting: máx 15 mensajes/minuto por número (excluye números de delivery)
     delivery_phones = {d["phone"].replace("+", "") for d in DELIVERIES}
+    if phone_clean not in delivery_phones and _check_rate_limit(phone_clean):
+        print(f"[RATE LIMIT] {phone_clean} excedió 15 msg/min — ignorado")
+        return
+
+    # ── Mensajes de números de delivery ─────────────────────────────────────────
     if phone_clean in delivery_phones:
         delivery_name = next(
             (d["name"] for d in DELIVERIES if d["phone"].replace("+", "") == phone_clean),
@@ -387,6 +483,14 @@ async def handle_message(phone: str, message: str, phone_number_id: str = None):
     # Nuevo usuario: enviar bienvenida primero
     if not db.is_welcomed(phone):
         db.mark_welcomed(phone)
+        if not esta_en_horario():
+            # Fuera de horario: no enviamos botones de pedido, solo el aviso
+            reply = mensaje_fuera_horario()
+            await send_whatsapp_message(phone, reply, sending_id)
+            db.append_message(phone, "user", message)
+            db.append_message(phone, "assistant", reply)
+            db.mark_unread(phone)
+            return
         bienvenida = mensaje_bienvenida()
         await send_whatsapp_message(phone, bienvenida, sending_id)
         await send_whatsapp_buttons(
@@ -454,9 +558,9 @@ async def receive_message(request: Request):
             if msg_id in _processed_msg_ids:
                 print(f"[WEBHOOK] Mensaje duplicado ignorado: {msg_id}")
                 return JSONResponse({"status": "ok"})
-            _processed_msg_ids.add(msg_id)
+            _processed_msg_ids[msg_id] = True
             if len(_processed_msg_ids) > 500:
-                _processed_msg_ids.clear()
+                _processed_msg_ids.popitem(last=False)  # elimina el más antiguo
 
         phone = message_data["from"]
         msg_type = message_data.get("type", "")
@@ -477,6 +581,7 @@ async def receive_message(request: Request):
             btn = message_data.get("interactive", {}).get("button_reply", {})
             btn_id    = btn.get("id", "")
             btn_title = btn.get("title", "")
+            phone_clean = phone.replace("whatsapp:", "").replace("+", "")
             from datetime import datetime, timezone, timedelta
             _PERU_TZ = timezone(timedelta(hours=-5))
             now_ts = datetime.now(_PERU_TZ).strftime("%H:%M")
@@ -561,11 +666,54 @@ STEP_LABELS = ["Nuevo", "Preparación", "En camino", "Entregado"]
 STEP_IDX = {"Nuevo 🆕": 0, "En preparación 👨‍🍳": 1, "En camino 🛵": 2, "Entregado ✅": 3}
 
 
+async def _notify_order_listo(order: dict):
+    """Envía WhatsApp al cliente avisando que el pedido está listo esperando al delivery."""
+    if not order:
+        return
+    phone = order["phone"]
+    mensaje = (
+        "🎉 *¡Tu pedido está listo!*\n\n"
+        f"🛒 {order['items']}\n"
+        f"💰 {order['total']}\n\n"
+        "🛵 Estamos esperando al motorizado — en breve saldrá a tu dirección.\n"
+        "¡Gracias por tu paciencia! 🌮"
+    )
+    await send_whatsapp_message(phone, mensaje)
+
+
+async def _briefing_motorista(order: dict):
+    """Avisa al equipo (dueño) qué decirle al motorizado de Altoke sobre el cobro al entregar.
+    Altoke no acepta datos del pedido — el equipo se los da en persona cuando llega el moto."""
+    if not order:
+        return
+    metodo = order.get("metodo_pago") or "Efectivo"
+    es_digital = metodo in ("Yape/Plin", "Yape", "Plin")
+    tiene_delivery_pago = "delivery:" in (order.get("items") or "").lower()
+    if es_digital and tiene_delivery_pago:
+        cobro_txt = "✅ Ya pagó TODO (comida + delivery) en digital — dile al moto que NO cobre nada."
+    elif es_digital:
+        cobro_txt = "💜 Pagó la comida en digital — dile al moto que cobre SOLO el delivery al cliente."
+    else:
+        cobro_txt = f"💵 Paga en EFECTIVO — dile al moto que cobre {order['total']} + delivery al cliente."
+    from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+    hora = _dt.now(_tz(_td(hours=-5))).strftime("%d/%m · %I:%M %p")
+    msg = (
+        f"🛵 *Pedido #{order['id']} salió — Chilango*\n"
+        f"📍 {order.get('direccion') or 'Sin dirección'}\n"
+        f"💳 {cobro_txt}\n"
+        f"🕒 {hora}"
+    )
+    await send_whatsapp_message(OWNER_PHONE, msg)
+
+
 async def _notify_order_camino(order: dict):
     """Envía WhatsApp al cliente cuando su pedido pasa a 'En camino'."""
     if not order:
         return
     phone = order["phone"]
+    # Marcar timestamp para encuesta post-entrega
+    if order.get("id"):
+        db.mark_order_camino(order["id"])
     es_recojo = (order.get("direccion") or "").strip().lower() == "recojo"
     if es_recojo:
         mensaje = (
@@ -577,13 +725,32 @@ async def _notify_order_camino(order: dict):
             "¡Te esperamos! 🌮"
         )
     else:
+        metodo = order.get("metodo_pago") or "Efectivo"
+        es_digital = metodo in ("Yape/Plin", "Yape", "Plin")
+        tiene_delivery_pago = "delivery:" in (order.get("items") or "").lower()
+        if es_digital and tiene_delivery_pago:
+            aviso_pago = (
+                "\n\n💜 *Ya pagaste en digital (incluyendo el delivery).*\n"
+                "El motorizado *no cobrará nada adicional* al entregar. ✅"
+            )
+        elif es_digital:
+            aviso_pago = (
+                "\n\n💜 *Pago confirmado por digital.*\n"
+                "Solo el delivery se cobra al entregar si no lo incluiste antes."
+            )
+        else:
+            aviso_pago = ""
         mensaje = (
             "🛵 *¡Tu pedido está en camino!*\n\n"
             f"🛒 {order['items']}\n"
-            f"💰 {order['total']}\n\n"
+            f"💰 {order['total']}"
+            f"{aviso_pago}\n\n"
             "¡Gracias por elegir Chilango! 🌮"
         )
     await send_whatsapp_message(phone, mensaje)
+    # Briefing al motorizado (si es delivery)
+    if not es_recojo:
+        await _briefing_motorista(order)
 
 
 def _render_card(p: dict) -> str:
@@ -640,11 +807,38 @@ def _render_card(p: dict) -> str:
     items_list = [i.strip() for i in items_raw.split(",") if i.strip()]
     items_html = "".join(f'<div class="oc-item-line">• {html.escape(i)}</div>' for i in items_list) if len(items_list) > 1 else html.escape(items_raw)
 
+    # Badge cuando el cliente pagó el delivery incluido en el pedido
+    tiene_delivery_pago = "delivery:" in items_raw.lower()
+    delivery_badge = '<span class="oc-pbadge delivery-inc">🛵 Delivery pagado</span>' if tiene_delivery_pago else ""
+
+    # Protocolo de cobro para el motorizado de Altoke (visible en "En preparación")
+    if estado == "En preparación 👨‍🍳" and not es_recojo:
+        if es_digital and tiene_delivery_pago:
+            cobro_moto = "✅ Ya pagó TODO — dile al moto que NO cobre nada al cliente"
+            cobro_color = "#e8f5e9"; cobro_border = "#a5d6a7"; cobro_txt_color = "#2e7d32"
+        elif es_digital:
+            cobro_moto = "💜 Pagó en digital — el moto cobra SOLO el delivery al cliente"
+            cobro_color = "#f3e5f5"; cobro_border = "#ce93d8"; cobro_txt_color = "#6a1b9a"
+        else:
+            cobro_moto = f"💵 Pago en efectivo — el moto cobra {html.escape(p['total'])} + delivery"
+            cobro_color = "#fff8e1"; cobro_border = "#ffe082"; cobro_txt_color = "#e65100"
+        altoke_banner = (
+            f'<div style="background:{cobro_color};border:1px solid {cobro_border};border-radius:8px;'
+            f'padding:7px 12px;margin:8px 12px 0;font-size:12px;font-weight:700;color:{cobro_txt_color}">'
+            f'⚡ Dile al moto: {cobro_moto}</div>'
+        )
+    else:
+        altoke_banner = ""
+
     # ── Botones de acción ───────────────────────────────────────
     if activo:
         btn_cancel = f'<button class="oa oa-cancel" onclick="cancelarPedido({pid})">❌ Cancelar</button>'
         btn_delivery = f'<button class="oa oa-delivery" onclick="llamarDelivery({pid})">🛵 Delivery</button>' if not es_recojo else ""
         btn_cost = ""  # eliminado — la consulta de costo se dispara automáticamente desde el bot
+        btn_listo = (
+            f'<button class="oa oa-listo" onclick="avisarListo({pid})">📦 Avisar listo</button>'
+            if estado == "En preparación 👨‍🍳" and not es_recojo else ""
+        )
         if es_recojo and siguiente and siguiente == "En camino 🛵":
             sig_js = siguiente.replace("'", "\\'")
             btn_next = f'<button class="oa oa-next recojo-next" onclick="cambiarEstado({pid},\'{sig_js}\')">📦 Listo p/retirar</button>'
@@ -654,7 +848,7 @@ def _render_card(p: dict) -> str:
         else:
             btn_next = ""
     else:
-        btn_cancel = btn_delivery = btn_cost = ""
+        btn_cancel = btn_delivery = btn_cost = btn_listo = ""
         btn_next = f'<span class="oa-done">{"❌ Cancelado" if es_cancelado else "✅ Entregado"}</span>'
 
     btn_del = f'<button class="oa oa-del" onclick="eliminarPedido({pid},this)" title="Eliminar">🗑️</button>'
@@ -685,9 +879,11 @@ def _render_card(p: dict) -> str:
     <div class="oc-pay-badges">
       <span class="oc-pbadge {metodo_cls}">{metodo_icon} {html.escape(metodo)}</span>
       {cobro_badge}
+      {delivery_badge}
     </div>
   </div>
-  <div class="oc-actions">{btn_cancel}{btn_delivery}{btn_cost}{btn_next}{btn_del}</div>
+  {altoke_banner}
+  <div class="oc-actions">{btn_cancel}{btn_delivery}{btn_listo}{btn_cost}{btn_next}{btn_del}</div>
 </div>"""
 
 
@@ -722,8 +918,15 @@ async def pedidos_panel(
     total_activos  = len(pedidos) - count_entregado - count_cancel
 
     # Total acumulado del día: todo menos cancelados (incluye entregados)
+    import re as _re_total
+    def _safe_total(val: str) -> float:
+        try:
+            m = _re_total.search(r'(\d+(?:[.,]\d{1,2})?)', (val or "").replace(",", "."))
+            return float(m.group(1)) if m else 0.0
+        except Exception:
+            return 0.0
     total_dia = sum(
-        float(p["total"].replace("S/", "").replace(",", ".").strip())
+        _safe_total(p["total"])
         for p in pedidos
         if p.get("estado") != "Cancelado ❌" and p.get("total")
     ) if pedidos else 0
@@ -877,7 +1080,12 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgro
 .oa-next.recojo-next:hover{{background:#7B1FA2}}
 .oa-del{{flex:0 0 44px;color:#ccc}}
 .oa-del:hover{{background:var(--ch-red-bg);color:var(--ch-red)}}
+.oa-listo{{color:var(--ch-purple)}}
+.oa-listo:hover{{background:var(--ch-purple-bg)}}
 .oa-done{{padding:12px 16px;font-size:12px;color:#bbb;font-weight:600}}
+.oc-pbadge.delivery-inc{{background:#E3F2FD;color:var(--ch-blue);border:1px solid #90CAF9}}
+.oc-pbadge.demora{{background:#FFEBEE;color:#C62828;border:1px solid #FFCDD2;animation:pulse-demora 1.5s ease-in-out infinite}}
+@keyframes pulse-demora{{0%,100%{{opacity:1}}50%{{opacity:.6}}}}
 
 /* ── Misc ── */
 .empty{{text-align:center;padding:60px 20px;color:#aaa;font-size:15px;grid-column:1/-1}}
@@ -949,13 +1157,19 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgro
 </div>
 {'<div style="background:#e53935;color:#fff;text-align:center;padding:8px;font-weight:700;font-size:13px;letter-spacing:.3px">⏸️ BOT PAUSADO — Los clientes reciben mensaje de capacidad máxima</div>' if bot_pausado else ''}
 
-<div id="agotadosBar" style="background:#fff8e1;border-bottom:1px solid #ffe082;padding:8px 18px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-  <span style="font-size:13px;font-weight:600;color:#e65100">⚠️ Productos agotados hoy:</span>
+<div id="agotadosBar" style="background:#fff8e1;border-bottom:1px solid #ffe082;padding:8px 18px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+  <span style="font-size:13px;font-weight:600;color:#e65100">⚠️ Agotados:</span>
+  {''.join(
+      f'<button onclick="toggleAgotado(this,\'{item}\')" '
+      f'style="font-size:12px;border:1px solid #e65100;border-radius:20px;padding:4px 12px;cursor:pointer;transition:.15s;background:{"#e65100" if item in agotados_actual else "transparent"};color:{"#fff" if item in agotados_actual else "#e65100"}"'
+      f'>{item}</button>'
+      for item in ["Pastor","Suadero","Chorizo","Birria","Chamoyada"]
+  )}
   <input id="agotadosInput" type="text" value="{html.escape(agotados_actual)}"
-    placeholder="ej: Chilangazo, Chamoyada de Mango  (dejar vacío si hay todo)"
-    style="flex:1;min-width:220px;border:1px solid #ffcc02;border-radius:8px;padding:6px 12px;font-size:13px;outline:none;background:#fffde7"
+    placeholder="otros… (separados por coma)"
+    style="flex:1;min-width:160px;border:1px solid #ffcc02;border-radius:8px;padding:5px 10px;font-size:13px;outline:none;background:#fffde7"
     onkeydown="if(event.key==='Enter')guardarAgotados()">
-  <button onclick="guardarAgotados()" style="background:#e65100;color:white;border:none;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer">Guardar</button>
+  <button onclick="guardarAgotados()" style="background:#e65100;color:white;border:none;border-radius:8px;padding:6px 14px;font-size:13px;font-weight:600;cursor:pointer">Guardar</button>
   <span id="agotadosStatus" style="font-size:12px;color:#4caf50;display:none">✅ Guardado</span>
 </div>
 
@@ -1154,6 +1368,26 @@ async function llamarDelivery(orderId) {{
     alert('Error: ' + e.message);
   }}
 }}
+async function avisarListo(orderId) {{
+  try {{
+    const r = await fetch('/api/pedidos/aviso-listo', {{
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {{'Content-Type':'application/json'}},
+      body: JSON.stringify({{order_id: orderId}})
+    }});
+    if (r.status === 401) {{ location.reload(); return; }}
+    const data = await r.json();
+    if (data.status === 'ok') {{
+      showToast('📦 Cliente notificado — pedido listo esperando delivery');
+    }} else {{
+      alert('Error: ' + (data.msg || 'No se pudo enviar'));
+    }}
+  }} catch(e) {{
+    alert('Error: ' + e.message);
+  }}
+}}
+
 function consultarCostoDelivery(orderId) {{ _openDlvModal(orderId, 'cost'); }}
 
 async function _enviarDelivery(orderId, phone, name, endpoint, toastPrefix) {{
@@ -1253,14 +1487,37 @@ function buildCard(p) {{
     ? `<span class="oc-pbadge pagado">✅ Pagado</span>`
     : `<span class="oc-pbadge cobrar">💳 Cobrar al entregar</span>`;
 
+  // Badge de delivery pagado (cuando el cliente pagó el delivery junto con el pedido)
+  const tieneDeliveryPago = (p.items || '').toLowerCase().includes('delivery:');
+  const deliveryBadge = tieneDeliveryPago
+    ? `<span class="oc-pbadge delivery-inc">🛵 Delivery pagado</span>`
+    : '';
+
+  // Badge de demora: pedidos en preparación > 50 min
+  let demoraBadge = '';
+  if (estado === 'En preparación 👨‍🍳' && p.hora) {{
+    const [hh, mm] = p.hora.split(':').map(Number);
+    const now = new Date();
+    const orderMin = hh * 60 + mm;
+    const nowMin   = now.getHours() * 60 + now.getMinutes();
+    const diffMin  = nowMin - orderMin;
+    if (diffMin >= 50 && diffMin < 600) {{
+      demoraBadge = `<span class="oc-pbadge demora">⏰ ${{diffMin}} min en prep.</span>`;
+    }}
+  }}
+
   // Botones de acción
-  let btnCancelHtml = '', btnDeliveryHtml = '', btnCostHtml = '', btnSigHtml = '';
+  let btnCancelHtml = '', btnDeliveryHtml = '', btnCostHtml = '', btnListoHtml = '', btnSigHtml = '';
   if (esActivo) {{
     btnCancelHtml   = `<button class="oa oa-cancel" onclick="cancelarPedido(${{p.id}})">❌ Cancelar</button>`;
     btnDeliveryHtml = !esRecojo
       ? `<button class="oa oa-delivery" onclick="llamarDelivery(${{p.id}})">🛵 Delivery</button>`
       : '';
     btnCostHtml = ''; // eliminado — la consulta se dispara automáticamente desde el bot
+    // Botón "Avisar listo": solo para pedidos en preparación de delivery (no recojo)
+    btnListoHtml = (estado === 'En preparación 👨‍🍳' && !esRecojo)
+      ? `<button class="oa oa-listo" onclick="avisarListo(${{p.id}})">📦 Avisar listo</button>`
+      : '';
     if (siguiente) {{
       const esSiguienteCamino = p.siguiente_estado_raw === 'En camino 🛵';
       const lblBtn  = (esRecojo && esSiguienteCamino) ? '📦 Listo p/retirar' : `→ ${{esc(siguiente)}}`;
@@ -1300,9 +1557,11 @@ function buildCard(p) {{
     <div class="oc-pay-badges">
       <span class="oc-pbadge ${{metodoCls}}">${{pagoEmoji}} ${{esc(metodo)}}</span>
       ${{cobroBadge}}
+      ${{deliveryBadge}}
+      ${{demoraBadge}}
     </div>
   </div>
-  <div class="oc-actions">${{btnCancelHtml}}${{btnDeliveryHtml}}${{btnCostHtml}}${{btnSigHtml}}${{btnDelHtml}}</div>
+  <div class="oc-actions">${{btnCancelHtml}}${{btnDeliveryHtml}}${{btnListoHtml}}${{btnCostHtml}}${{btnSigHtml}}${{btnDelHtml}}</div>
 </div>`;
 }}
 
@@ -1400,6 +1659,21 @@ function probarNotif() {{
     .then(r=>r.json())
     .then(()=>alert('✅ Solicitud enviada — revisa logs de Railway'))
     .catch(e=>alert('Error: '+e));
+}}
+
+function toggleAgotado(btn, item) {{
+  const inp = document.getElementById('agotadosInput');
+  const parts = inp.value.split(',').map(s => s.trim()).filter(Boolean);
+  const idx = parts.findIndex(p => p.toLowerCase() === item.toLowerCase());
+  if (idx === -1) {{
+    parts.push(item);
+    btn.style.background = '#e65100'; btn.style.color = '#fff';
+  }} else {{
+    parts.splice(idx, 1);
+    btn.style.background = 'transparent'; btn.style.color = '#e65100';
+  }}
+  inp.value = parts.join(', ');
+  guardarAgotados();
 }}
 
 async function guardarAgotados() {{
@@ -1619,19 +1893,32 @@ async def api_llamar_delivery(
     # tg_id = os.environ.get(f"DELIVERY_{target_index}_TELEGRAM_ID", "").strip()
     # ── Fin líneas motorizado ─────────────────────────────────────────────
 
-    # Notificar al servicio de delivery
-    DELIVERY_PHONE = "525513781963"
-    msg_delivery = (
-        f"🛵 Delivery solicitado\n"
-        f"👤 Cliente: +{order['phone']}\n"
-        f"📍 {order.get('direccion') or 'Sin dirección'}"
-    )
-    ok = await send_whatsapp_message(DELIVERY_PHONE, msg_delivery)
+    # Solicitar motorizado a Altoke — solo avisamos que hay pedido, los datos se dan en persona
+    msg_delivery = f"🛵 Necesitamos un motorizado — Chilango\n🕒 {hora}"
+    ok = await send_whatsapp_message(DELIVERY_SERVICE_PHONE, msg_delivery)
     if not ok:
-        return JSONResponse({"status": "error", "msg": "No se pudo notificar al dueño"}, status_code=500)
+        return JSONResponse({"status": "error", "msg": "No se pudo contactar a Altoke"}, status_code=500)
 
-    print(f"[DELIVERY] ✅ Dueño notificado para pedido #{order_id}")
-    return JSONResponse({"status": "ok", "delivery": "Dueño"})
+    print(f"[DELIVERY] ✅ Altoke notificado para pedido #{order_id}")
+    return JSONResponse({"status": "ok", "delivery": "Altoke"})
+
+
+@app.post("/api/pedidos/aviso-listo")
+async def api_aviso_listo(
+    request: Request,
+    credentials: HTTPBasicCredentials = Depends(verificar_admin)
+):
+    """Notifica al cliente que su pedido está listo esperando al delivery."""
+    data = await request.json()
+    order_id = int(data.get("order_id", 0))
+    if not order_id:
+        return JSONResponse({"status": "error", "msg": "order_id requerido"}, status_code=400)
+    order = db.get_order_by_id(order_id)
+    if not order:
+        return JSONResponse({"status": "error", "msg": "Pedido no encontrado"}, status_code=404)
+    await _notify_order_listo(order)
+    print(f"[AVISO LISTO] WhatsApp enviado al cliente para pedido #{order_id}")
+    return JSONResponse({"status": "ok"})
 
 
 @app.post("/api/pedidos/consultar-delivery")
@@ -1664,13 +1951,12 @@ async def api_consultar_delivery(
     # ── Fin líneas motorizado ─────────────────────────────────────────────
 
     # Notificar al servicio de delivery para consultar costo
-    DELIVERY_PHONE = "525513781963"
     msg_delivery = (
         f"💰 Consulta de costo delivery\n"
         f"👤 Cliente: +{order['phone']}\n"
         f"📍 {order.get('direccion') or 'Sin dirección'}"
     )
-    await send_whatsapp_message(DELIVERY_PHONE, msg_delivery)
+    await send_whatsapp_message(DELIVERY_SERVICE_PHONE, msg_delivery)
     print(f"[COSTO DELIVERY] Dueño notificado para pedido #{order_id}")
     return JSONResponse({"status": "ok", "delivery": "Dueño"})
 
@@ -1812,6 +2098,8 @@ async def send_manual_message(
     now_ts = datetime.now(PERU_TZ).strftime("%H:%M")
     db.append_message(phone, "assistant", message, ts=now_ts, manual=True)
     db.mark_unread(phone)
+    # Pausar el bot automáticamente cuando el equipo escribe manualmente
+    db.mark_escalated(phone)
     print(f"[MANUAL] Mensaje enviado a {phone}: {message[:60]}")
     return JSONResponse({"status": "ok"})
 
@@ -1828,6 +2116,21 @@ async def delete_conversation(
         return JSONResponse({"status": "error"}, status_code=400)
     db.delete_conversation(phone)
     print(f"[ADMIN] Chat eliminado: {phone}")
+    return JSONResponse({"status": "ok"})
+
+
+@app.post("/api/conversations/pausar")
+async def pausar_bot_conv(
+    request: Request,
+    credentials: HTTPBasicCredentials = Depends(verificar_admin)
+):
+    """El equipo pausa el bot para atender manualmente a un cliente."""
+    data = await request.json()
+    phone = data.get("phone", "").strip()
+    if not phone:
+        return JSONResponse({"status": "error"}, status_code=400)
+    db.mark_escalated(phone)
+    print(f"[ESCALATE] Bot pausado para {phone}")
     return JSONResponse({"status": "ok"})
 
 
@@ -1869,11 +2172,15 @@ async def api_conversations(credentials: HTTPBasicCredentials = Depends(verifica
         es_delivery = phone in DELIVERY_NAME_MAP
         display_name = f"🛵 {DELIVERY_NAME_MAP[phone]}" if es_delivery else f"+{phone}"
         avatar = "🛵" if es_delivery else "👤"
+        tiempo = _format_contact_time(data.get("last_msg_at", ""))
         contacts_html += (
             f'<div class="contact{unread_class}" id="c_{html.escape(phone)}" onclick="showChat(\'{html.escape(phone)}\')">'
             f'<div class="avatar">{avatar}</div>'
-            f'<div class="contact-info"><div class="contact-name">{html.escape(display_name)}</div>'
-            f'<div class="contact-preview">{preview}</div></div>{badge}</div>'
+            f'<div class="contact-info">'
+            f'<div class="contact-row1"><div class="contact-name">{html.escape(display_name)}</div>'
+            f'<div class="contact-time">{tiempo}</div></div>'
+            f'<div class="contact-row2"><div class="contact-preview">{preview}</div>{badge}</div>'
+            f'</div></div>'
         )
     # Mensajes limpios (sin imágenes) + timestamp si existe
     conv_clean = {}
@@ -2116,14 +2423,20 @@ async def admin(credentials: HTTPBasicCredentials = Depends(verificar_admin)):
         es_delivery = phone in DELIVERY_NAME_MAP
         display_name = f"🛵 {DELIVERY_NAME_MAP[phone]}" if es_delivery else f"+{phone}"
         avatar = "🛵" if es_delivery else "👤"
+        tiempo = _format_contact_time(data.get("last_msg_at", ""))
         contacts_html += f"""
         <div class="contact{unread_class}" id="c_{html.escape(phone)}" onclick="showChat('{html.escape(phone)}')">
             <div class="avatar">{avatar}</div>
             <div class="contact-info">
-                <div class="contact-name">{html.escape(display_name)}</div>
-                <div class="contact-preview">{preview}</div>
+                <div class="contact-row1">
+                    <div class="contact-name">{html.escape(display_name)}</div>
+                    <div class="contact-time">{tiempo}</div>
+                </div>
+                <div class="contact-row2">
+                    <div class="contact-preview">{preview}</div>
+                    {badge}
+                </div>
             </div>
-            {badge}
         </div>"""
 
     if not contacts_html:
@@ -2173,11 +2486,15 @@ async def admin(credentials: HTTPBasicCredentials = Depends(verificar_admin)):
         .contact.active {{ background: #d9fdd3; }}
         .avatar {{ width: 46px; height: 46px; border-radius: 50%; background: #25d366; display: flex; align-items: center; justify-content: center; font-size: 20px; flex-shrink: 0; }}
         .contact-info {{ flex: 1; min-width: 0; }}
-        .contact-name {{ font-weight: 600; font-size: 14px; color: #111; }}
-        .contact-preview {{ font-size: 13px; color: #667781; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }}
-        .contact-unread {{ font-size: 11px; background: #25d366; color: white; border-radius: 50%; width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-weight: 600; }}
+        .contact-row1 {{ display: flex; align-items: baseline; justify-content: space-between; gap: 6px; }}
+        .contact-row2 {{ display: flex; align-items: center; gap: 6px; margin-top: 3px; }}
+        .contact-name {{ font-weight: 600; font-size: 14px; color: #111; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0; }}
+        .contact-time {{ font-size: 11px; color: #667781; flex-shrink: 0; white-space: nowrap; }}
+        .contact-preview {{ font-size: 13px; color: #667781; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0; }}
+        .contact-unread {{ font-size: 11px; background: #25d366; color: white; border-radius: 50%; min-width: 20px; height: 20px; padding: 0 4px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-weight: 700; }}
         .contact.unread {{ background: #f0fdf4; }}
         .contact.unread .contact-name {{ color: #111; font-weight: 700; }}
+        .contact.unread .contact-time {{ color: #25d366; font-weight: 700; }}
         .chat-panel {{ flex: 1; display: flex; flex-direction: column; background: #efeae2; overflow: hidden; }}
         .chat-header {{ background: #f0f2f5; padding: 10px 16px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid #e0e0e0; flex-shrink: 0; }}
         .chat-header .avatar {{ width: 38px; height: 38px; font-size: 16px; }}
@@ -2271,7 +2588,7 @@ async def admin(credentials: HTTPBasicCredentials = Depends(verificar_admin)):
             const escaladoBadge = isEscalado
                 ? `<span style="background:#e53935;color:#fff;font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;margin-left:8px">🤝 Equipo activo</span>
                    <button onclick="reactivarBot('${{esc(phone)}}')" style="background:#2D5016;color:#fff;border:none;border-radius:20px;padding:4px 12px;font-size:11px;font-weight:700;cursor:pointer;margin-left:6px">🤖 Reactivar bot</button>`
-                : '';
+                : `<button onclick="pausarBot('${{esc(phone)}}')" style="background:#f57c00;color:#fff;border:none;border-radius:20px;padding:4px 12px;font-size:11px;font-weight:700;cursor:pointer;margin-left:6px">⏸️ Pausar bot</button>`;
             const avatarIcon = (window.deliveryPhones && window.deliveryPhones[phone]) ? '🛵' : '👤';
             const displayName = (window.deliveryNames && window.deliveryNames[phone]) ? '🛵 ' + window.deliveryNames[phone] : '+' + esc(phone);
             document.getElementById('chatPanel').innerHTML = `
@@ -2284,6 +2601,13 @@ async def admin(credentials: HTTPBasicCredentials = Depends(verificar_admin)):
                         onmouseover="this.style.color='#e53935'" onmouseout="this.style.color='#aaa'">🗑️</button>
                 </div>
                 <div class="chat-messages" id="msgs">${{bubbles}}</div>
+                ${{isEscalado ? `<div style="padding:8px 12px;background:#fff8e1;border-top:1px solid #ffe082;display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+                    <span style="font-size:11px;font-weight:700;color:#e65100">⚡ Respuesta rápida:</span>
+                    <button onclick="usarPlantilla(this)" data-txt="Disculpa la demora, Chilanguit@ 🙏 Ya estamos en ello y te avisamos en cuanto tu pedido salga." style="font-size:11px;border:1px solid #e65100;border-radius:16px;padding:3px 10px;background:transparent;color:#e65100;cursor:pointer">⏰ Disculpa demora</button>
+                    <button onclick="usarPlantilla(this)" data-txt="¡Nos disculpamos! 🙏 Vamos a compensarte con un guacamole gratis en tu próximo pedido. ¿Te parece bien?" style="font-size:11px;border:1px solid #2D5016;border-radius:16px;padding:3px 10px;background:transparent;color:#2D5016;cursor:pointer">🥑 Guacamole gratis</button>
+                    <button onclick="usarPlantilla(this)" data-txt="Chilanguit@, para compensar el inconveniente te regalamos el delivery gratis en tu próximo pedido. Disculpa las molestias 🙏" style="font-size:11px;border:1px solid #2D5016;border-radius:16px;padding:3px 10px;background:transparent;color:#2D5016;cursor:pointer">🛵 Delivery gratis</button>
+                    <button onclick="usarPlantilla(this)" data-txt="¡Acá estamos! Cuéntame qué pasó para poder ayudarte mejor 🌮" style="font-size:11px;border:1px solid #555;border-radius:16px;padding:3px 10px;background:transparent;color:#555;cursor:pointer">💬 Pedir detalle</button>
+                </div>` : ''}}
                 <div class="chat-input-area">
                     <input type="text" id="manualInput" class="chat-input"
                            placeholder="Escribe un mensaje al cliente..."
@@ -2319,6 +2643,21 @@ async def admin(credentials: HTTPBasicCredentials = Depends(verificar_admin)):
             }});
             escaladoMap[phone] = false;
             showChat(phone);
+        }}
+
+        async function pausarBot(phone) {{
+            await fetch('/api/conversations/pausar', {{
+                method: 'POST', credentials: 'same-origin',
+                headers: {{'Content-Type':'application/json'}},
+                body: JSON.stringify({{phone}})
+            }});
+            escaladoMap[phone] = true;
+            showChat(phone);
+        }}
+
+        function usarPlantilla(btn) {{
+            const inp = document.getElementById('manualInput');
+            if (inp) {{ inp.value = btn.dataset.txt; inp.focus(); }}
         }}
 
         async function sendManual(phone) {{

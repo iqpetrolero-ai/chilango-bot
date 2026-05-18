@@ -65,45 +65,26 @@ async def _notify_delivery(delivery_phone: str, delivery_name: str,
     await _send_whatsapp(delivery_phone, mensaje_wa)
 
 
+DELIVERY_SERVICE_PHONE = os.environ.get("DELIVERY_SERVICE_PHONE", "525513781963").strip()
+OWNER_PHONE = os.environ.get("OWNER_PHONE", "51954713696").strip()
+
+
 async def notify_delivery_cost_query(phone_client: str, direccion: str,
                                       subtotal: str = "", items: str = "", pago: str = ""):
-    """Notifica al dueño que un cliente necesita delivery — él gestionará manualmente el motorizado."""
-    # ── Líneas de delivery (mantenidas, no activas en este flujo) ──────────
-    # deliveries = []
-    # for i in range(1, 5):
-    #     ph = (os.environ.get(f"DELIVERY_{i}_PHONE") or (os.environ.get("DELIVERY_PHONE","") if i==1 else "")).strip()
-    #     name = os.environ.get(f"DELIVERY_{i}_NAME", f"Motorizado {i}").strip()
-    #     if ph:
-    #         deliveries.append({"phone": ph.replace("+",""), "name": name, "index": i})
-    # msg_wa = (
-    #     f"🛵 ¿Cuál es el costo de delivery?\n"
-    #     f"📍 {direccion or 'Sin especificar'}\n"
-    #     f"👤 Cliente: +{phone_client}\n"
-    #     f"(Responde solo con el monto, ej: 7 o S/7)"
-    # )
-    # msg_tg = (
-    #     f"🛵 *¿Cuál es el costo de delivery?*\n"
-    #     f"📍 {direccion or 'Sin especificar'}\n"
-    #     f"👤 Cliente: +{phone_client}\n"
-    #     f"_Responde por WhatsApp con el monto, ej: 7 o S/7_"
-    # )
-    # for d in deliveries:
-    #     await _notify_delivery(d["phone"], d["name"], d["index"], msg_wa, msg_tg)
-    #     db.save_delivery_query(d["phone"], phone_client, subtotal, items, pago, direccion)
-    # ── Fin líneas delivery ────────────────────────────────────────────────
-
-    DELIVERY_PHONE = "525513781963"
-
-    msg_delivery = (
-        f"🛵 Cliente necesita delivery\n"
+    """Notifica al dueño que un cliente quiere pagar delivery incluido.
+    El dueño llama a Altoke para consultar el costo y lo ingresa en el panel."""
+    msg_owner = (
+        f"💰 *Cliente quiere pagar delivery incluido*\n"
         f"👤 +{phone_client}\n"
-        f"📍 {direccion or 'Sin especificar'}"
+        f"📍 {direccion or 'Sin especificar'}\n"
+        f"🛒 {items or '—'} · {subtotal or '—'}\n"
+        f"📲 Llama a Altoke para el costo y regístralo en el panel."
     )
-    await _send_whatsapp(DELIVERY_PHONE, msg_delivery)
+    await _send_whatsapp(OWNER_PHONE, msg_owner)
 
     # Guardar consulta pendiente para gestión desde el panel
     db.save_pending_cost_query(phone_client, subtotal, items, pago, direccion)
-    print(f"[CONSULTAR_COSTO] ✅ Notificado a delivery ({DELIVERY_PHONE}), consulta guardada para +{phone_client}")
+    print(f"[CONSULTAR_COSTO] ✅ Dueño notificado, consulta guardada para +{phone_client}")
 
 
 def _init_excel():

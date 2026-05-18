@@ -1561,6 +1561,20 @@ function buildCard(p) {{
       ${{demoraBadge}}
     </div>
   </div>
+  ${{(estado === 'En preparación 👨‍🍳' && !esRecojo) ? (() => {{
+    let cobro, bg, border, color;
+    if (esDigital && tieneDeliveryPago) {{
+      cobro  = '✅ Ya pagó TODO — dile al moto que NO cobre nada al cliente';
+      bg='#e8f5e9'; border='#a5d6a7'; color='#2e7d32';
+    }} else if (esDigital) {{
+      cobro  = '💜 Pagó en digital — el moto cobra SOLO el delivery al cliente';
+      bg='#f3e5f5'; border='#ce93d8'; color='#6a1b9a';
+    }} else {{
+      cobro  = `💵 Pago en efectivo — el moto cobra ${{esc(p.total)}} + delivery`;
+      bg='#fff8e1'; border='#ffe082'; color='#e65100';
+    }}
+    return `<div style="background:${{bg}};border:1px solid ${{border}};border-radius:8px;padding:7px 12px;margin:8px 12px 0;font-size:12px;font-weight:700;color:${{color}}">⚡ Dile al moto: ${{cobro}}</div>`;
+  }})() : ''}}
   <div class="oc-actions">${{btnCancelHtml}}${{btnDeliveryHtml}}${{btnListoHtml}}${{btnCostHtml}}${{btnSigHtml}}${{btnDelHtml}}</div>
 </div>`;
 }}

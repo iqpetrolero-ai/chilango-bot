@@ -73,6 +73,26 @@ def init_db():
             c.execute("ALTER TABLE customer_profiles ADD COLUMN puntos INTEGER NOT NULL DEFAULT 0")
         except Exception:
             pass
+        # Migración: timestamp del último recordatorio enviado (evita spam)
+        try:
+            c.execute("ALTER TABLE conversations ADD COLUMN reminder_sent_at TEXT DEFAULT ''")
+        except Exception:
+            pass
+        # Migración: timestamp de la última re-notificación de escalación urgente
+        try:
+            c.execute("ALTER TABLE conversations ADD COLUMN last_reescalation_at TEXT DEFAULT ''")
+        except Exception:
+            pass
+        # Migraciones: seguimiento de encuesta post-entrega y timestamp "en camino"
+        for _m2 in [
+            "ALTER TABLE orders ADD COLUMN survey_sent INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE orders ADD COLUMN camino_at TEXT DEFAULT ''",
+            "ALTER TABLE conversations ADD COLUMN carta_followup_sent_at TEXT DEFAULT ''",
+        ]:
+            try:
+                c.execute(_m2)
+            except Exception:
+                pass
 
         # ── Configuración general del negocio ─────────────────────
         c.execute("""
@@ -554,13 +574,34 @@ def set_config(key: str, value: str):
 def mark_escalated(phone: str):
     """Marca conversación como escalada — el bot no responderá hasta que el equipo la libere."""
     with _conn() as c:
-        c.execute("UPDATE conversations SET escalado=1 WHERE phone=?", (phone,))
+        c.execute("UPDATE conversations SET escalado=1, last_reescalation_at='' WHERE phone=?", (phone,))
 
 
 def reset_escalation(phone: str):
     """El equipo libera la conversación y el bot puede volver a responder."""
     with _conn() as c:
-        c.execute("UPDATE conversations SET escalado=0 WHERE phone=?", (phone,))
+        c.execute("UPDATE conversations SET escalado=0, last_reescalation_at='' WHERE phone=?", (phone,))
+
+
+def mark_reescalation_sent(phone: str):
+    """Registra cuándo se envió la última re-notificación urgente de escalación."""
+    now = datetime.now(PERU_TZ).isoformat()
+    with _conn() as c:
+        c.execute("UPDATE conversations SET last_reescalation_at=? WHERE phone=?", (now, phone))
+
+
+def check_reescalation_cooldown(phone: str, minutes: int = 5) -> bool:
+    """Devuelve True si ya pasó el cooldown desde la última re-notificación (o nunca se envió)."""
+    from datetime import datetime as _dt
+    cooldown_cutoff = (_dt.now(PERU_TZ) - timedelta(minutes=minutes)).isoformat()
+    with _conn() as c:
+        row = c.execute(
+            "SELECT last_reescalation_at FROM conversations WHERE phone=?", (phone,)
+        ).fetchone()
+        if not row:
+            return True
+        last = row["last_reescalation_at"] or ""
+        return not last or last < cooldown_cutoff
 
 
 def is_escalated(phone: str) -> bool:
@@ -571,15 +612,25 @@ def is_escalated(phone: str) -> bool:
 
 # ── Recordatorios de confirmación pendiente ───────────────────
 
-def get_pending_reminders(minutos: int = 10) -> list[dict]:
-    """Retorna conversaciones donde el bot esperaba confirmación y el cliente no respondió."""
+def mark_reminder_sent(phone: str):
+    """Registra cuándo se envió el último recordatorio a este teléfono."""
+    now = datetime.now(PERU_TZ).isoformat()
+    with _conn() as c:
+        c.execute("UPDATE conversations SET reminder_sent_at=? WHERE phone=?", (now, phone))
+
+
+def get_pending_reminders(minutos: int = 10, cooldown_min: int = 30) -> list[dict]:
+    """Retorna conversaciones donde el bot esperaba confirmación y el cliente no respondió.
+    Solo incluye números que no hayan recibido recordatorio en los últimos cooldown_min minutos."""
     from datetime import datetime as _dt
     cutoff = (_dt.now(PERU_TZ) - timedelta(minutes=minutos)).isoformat()
+    cooldown_cutoff = (_dt.now(PERU_TZ) - timedelta(minutes=cooldown_min)).isoformat()
     with _conn() as c:
         rows = c.execute(
             "SELECT phone, messages FROM conversations "
-            "WHERE welcomed=1 AND escalado=0 AND last_msg_at < ? AND last_msg_at != ''",
-            (cutoff,)
+            "WHERE welcomed=1 AND escalado=0 AND last_msg_at < ? AND last_msg_at != '' "
+            "AND (reminder_sent_at IS NULL OR reminder_sent_at = '' OR reminder_sent_at < ?)",
+            (cutoff, cooldown_cutoff)
         ).fetchall()
     result = []
     for r in rows:
@@ -591,6 +642,11 @@ def get_pending_reminders(minutos: int = 10) -> list[dict]:
         if last.get("role") != "assistant":
             continue
         content = str(last.get("content", "")).lower()
+        # No recordar si el pedido ya fue confirmado exitosamente
+        skip_keywords = ["pedido confirmado", "¡pedido confirmado", "confirmado! 🌮",
+                         "¡confirmado!", "pedido guardado", "¡con gusto", "en preparación"]
+        if any(k in content for k in skip_keywords):
+            continue
         keywords = ["¿confirmamos", "confirmas", "yape", "yapea", "plina",
                     "¿cómo pagas", "cómo pagas", "efectivo?", "total:"]
         if any(k in content for k in keywords):
@@ -632,3 +688,72 @@ def get_moto_request(request_id: int) -> dict | None:
     with _conn() as c:
         row = c.execute("SELECT * FROM moto_requests WHERE id=?", (request_id,)).fetchone()
         return dict(row) if row else None
+
+
+# ── Encuesta post-entrega y carta follow-up ───────────────────
+
+def mark_order_camino(order_id: int):
+    """Registra la hora en que un pedido pasó a 'En camino' para el temporizador de encuesta."""
+    now = datetime.now(PERU_TZ).isoformat()
+    with _conn() as c:
+        c.execute("UPDATE orders SET camino_at=? WHERE id=?", (now, order_id))
+
+
+def mark_survey_sent(order_id: int):
+    """Marca que ya se envió la encuesta de satisfacción para este pedido."""
+    with _conn() as c:
+        c.execute("UPDATE orders SET survey_sent=1 WHERE id=?", (order_id,))
+
+
+def get_orders_for_survey(minutes: int = 60) -> list[dict]:
+    """Retorna pedidos En camino que llevan >= minutes sin recibir encuesta."""
+    cutoff = (datetime.now(PERU_TZ) - timedelta(minutes=minutes)).isoformat()
+    with _conn() as c:
+        rows = c.execute(
+            "SELECT id, phone FROM orders "
+            "WHERE estado='En camino 🛵' AND survey_sent=0 "
+            "AND camino_at != '' AND camino_at < ?",
+            (cutoff,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_pending_carta_followups(minutos: int = 15) -> list[dict]:
+    """Retorna conversaciones donde se envió la carta hace >= minutos pero sin pedido hoy."""
+    cutoff = (datetime.now(PERU_TZ) - timedelta(minutes=minutos)).isoformat()
+    today = datetime.now(PERU_TZ).strftime("%d/%m/%Y")
+    with _conn() as c:
+        rows = c.execute(
+            "SELECT phone, messages FROM conversations "
+            "WHERE welcomed=1 AND escalado=0 AND last_msg_at < ? AND last_msg_at != '' "
+            "AND (carta_followup_sent_at IS NULL OR carta_followup_sent_at = '')",
+            (cutoff,)
+        ).fetchall()
+    result = []
+    for r in rows:
+        msgs = json.loads(r["messages"])
+        if not msgs:
+            continue
+        # Buscar si el último mensaje del bot fue envío de carta
+        last_bot = next((m for m in reversed(msgs) if m.get("role") == "assistant"), None)
+        if not last_bot:
+            continue
+        content = last_bot.get("content", "")
+        if "carta enviada" not in content.lower():
+            continue
+        # Verificar que no haya pedido hoy
+        with _conn() as c2:
+            has_order = c2.execute(
+                "SELECT 1 FROM orders WHERE phone=? AND fecha=?", (r["phone"], today)
+            ).fetchone()
+        if has_order:
+            continue
+        result.append({"phone": r["phone"]})
+    return result
+
+
+def mark_carta_followup_sent(phone: str):
+    """Marca que se envió el follow-up de carta a este teléfono."""
+    now = datetime.now(PERU_TZ).isoformat()
+    with _conn() as c:
+        c.execute("UPDATE conversations SET carta_followup_sent_at=? WHERE phone=?", (now, phone))

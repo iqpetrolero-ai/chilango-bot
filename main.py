@@ -32,6 +32,9 @@ async def _start_reminder_task():
         await _asyncio.sleep(60)  # Esperar 1 min al arrancar antes del primer chequeo
         while True:
             try:
+                if not esta_en_horario():
+                    await _asyncio.sleep(300)
+                    continue
                 pendientes = db.get_pending_reminders(minutos=5, cooldown_min=30)
                 for p in pendientes:
                     phone = p["phone"]
@@ -79,19 +82,21 @@ async def _start_reminder_task():
         await _asyncio.sleep(90)
         while True:
             try:
-                pendientes = db.get_pending_carta_followups(minutos=15)
-                for p in pendientes:
-                    followup = (
-                        "¡Hola! 😊 ¿Pudiste ver nuestra carta? 🌮\n\n"
-                        "Si te animaste con algo o tienes alguna duda, aquí estamos. "
-                        "¿Le entramos con un pedido?"
-                    )
-                    await send_whatsapp_message(p["phone"], followup)
-                    from datetime import datetime as _dt, timezone as _tz, timedelta as _td
-                    _ts = _dt.now(_tz(_td(hours=-5))).strftime("%H:%M")
-                    db.append_message(p["phone"], "assistant", followup, ts=_ts)
-                    db.mark_carta_followup_sent(p["phone"])
-                    print(f"[CARTA FOLLOWUP] Enviado a {p['phone']}")
+                # Solo enviar follow-ups en horario de atención
+                if esta_en_horario():
+                    pendientes = db.get_pending_carta_followups(minutos=15)
+                    for p in pendientes:
+                        followup = (
+                            "¡Hola! 😊 ¿Pudiste ver nuestra carta? 🌮\n\n"
+                            "Si te animaste con algo o tienes alguna duda, aquí estamos. "
+                            "¿Le entramos con un pedido?"
+                        )
+                        await send_whatsapp_message(p["phone"], followup)
+                        from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+                        _ts = _dt.now(_tz(_td(hours=-5))).strftime("%H:%M")
+                        db.append_message(p["phone"], "assistant", followup, ts=_ts)
+                        db.mark_carta_followup_sent(p["phone"])
+                        print(f"[CARTA FOLLOWUP] Enviado a {p['phone']}")
             except Exception as _e:
                 print(f"[CARTA FOLLOWUP] Error: {_e}")
             await _asyncio.sleep(300)  # Chequear cada 5 minutos

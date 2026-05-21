@@ -1591,7 +1591,9 @@ function esc(s) {{
 /* ── Refresh automático ── */
 async function refreshOrders() {{
   try {{
-    const r = await fetch('/api/pedidos', {{credentials:'same-origin'}});
+    const fechaSel = document.getElementById('fechaSelect')?.value || '';
+    const url = fechaSel ? `/api/pedidos?fecha=${{encodeURIComponent(fechaSel)}}` : '/api/pedidos';
+    const r = await fetch(url, {{credentials:'same-origin'}});
     if (r.status === 401) {{ location.reload(); return; }}
     const data = await r.json();
     const pedidos = data.pedidos;
@@ -1609,7 +1611,8 @@ async function refreshOrders() {{
     // Re-renderizar tarjetas
     const grid = document.getElementById('ordersGrid');
     if (pedidos.length === 0) {{
-      grid.innerHTML = '<div class="empty">No hay pedidos hoy todavía 🌮</div>';
+      const fechaSel2 = document.getElementById('fechaSelect')?.value || '';
+      grid.innerHTML = `<div class="empty">${{fechaSel2 ? 'Sin pedidos para ' + fechaSel2 : 'No hay pedidos hoy todavía'}} 🌮</div>`;
     }} else {{
       grid.innerHTML = pedidos.map(buildCard).join('');
     }}
@@ -1823,12 +1826,17 @@ setInterval(checkPendingCostQueries, 15000);
 
 
 @app.get("/api/pedidos")
-async def api_pedidos_json(credentials: HTTPBasicCredentials = Depends(verificar_admin)):
+async def api_pedidos_json(
+    credentials: HTTPBasicCredentials = Depends(verificar_admin),
+    fecha: str = Query(None)
+):
     """Endpoint JSON para polling del frontend.
-    Incluye 'siguiente_estado' calculado server-side para evitar comparaciones
-    de emojis en JS (que pueden fallar por diferencias de encoding).
+    Acepta ?fecha=DD/MM/YYYY para respetar la fecha seleccionada en el panel.
     """
-    pedidos = db.get_orders_today()
+    if fecha:
+        pedidos = db.get_orders_for_date(fecha)
+    else:
+        pedidos = db.get_orders_today()
     # Normalizar estados sin emoji (DEFAULT antiguo de BD) antes de procesar
     _norm = {
         "Nuevo": "Nuevo 🆕",

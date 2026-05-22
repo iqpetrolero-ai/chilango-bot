@@ -910,9 +910,19 @@ async def pedidos_panel(
     from datetime import datetime, timezone, timedelta
     PERU_TZ = timezone(timedelta(hours=-5))
     hoy = datetime.now(PERU_TZ).strftime("%d/%m/%Y")
+
+    # Determinar qué fecha mostrar
     fecha_sel = fecha if fecha else hoy
-    pedidos = db.get_orders_for_date(fecha_sel) if hasattr(db, "get_orders_for_date") else db.get_orders_today()
-    fechas_disponibles = db.get_available_dates() if hasattr(db, "get_available_dates") else [hoy]
+
+    # Cargar pedidos según la fecha seleccionada
+    if fecha_sel == hoy:
+        pedidos = db.get_orders_today()
+    else:
+        pedidos = db.get_orders_for_date(fecha_sel)
+
+    # Fechas disponibles para el selector (siempre incluye hoy aunque no tenga pedidos)
+    fechas_raw = db.get_available_dates()
+    fechas_disponibles = fechas_raw if hoy in fechas_raw else [hoy] + fechas_raw
 
     def _cnt(e): return sum(1 for p in pedidos if (p.get("estado") or "Nuevo 🆕") == e)
     count_nuevos   = _cnt("Nuevo 🆕")
@@ -939,7 +949,12 @@ async def pedidos_panel(
     cnt_yapeplin = sum(1 for p in pedidos if p.get("metodo_pago") in ("Yape/Plin", "Yape", "Plin") and p.get("estado") != "Cancelado ❌")
     cnt_efec = sum(1 for p in pedidos if p.get("metodo_pago") not in ("Yape/Plin", "Yape", "Plin") and p.get("estado") != "Cancelado ❌")
 
-    cards = "".join(_render_card(p) for p in pedidos) if pedidos else '<div class="empty">No hay pedidos hoy todavía 🌮</div>'
+    if pedidos:
+        cards = "".join(_render_card(p) for p in pedidos)
+    elif fecha_sel == hoy:
+        cards = '<div class="empty">No hay pedidos hoy todavía 🌮</div>'
+    else:
+        cards = f'<div class="empty">Sin pedidos para {html.escape(fecha_sel)} 🌮</div>'
 
     agotados_actual = db.get_config("productos_agotados", "")
     bot_pausado = db.get_config("bot_pausado", "0") == "1"

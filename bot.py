@@ -640,22 +640,48 @@ async def _parse_and_save_order(phone: str, reply: str) -> tuple[str, bool]:
     return reply, needs_escalate
 
 
-def _estimar_espera(pedidos_activos: int) -> str:
-    """Tiempo base de cola según pedidos activos."""
-    if pedidos_activos <= 1:
-        return "0"
-    elif pedidos_activos <= 3:
-        return "10"
-    elif pedidos_activos <= 5:
-        return "15"
+def _peso_pedido(items_str: str) -> int:
+    """Calcula el peso/complejidad de un pedido según sus items."""
+    s = (items_str or "").lower()
+    if "plato chingón" in s or "plato chingon" in s:
+        return 4
+    elif "de compas" in s or "chilangazo" in s:
+        return 3
+    elif "quesabirria" in s or "gringa" in s or "combo" in s or "nachos" in s:
+        return 2
     else:
-        return "20"
+        return 1  # tacos, quesadillas, esquites
+
+
+def _carga_activa() -> int:
+    """Suma el peso de todos los pedidos activos (Nuevo + En preparación) de hoy."""
+    try:
+        items_list = db.get_active_orders_items()
+        return sum(_peso_pedido(i) for i in items_list)
+    except Exception:
+        return 0
+
+
+def _extra_por_carga(carga: int) -> int:
+    """Tiempo extra en minutos según la carga activa de la cocina."""
+    if carga <= 2:
+        return 0
+    elif carga <= 5:
+        return 5
+    else:
+        return 10
+
+
+def _estimar_espera(pedidos_activos: int) -> str:
+    """Compatibilidad: convierte conteo a extra en minutos (usado en fallback)."""
+    carga = pedidos_activos * 2  # estimación conservadora si no hay items
+    return str(_extra_por_carga(carga))
 
 
 def _estimar_tiempo_por_items(items_str: str, pedidos_activos: int) -> str:
-    """Estima el tiempo total según la complejidad del pedido + cola actual."""
-    s = items_str.lower()
-    # Tiempo base por complejidad del plato
+    """Estima el tiempo total según la complejidad del pedido + carga real de la cocina."""
+    s = (items_str or "").lower()
+    # Tiempo base por complejidad del nuevo pedido
     if "plato chingón" in s or "plato chingon" in s:
         base = 40
     elif "de compas" in s or "chilangazo" in s:
@@ -665,8 +691,9 @@ def _estimar_tiempo_por_items(items_str: str, pedidos_activos: int) -> str:
     elif "quesabirria" in s or "gringa" in s:
         base = 20
     else:
-        base = 15  # tacos, quesadillas, esquites simples
-    extra = int(_estimar_espera(pedidos_activos))
+        base = 15  # tacos, quesadillas, esquites
+    # Extra según carga real activa (sin contar el pedido nuevo aún)
+    extra = _extra_por_carga(_carga_activa())
     total = base + extra
     return f"{total}-{total + 5} minutos"
 
@@ -728,6 +755,8 @@ async def _call_claude(phone: str, messages: list) -> str:
     tiempo_ctx = "\nTiempo estimado de preparación: 20-25 minutos"
     try:
         activos = db.get_active_orders_count() if hasattr(db, "get_active_orders_count") else 0
+        carga = _carga_activa()
+        extra = _extra_por_carga(carga)
         # Detectar items del pedido actual en el historial de mensajes
         items_en_curso = ""
         for m in reversed(messages[-10:]):
@@ -737,12 +766,12 @@ async def _call_claude(phone: str, messages: list) -> str:
             ):
                 items_en_curso = content
                 break
-        espera = _estimar_tiempo_por_items(items_en_curso, activos) if items_en_curso else f"{30 + int(_estimar_espera(activos))}-{35 + int(_estimar_espera(activos))} minutos"
+        espera = _estimar_tiempo_por_items(items_en_curso, activos) if items_en_curso else f"{15 + extra}-{20 + extra} minutos"
         tiempo_ctx = (
-            f"\nPedidos activos ahora: {activos}"
+            f"\nPedidos activos ahora: {activos} (carga de cocina: {carga}/9)"
             f"\nTiempo estimado de preparación: {espera}"
-            f"\n(Tacos/Quesadillas: ~15-20 min · Quesabirrias/Gringa: ~20-25 min · "
-            f"Combos De Compas/Chilangazo: ~30-35 min · Plato Chingón: ~40-45 min)"
+            f"\n(Tacos/Quesadillas: ~{15+extra}-{20+extra} min · Quesabirrias/Gringa: ~{20+extra}-{25+extra} min · "
+            f"Combos: ~{25+extra}-{30+extra} min · De Compas/Chilangazo: ~{30+extra}-{35+extra} min · Plato Chingón: ~{40+extra}-{45+extra} min)"
         )
     except Exception as e:
         print(f"[ESPERA] Error al calcular tiempo estimado: {e}")
@@ -833,11 +862,11 @@ async def process_message(phone: str, message: str) -> tuple[str, bool]:
     if db.get_config("bot_pausado", "0") == "1":
         return mensaje_pausado(), False
 
-    # Auto-pausa por saturación: 4+ pedidos activos (transitoria, sin tocar config manual)
+    # Auto-pausa por saturación dinámica: carga ≥ 9 según complejidad de pedidos activos
     try:
-        _activos = db.get_active_orders_count()
-        if _activos >= 4:
-            print(f"[AUTO-PAUSA] Saturado — {_activos} pedidos activos")
+        _carga = _carga_activa()
+        if _carga >= 9:
+            print(f"[AUTO-PAUSA] Saturado — carga activa: {_carga}")
             return mensaje_saturado(), False
     except Exception as _e:
         print(f"[AUTO-PAUSA] Error: {_e}")

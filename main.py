@@ -2265,19 +2265,25 @@ async def admin_clientes(
     filas = ""
     for i, c in enumerate(clientes, 1):
         nombre    = html.escape(c.get("nombre") or "—")
-        phone     = html.escape(c.get("phone") or "")
-        ultima_dir= html.escape(c.get("ultima_dir") or "—")
-        puntos    = int(c.get("puntos") or 0)
-        pedidos   = int(c.get("total_pedidos") or 0)
-        gastado   = float(c.get("total_gastado") or 0)
-        updated   = (c.get("updated_at") or "—")[:16]
+        phone          = html.escape(c.get("phone") or "")
+        ultima_dir     = html.escape(c.get("ultima_dir") or "—")
+        puntos         = int(c.get("puntos") or 0)
+        pedidos_dia    = int(c.get("total_pedidos") or 0)
+        gastado_dia    = float(c.get("total_gastado") or 0)
+        pedidos_hist   = int(c.get("total_pedidos_hist") or pedidos_dia)
+        gastado_hist   = float(c.get("total_gastado_hist") or gastado_dia)
+        es_recurrente  = pedidos_hist > pedidos_dia
+        updated        = (c.get("updated_at") or "—")[:16]
         medal = "🥇" if i == 1 else ("🥈" if i == 2 else ("🥉" if i == 3 else f"{i}"))
+        badge_rec = ' <span style="font-size:10px;background:#e8f5e9;color:#2e7d32;border-radius:10px;padding:1px 6px;font-weight:600">recurrente</span>' if es_recurrente else ''
         filas += f"""<tr>
           <td class="cl-rank">{medal}</td>
           <td class="cl-phone"><a href="https://wa.me/{phone}" target="_blank">+{phone}</a></td>
-          <td>{nombre}</td>
-          <td class="cl-num">{pedidos}</td>
-          <td class="cl-num cl-total">S/ {gastado:.2f}</td>
+          <td>{nombre}{badge_rec}</td>
+          <td class="cl-num">{pedidos_dia}</td>
+          <td class="cl-num cl-total">S/ {gastado_dia:.2f}</td>
+          <td class="cl-num cl-hist">{pedidos_hist}</td>
+          <td class="cl-num cl-hist">S/ {gastado_hist:.2f}</td>
           <td class="cl-pts">
             <input class="pts-input" type="number" min="0" value="{puntos}"
               onchange="guardarPuntos('{phone}', this)"
@@ -2332,6 +2338,7 @@ td{{padding:10px 14px;font-size:13px;color:#333}}
 .cl-phone a:hover{{text-decoration:underline}}
 .cl-num{{text-align:right;font-variant-numeric:tabular-nums}}
 .cl-total{{color:#2D5016;font-weight:700}}
+.cl-hist{{color:#555;background:#f8fdf5}}
 .cl-date{{color:#999;font-size:12px}}
 .pts-input{{width:72px;border:1px solid #ddd;border-radius:8px;padding:5px 8px;font-size:13px;text-align:center;outline:none;transition:border-color .15s}}
 .pts-input:focus{{border-color:#2D5016}}
@@ -2375,8 +2382,10 @@ td{{padding:10px 14px;font-size:13px;color:#333}}
           <th>#</th>
           <th>Teléfono</th>
           <th>Nombre</th>
-          <th style="text-align:right">Pedidos</th>
-          <th style="text-align:right">Total gastado</th>
+          <th style="text-align:right">Pedidos día</th>
+          <th style="text-align:right">Total día</th>
+          <th style="text-align:right;background:#1b3a0e">Pedidos hist.</th>
+          <th style="text-align:right;background:#1b3a0e">Total hist.</th>
           <th style="text-align:center">Puntos 🌟</th>
           <th>Última actividad</th>
         </tr>

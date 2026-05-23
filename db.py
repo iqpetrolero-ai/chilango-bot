@@ -547,6 +547,51 @@ def get_customers_with_stats() -> list:
     return result
 
 
+def get_customers_with_stats_for_date(fecha: str) -> list:
+    """Retorna clientes que compraron en una fecha específica (DD/MM/YYYY), con stats de ese día."""
+    import re as _re
+    with _conn() as conn:
+        orders = conn.execute(
+            "SELECT phone, total FROM orders WHERE fecha=? AND estado NOT IN ('Cancelado ❌')",
+            (fecha,)
+        ).fetchall()
+
+    if not orders:
+        return []
+
+    phones = list({o["phone"] for o in orders})
+    stats: dict = {}
+    for o in orders:
+        ph = o["phone"]
+        if ph not in stats:
+            stats[ph] = {"count": 0, "total": 0.0}
+        stats[ph]["count"] += 1
+        try:
+            m = _re.search(r"(\d+(?:[.,]\d{1,2})?)", (o["total"] or ""))
+            if m:
+                stats[ph]["total"] += float(m.group(1).replace(",", "."))
+        except Exception:
+            pass
+
+    result = []
+    with _conn() as conn:
+        for ph in phones:
+            row = conn.execute(
+                "SELECT phone, nombre, ultima_dir, ultimo_pedido, ultimo_pago, puntos, updated_at "
+                "FROM customer_profiles WHERE phone=?", (ph,)
+            ).fetchone()
+            c = dict(row) if row else {"phone": ph, "nombre": None, "ultima_dir": None,
+                                        "ultimo_pedido": None, "ultimo_pago": None,
+                                        "puntos": 0, "updated_at": None}
+            s = stats.get(ph, {"count": 0, "total": 0.0})
+            c["total_pedidos"] = s["count"]
+            c["total_gastado"] = round(s["total"], 2)
+            result.append(c)
+
+    result.sort(key=lambda x: x["total_gastado"], reverse=True)
+    return result
+
+
 def update_customer_points(phone: str, puntos: int):
     """Actualiza los puntos de un cliente."""
     with _conn() as c:

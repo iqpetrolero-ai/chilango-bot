@@ -2246,8 +2246,21 @@ async def api_conversations(credentials: HTTPBasicCredentials = Depends(verifica
 
 
 @app.get("/admin/clientes", response_class=HTMLResponse)
-async def admin_clientes(credentials: HTTPBasicCredentials = Depends(verificar_admin)):
-    clientes = db.get_customers_with_stats()
+async def admin_clientes(
+    credentials: HTTPBasicCredentials = Depends(verificar_admin),
+    fecha: str = Query(None)
+):
+    from datetime import datetime, timezone, timedelta
+    PERU_TZ = timezone(timedelta(hours=-5))
+    hoy = datetime.now(PERU_TZ).strftime("%d/%m/%Y")
+    fecha_sel = fecha if fecha else hoy
+
+    # Obtener fechas disponibles para el selector
+    fechas_raw = db.get_available_dates()
+    fechas_disponibles = fechas_raw if hoy in fechas_raw else [hoy] + fechas_raw
+
+    # Clientes del día seleccionado
+    clientes = db.get_customers_with_stats_for_date(fecha_sel)
 
     filas = ""
     for i, c in enumerate(clientes, 1):
@@ -2275,6 +2288,13 @@ async def admin_clientes(credentials: HTTPBasicCredentials = Depends(verificar_a
 
     total_clientes = len(clientes)
     total_gastado_global = sum(c.get("total_gastado") or 0 for c in clientes)
+    total_pedidos_dia = sum(c.get("total_pedidos") or 0 for c in clientes)
+    label_fecha = f"{'Hoy ' if fecha_sel == hoy else ''}{fecha_sel}"
+
+    selector_fechas = "".join(
+        f'<option value="{f}" {"selected" if f == fecha_sel else ""}>{f}{" (hoy)" if f == hoy else ""}</option>'
+        for f in fechas_disponibles
+    )
 
     return f"""<!DOCTYPE html>
 <html lang="es">
@@ -2292,13 +2312,14 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgro
 .nav a{{color:rgba(255,255,255,.7);text-decoration:none;padding:9px 18px;font-size:13px;transition:background .15s}}
 .nav a:hover,.nav a.active{{color:#fff;background:rgba(255,255,255,.12)}}
 .wrap{{max-width:1100px;margin:0 auto;padding:20px 16px}}
+.toolbar-cl{{display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap}}
+.toolbar-cl select{{border:1px solid #ccc;border-radius:8px;padding:6px 12px;font-size:13px;cursor:pointer;outline:none}}
+.toolbar-cl input{{border:1px solid #ddd;border-radius:10px;padding:8px 14px;font-size:14px;outline:none;min-width:240px}}
+.toolbar-cl input:focus{{border-color:#2D5016}}
 .stats-bar{{display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap}}
 .stat-chip{{background:white;border-radius:12px;padding:12px 20px;box-shadow:0 1px 4px rgba(0,0,0,.08);text-align:center}}
 .stat-chip .val{{font-size:22px;font-weight:700;color:#2D5016}}
 .stat-chip .lbl{{font-size:11px;color:#888;margin-top:2px}}
-.search-bar{{margin-bottom:14px}}
-.search-bar input{{width:100%;max-width:360px;border:1px solid #ddd;border-radius:10px;padding:9px 14px;font-size:14px;outline:none}}
-.search-bar input:focus{{border-color:#2D5016}}
 .tbl-wrap{{background:white;border-radius:14px;box-shadow:0 1px 4px rgba(0,0,0,.08);overflow:hidden}}
 table{{width:100%;border-collapse:collapse}}
 thead th{{background:#2D5016;color:white;padding:11px 14px;text-align:left;font-size:12px;font-weight:600;white-space:nowrap}}
@@ -2334,16 +2355,20 @@ td{{padding:10px 14px;font-size:13px;color:#333}}
   <a href="/admin/clientes" class="active">👥 Clientes</a>
 </nav>
 <div class="wrap">
-  <div class="stats-bar">
-    <div class="stat-chip"><div class="val">{total_clientes}</div><div class="lbl">Clientes registrados</div></div>
-    <div class="stat-chip"><div class="val">S/ {total_gastado_global:.2f}</div><div class="lbl">Facturación total</div></div>
-    <div class="stat-chip"><div class="val">S/ {(total_gastado_global/total_clientes if total_clientes else 0):.2f}</div><div class="lbl">Ticket promedio</div></div>
-  </div>
-  <div class="search-bar">
+  <div class="toolbar-cl">
+    <select onchange="if(this.value)location.href='/admin/clientes?fecha='+encodeURIComponent(this.value)">
+      {selector_fechas}
+    </select>
     <input type="text" id="buscar" placeholder="🔍 Buscar por teléfono o nombre..." oninput="filtrar(this.value)">
   </div>
+  <div class="stats-bar">
+    <div class="stat-chip"><div class="val">{total_clientes}</div><div class="lbl">Clientes — {label_fecha}</div></div>
+    <div class="stat-chip"><div class="val">{total_pedidos_dia}</div><div class="lbl">Pedidos ese día</div></div>
+    <div class="stat-chip"><div class="val">S/ {total_gastado_global:.2f}</div><div class="lbl">Facturación del día</div></div>
+    <div class="stat-chip"><div class="val">S/ {(total_gastado_global/total_clientes if total_clientes else 0):.2f}</div><div class="lbl">Ticket promedio</div></div>
+  </div>
   <div class="tbl-wrap">
-    {"<div class='empty'>Aún no hay clientes registrados 🌮</div>" if not clientes else f"""
+    {"<div class='empty'>Sin pedidos para " + html.escape(fecha_sel) + " 🌮</div>" if not clientes else f"""
     <table id="tablaClientes">
       <thead>
         <tr>

@@ -340,6 +340,17 @@ def get_active_orders_count() -> int:
         return row["n"] if row else 0
 
 
+def get_active_orders_items() -> list[str]:
+    """Retorna los items de pedidos activos (Nuevo + En preparación) de hoy."""
+    today = datetime.now(PERU_TZ).strftime("%d/%m/%Y")
+    with _conn() as c:
+        rows = c.execute(
+            "SELECT items FROM orders WHERE fecha=? AND estado IN ('Nuevo 🆕','En preparación 👨‍🍳')",
+            (today,)
+        ).fetchall()
+        return [r["items"] or "" for r in rows]
+
+
 def get_orders_today() -> list:
     now = datetime.now(PERU_TZ)
     today = now.strftime("%d/%m/%Y")

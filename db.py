@@ -559,44 +559,70 @@ def get_customers_with_stats() -> list:
 
 
 def get_customers_with_stats_for_date(fecha: str) -> list:
-    """Retorna clientes que compraron en una fecha específica (DD/MM/YYYY), con stats de ese día."""
+    """Retorna clientes que compraron en una fecha específica (DD/MM/YYYY),
+    con stats del día Y acumulado histórico."""
     import re as _re
+
+    def _parse_total(val):
+        try:
+            m = _re.search(r"(\d+(?:[.,]\d{1,2})?)", (val or ""))
+            return float(m.group(1).replace(",", ".")) if m else 0.0
+        except Exception:
+            return 0.0
+
     with _conn() as conn:
-        orders = conn.execute(
+        # Pedidos del día
+        orders_day = conn.execute(
             "SELECT phone, total FROM orders WHERE fecha=? AND estado NOT IN ('Cancelado ❌')",
             (fecha,)
         ).fetchall()
 
-    if not orders:
-        return []
+        if not orders_day:
+            return []
 
-    phones = list({o["phone"] for o in orders})
-    stats: dict = {}
-    for o in orders:
-        ph = o["phone"]
-        if ph not in stats:
-            stats[ph] = {"count": 0, "total": 0.0}
-        stats[ph]["count"] += 1
-        try:
-            m = _re.search(r"(\d+(?:[.,]\d{1,2})?)", (o["total"] or ""))
-            if m:
-                stats[ph]["total"] += float(m.group(1).replace(",", "."))
-        except Exception:
-            pass
+        phones = list({o["phone"] for o in orders_day})
 
-    result = []
-    with _conn() as conn:
+        # Stats del día por cliente
+        stats_day: dict = {}
+        for o in orders_day:
+            ph = o["phone"]
+            if ph not in stats_day:
+                stats_day[ph] = {"count": 0, "total": 0.0}
+            stats_day[ph]["count"] += 1
+            stats_day[ph]["total"] += _parse_total(o["total"])
+
+        # Stats acumuladas históricas por cliente
+        placeholders = ",".join("?" * len(phones))
+        orders_all = conn.execute(
+            f"SELECT phone, total FROM orders WHERE phone IN ({placeholders}) AND estado NOT IN ('Cancelado ❌')",
+            phones
+        ).fetchall()
+
+        stats_all: dict = {}
+        for o in orders_all:
+            ph = o["phone"]
+            if ph not in stats_all:
+                stats_all[ph] = {"count": 0, "total": 0.0}
+            stats_all[ph]["count"] += 1
+            stats_all[ph]["total"] += _parse_total(o["total"])
+
+        result = []
         for ph in phones:
             row = conn.execute(
                 "SELECT phone, nombre, ultima_dir, ultimo_pedido, ultimo_pago, puntos, updated_at "
                 "FROM customer_profiles WHERE phone=?", (ph,)
             ).fetchone()
             c = dict(row) if row else {"phone": ph, "nombre": None, "ultima_dir": None,
-                                        "ultimo_pedido": None, "ultimo_pago": None,
-                                        "puntos": 0, "updated_at": None}
-            s = stats.get(ph, {"count": 0, "total": 0.0})
-            c["total_pedidos"] = s["count"]
-            c["total_gastado"] = round(s["total"], 2)
+                                       "ultimo_pedido": None, "ultimo_pago": None,
+                                       "puntos": 0, "updated_at": None}
+            d = stats_day.get(ph, {"count": 0, "total": 0.0})
+            a = stats_all.get(ph, {"count": 0, "total": 0.0})
+            # Stats del día
+            c["total_pedidos"] = d["count"]
+            c["total_gastado"]  = round(d["total"], 2)
+            # Stats acumuladas
+            c["total_pedidos_hist"] = a["count"]
+            c["total_gastado_hist"]  = round(a["total"], 2)
             result.append(c)
 
     result.sort(key=lambda x: x["total_gastado"], reverse=True)

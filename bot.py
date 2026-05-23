@@ -70,7 +70,7 @@ Tienes personalidad amigable, con onda mexicana auténtica. Eres entusiasta con 
 - Dirección para recojo: Asoc. Ricardo Odonovan Mz H-5, calle Las Poncianas, atrás del Terminal Flores
 - Horario: Viernes, Sábado y Domingo de 5pm a 11pm · Último pedido: 10:45pm
 - Instagram: @chilangotacna
-- Formas de pago: Yape/Plin · Efectivo (NO se acepta tarjeta)
+- Formas de pago: Yape/Plin · Efectivo · Contra entrega (NO se acepta tarjeta — contra entrega se procesa igual que efectivo)
 - Número Yape/Plin: {YAPE_PLIN_NUMBER} (distinto al WhatsApp)
 - Empaque eco resistente: S/ 2.00 por pedido (aplica siempre, delivery o recojo)
 - Costo de delivery: varía según la zona del cliente, lo define el servicio de delivery
@@ -82,6 +82,7 @@ Tienes personalidad amigable, con onda mexicana auténtica. Eres entusiasta con 
 {MENU_TEXTO}
 
 ━━━ COMBOS — ACLARACIÓN IMPORTANTE ━━━
+- Los combos están armados con sus componentes fijos y NO se pueden modificar (p.ej. cambiar el agua por otra bebida no incluida, agregar o quitar ítems del combo). Si el cliente pide cambiar un componente del combo, responde de forma amable y natural: "Los combos vienen armados tal cual para que salga todo al mejor precio 😊 Si quieres algo diferente puedo armarte el pedido a la carta, ¿cómo lo prefieres?"
 - "Combo Pa' Ti Solito": el agua incluida es SOLO horchata, jamaica o tamarindo. NO incluye chamoyada de mango.
 - "De Compas": incluye 2 tacos (pregunta qué tipo sin mostrar precios) y
   2 aguas a elegir entre horchata, jamaica o tamarindo (pregunta cuáles sin mostrar precios).
@@ -108,6 +109,7 @@ Si es de las incluidas → no la cobres por separado. Si es adicional → agrég
    - "¿Tienen cobertura en mi zona?" → Sí, llegamos a todo Tacna
    - "¿Cuánto cuesta el delivery?" → El costo varía según tu zona; te lo confirmamos antes de que salga el pedido
    - "¿Puedo pagar el delivery incluido en el pedido?" → ver punto 11
+   - "¿Aceptan contra entrega?" → Sí, manejamos contra entrega. Trátalo exactamente igual que Efectivo en el flujo de pedido (mismo tag, mismo proceso).
    - "¿La quesabirria incluye algo más?" → Sí, viene con consomé para dipping 🍲
    - "¿Puedo personalizar mi pedido?" → Sí: sin cebolla, sin cilantro o todo aparte
    - Quejas de sabor, temperatura o producto incorrecto → ver punto 12
@@ -147,7 +149,9 @@ Si es de las incluidas → no la cobres por separado. Si es adicional → agrég
 
    YAPE/PLIN:
    Paso 1 — Una vez que tienes dirección y el cliente eligió Yape/Plin: indica
-             "📲 Yapea o Plina al *{YAPE_PLIN_NUMBER}* a nombre de *Karla Saldaña*" y pide la captura. NO incluyas ningún tag aún.
+             "📲 Yapea o Plinea al *{YAPE_PLIN_NUMBER}* a nombre de *Karla Saldaña* por *S/ XX.XX*" y pide la captura.
+             SIEMPRE usa la frase "Yapea o Plinea" (nunca solo "yapea" ni solo "plinea").
+             NO incluyas ningún tag aún.
    Paso 2 — Cliente envía la captura: verifica el monto en la imagen.
              * Monto correcto → confirma, informa tiempo estimado (CONTEXTO ACTUAL) y agrega [PEDIDO_OK|...]
              * Monto menor    → indica la diferencia y pide que complete
@@ -158,6 +162,10 @@ Si es de las incluidas → no la cobres por separado. Si es adicional → agrég
    Cuando el cliente confirme → informa tiempo estimado (CONTEXTO ACTUAL) e incluye [PEDIDO_OK|...]. Solo una vez.
    Ej delivery: "¡Pedido confirmado! 🌮 Tiempo estimado: unos [X] minutos. ¡Te avisamos cuando salga!"
    Ej recojo:   "¡Confirmado! Tiempo estimado: unos [X] minutos. Te avisamos cuando esté listo 🌮"
+
+   CONTRA ENTREGA:
+   Tratar exactamente igual que Efectivo. Usar pago: Efectivo en el tag [PEDIDO_OK|...].
+   No explicar al cliente cómo funciona internamente. Confirmar normalmente igual que un pedido en efectivo.
 
    FORMATO EXACTO DEL TAG NUEVO PEDIDO (5 campos):
    [PEDIDO_OK|items: <descripción>|total: S/ XX.XX|pago: <Yape/Plin|Efectivo>|dir: <dirección o Recojo>|notas: <personalizaciones o dejar vacío>]
@@ -708,9 +716,10 @@ async def _call_claude(phone: str, messages: list) -> str:
                 "\n• Si el cliente EXPLÍCITAMENTE pide cambiar algo (agregar, quitar o cambiar ítems),"
                 " muestra el nuevo resumen completo con total recalculado, pide confirmación"
                 " y cuando confirme usa [PEDIDO_MOD|...] con el pedido completo actualizado."
-                "\n• Si dice 'gracias', 'ok', 'perfecto' u otras frases de cierre, responde MUY brevemente"
-                " (ej: '¡Con gusto! 😊') sin ningún tag y SIN mencionar el estado del pedido —"
-                " nunca digas 'en camino', 'ya salió', 'en preparación' ni similares."
+                "\n• Si dice 'gracias', 'ok', 'perfecto' u otras frases de cierre, responde ÚNICAMENTE con"
+                " '¡Con gusto, Chilanguit@! 😊' — NADA MÁS. PROHIBIDO ABSOLUTAMENTE agregar frases como"
+                " 'ya está en camino', 'ya salió', 'ya está listo', 'en preparación' o cualquier referencia"
+                " al estado del pedido. El pedido acaba de ser tomado, no ha salido aún."
             )
     except Exception as e:
         print(f"[PEDIDO-CTX] Error: {e}")
@@ -838,7 +847,7 @@ async def process_message(phone: str, message: str) -> tuple[str, bool]:
     if db.is_escalated(phone_clean_esc):
         msgs = db.get_messages(phone)
         sin_respuesta = _contar_mensajes_sin_respuesta_manual(msgs)
-        if sin_respuesta >= 1 and db.check_reescalation_cooldown(phone_clean_esc, minutes=5):
+        if sin_respuesta >= 1 and db.check_reescalation_cooldown(phone_clean_esc, minutes=30):
             await _notify_reescalacion(phone_clean_esc, sin_respuesta)
             db.mark_reescalation_sent(phone_clean_esc)
             reply_esc = (
@@ -872,7 +881,7 @@ async def process_message_with_image(phone: str, image_bytes: bytes, mime_type: 
     if db.is_escalated(phone_clean_esc):
         msgs = db.get_messages(phone)
         sin_respuesta = _contar_mensajes_sin_respuesta_manual(msgs)
-        if sin_respuesta >= 1 and db.check_reescalation_cooldown(phone_clean_esc, minutes=5):
+        if sin_respuesta >= 1 and db.check_reescalation_cooldown(phone_clean_esc, minutes=30):
             await _notify_reescalacion(phone_clean_esc, sin_respuesta)
             db.mark_reescalation_sent(phone_clean_esc)
             reply_esc = (

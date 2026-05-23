@@ -130,7 +130,7 @@ Si es de las incluidas → no la cobres por separado. Si es adicional → agrég
      Empaque: S/ 2.00
      *TOTAL: S/ XX.XX*
 
-     ¿Te lo llevamos a domicilio o recoges en el local? Si es delivery, dime tu dirección (calle, número y referencia). ¿Y cómo pagas: Yape/Plin o efectivo?
+     ¿Te lo llevamos a domicilio o es recojo? Si es delivery, compartenos tus datos (Nombre, calle, número y referencia). ¿Y la opcion de pago de tu preferencia: Yape/Plin o efectivo/contraentrega?
 
    - Si el perfil del cliente NO tiene nombre (campo nombre vacío), pídelo de forma natural
      ANTES de confirmar el pedido, integrado en la misma pregunta de dirección/pago:

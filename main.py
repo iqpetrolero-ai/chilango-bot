@@ -2161,6 +2161,24 @@ async def delete_conversation(
     return JSONResponse({"status": "ok"})
 
 
+@app.post("/api/conversations/delete-bulk")
+async def delete_conversations_bulk(
+    request: Request,
+    credentials: HTTPBasicCredentials = Depends(verificar_admin)
+):
+    """Elimina el historial de múltiples contactos."""
+    data = await request.json()
+    phones = data.get("phones", [])
+    if not phones:
+        return JSONResponse({"status": "error", "msg": "No phones provided"}, status_code=400)
+    for phone in phones:
+        phone = str(phone).strip()
+        if phone:
+            db.delete_conversation(phone)
+            print(f"[ADMIN] Chat eliminado (bulk): {phone}")
+    return JSONResponse({"status": "ok", "deleted": len(phones)})
+
+
 @app.post("/api/conversations/pausar")
 async def pausar_bot_conv(
     request: Request,
@@ -2501,7 +2519,10 @@ async def admin(credentials: HTTPBasicCredentials = Depends(verificar_admin)):
         avatar = "🛵" if es_delivery else "👤"
         tiempo = _format_contact_time(data.get("last_msg_at", ""))
         contacts_html += f"""
-        <div class="contact{unread_class}" id="c_{html.escape(phone)}" onclick="showChat('{html.escape(phone)}')">
+        <div class="contact{unread_class}" id="c_{html.escape(phone)}" onclick="contactClick(event, '{html.escape(phone)}')" data-phone="{html.escape(phone)}">
+            <input type="checkbox" class="conv-chk" data-phone="{html.escape(phone)}"
+                onclick="event.stopPropagation()" onchange="onChkChange()"
+                style="display:none;width:14px;height:14px;flex-shrink:0;cursor:pointer;accent-color:#25d366;margin-right:4px">
             <div class="avatar">{avatar}</div>
             <div class="contact-info">
                 <div class="contact-row1">
@@ -2555,7 +2576,7 @@ async def admin(credentials: HTTPBasicCredentials = Depends(verificar_admin)):
         .header .stats {{ margin-left: auto; font-size: 13px; opacity: 0.85; text-align: right; }}
         .container {{ display: flex; flex: 1; overflow: hidden; }}
         .sidebar {{ width: 320px; background: white; border-right: 1px solid #e0e0e0; display: flex; flex-direction: column; overflow: hidden; flex-shrink: 0; }}
-        .sidebar-title {{ padding: 12px 16px; font-size: 12px; color: #667781; background: #f0f2f5; border-bottom: 1px solid #e9edef; font-weight: 600; letter-spacing: .5px; }}
+        .sidebar-title {{ padding: 10px 16px; font-size: 12px; color: #667781; background: #f0f2f5; border-bottom: 1px solid #e9edef; font-weight: 600; letter-spacing: .5px; display:flex; align-items:center; justify-content:space-between; }}
         .sidebar-list {{ overflow-y: auto; flex: 1; }}
         .contact {{ padding: 12px 16px; border-bottom: 1px solid #e9edef; cursor: pointer; display: flex; align-items: center; gap: 12px; transition: background .1s; }}
         .contact:hover {{ background: #f5f5f5; }}
@@ -2615,7 +2636,25 @@ async def admin(credentials: HTTPBasicCredentials = Depends(verificar_admin)):
     </div>
     <div class="container">
         <div class="sidebar">
-            <div class="sidebar-title">CONVERSACIONES</div>
+            <div class="sidebar-title">
+                <span>CONVERSACIONES</span>
+                <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:12px;font-weight:400;color:#aaa" title="Seleccionar todas">
+                    <input type="checkbox" id="chkSelectAll" onchange="toggleSelectAll(this.checked)"
+                        style="width:14px;height:14px;cursor:pointer;accent-color:#25d366">
+                    Todas
+                </label>
+            </div>
+            <div id="bulkBar" style="display:none;padding:6px 12px;background:#fff3e0;border-bottom:1px solid #ffe082;display:none;align-items:center;gap:8px;flex-shrink:0">
+                <span id="bulkCount" style="font-size:12px;color:#555;flex:1">0 seleccionadas</span>
+                <button onclick="eliminarSeleccionadas()"
+                    style="background:#e53935;color:#fff;border:none;border-radius:16px;padding:4px 14px;font-size:12px;font-weight:700;cursor:pointer">
+                    🗑️ Eliminar
+                </button>
+                <button onclick="cancelarSeleccion()"
+                    style="background:none;border:1px solid #aaa;border-radius:16px;padding:4px 12px;font-size:12px;cursor:pointer;color:#555">
+                    Cancelar
+                </button>
+            </div>
             <div class="sidebar-list">{contacts_html}</div>
         </div>
         <div class="chat-panel" id="chatPanel">
@@ -2814,6 +2853,78 @@ async def admin(credentials: HTTPBasicCredentials = Depends(verificar_admin)):
         }}
         checkPedidosNuevos();
         setInterval(checkPedidosNuevos, 10000);
+
+        /* ── Selección múltiple ── */
+        let modoSeleccion = false;
+
+        function toggleSelectAll(checked) {{
+            modoSeleccion = true;
+            document.querySelectorAll('.conv-chk').forEach(chk => {{
+                chk.style.display = 'block';
+                chk.checked = checked;
+            }});
+            actualizarBulkBar();
+        }}
+
+        function contactClick(e, phone) {{
+            if (modoSeleccion) {{
+                const chk = document.querySelector(`.conv-chk[data-phone="${{phone}}"]`);
+                if (chk) {{ chk.checked = !chk.checked; onChkChange(); }}
+            }} else {{
+                showChat(phone);
+            }}
+        }}
+
+        function onChkChange() {{
+            modoSeleccion = true;
+            document.querySelectorAll('.conv-chk').forEach(chk => chk.style.display = 'block');
+            actualizarBulkBar();
+        }}
+
+        function actualizarBulkBar() {{
+            const seleccionadas = document.querySelectorAll('.conv-chk:checked');
+            const bar = document.getElementById('bulkBar');
+            const count = document.getElementById('bulkCount');
+            if (seleccionadas.length > 0) {{
+                bar.style.display = 'flex';
+                count.textContent = seleccionadas.length + ' seleccionada' + (seleccionadas.length > 1 ? 's' : '');
+            }} else {{
+                bar.style.display = 'none';
+            }}
+            // Sync checkbox "Todas"
+            const total = document.querySelectorAll('.conv-chk').length;
+            document.getElementById('chkSelectAll').checked = seleccionadas.length === total && total > 0;
+            document.getElementById('chkSelectAll').indeterminate = seleccionadas.length > 0 && seleccionadas.length < total;
+        }}
+
+        function cancelarSeleccion() {{
+            modoSeleccion = false;
+            document.querySelectorAll('.conv-chk').forEach(chk => {{
+                chk.checked = false;
+                chk.style.display = 'none';
+            }});
+            document.getElementById('bulkBar').style.display = 'none';
+            document.getElementById('chkSelectAll').checked = false;
+            document.getElementById('chkSelectAll').indeterminate = false;
+        }}
+
+        async function eliminarSeleccionadas() {{
+            const seleccionadas = [...document.querySelectorAll('.conv-chk:checked')];
+            if (seleccionadas.length === 0) return;
+            if (!confirm(`¿Eliminar ${{seleccionadas.length}} conversación${{seleccionadas.length > 1 ? 'es' : ''}}? Esta acción no se puede deshacer.`)) return;
+            const phones = seleccionadas.map(chk => chk.dataset.phone);
+            const r = await fetch('/api/conversations/delete-bulk', {{
+                method: 'POST', credentials: 'same-origin',
+                headers: {{'Content-Type': 'application/json'}},
+                body: JSON.stringify({{phones}})
+            }});
+            if ((await r.json()).status === 'ok') {{
+                cancelarSeleccion();
+                document.getElementById('chatPanel').innerHTML = '<div class="empty-state"><img src="/static/logo.png" alt=""><span>Selecciona una conversación</span></div>';
+                sessionStorage.removeItem('activePhone');
+                pollConversaciones();
+            }}
+        }}
     </script>
 </body>
 </html>"""

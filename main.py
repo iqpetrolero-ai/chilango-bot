@@ -639,7 +639,7 @@ async def home():
         <h1>🌮 Chilango Bot</h1>
         <p>El bot está funcionando correctamente ✅</p>
         <p>Pedidos registrados: <span class="badge">{count}</span></p>
-        <p><small>Horario: Vie · Sáb · Dom · 5pm – 11pm</small></p>
+        <p><small>Horario: Vie · Sáb · Dom · 5:30pm – 11pm</small></p>
     </body>
     </html>
     """

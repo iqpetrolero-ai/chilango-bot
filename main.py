@@ -2644,7 +2644,7 @@ async def admin(credentials: HTTPBasicCredentials = Depends(verificar_admin)):
                     Todas
                 </label>
             </div>
-            <div id="bulkBar" style="display:none;padding:6px 12px;background:#fff3e0;border-bottom:1px solid #ffe082;display:none;align-items:center;gap:8px;flex-shrink:0">
+            <div id="bulkBar" style="display:none;padding:6px 12px;background:#fff3e0;border-bottom:1px solid #ffe082;align-items:center;gap:8px;flex-shrink:0">
                 <span id="bulkCount" style="font-size:12px;color:#555;flex:1">0 seleccionadas</span>
                 <button onclick="eliminarSeleccionadas()"
                     style="background:#e53935;color:#fff;border:none;border-radius:16px;padding:4px 14px;font-size:12px;font-weight:700;cursor:pointer">
@@ -2885,12 +2885,10 @@ async def admin(credentials: HTTPBasicCredentials = Depends(verificar_admin)):
             const seleccionadas = document.querySelectorAll('.conv-chk:checked');
             const bar = document.getElementById('bulkBar');
             const count = document.getElementById('bulkCount');
-            if (seleccionadas.length > 0) {{
-                bar.style.display = 'flex';
-                count.textContent = seleccionadas.length + ' seleccionada' + (seleccionadas.length > 1 ? 's' : '');
-            }} else {{
-                bar.style.display = 'none';
-            }}
+            bar.style.cssText = seleccionadas.length > 0
+                ? 'display:flex;padding:6px 12px;background:#fff3e0;border-bottom:1px solid #ffe082;align-items:center;gap:8px;flex-shrink:0'
+                : 'display:none';
+            count.textContent = seleccionadas.length + ' seleccionada' + (seleccionadas.length > 1 ? 's' : '');
             // Sync checkbox "Todas"
             const total = document.querySelectorAll('.conv-chk').length;
             document.getElementById('chkSelectAll').checked = seleccionadas.length === total && total > 0;

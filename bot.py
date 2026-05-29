@@ -30,7 +30,7 @@ def esta_en_horario() -> bool:
     if ahora.weekday() not in (4, 5, 6):
         return False
     hora, minuto = ahora.hour, ahora.minute
-    if hora < 17:
+    if hora < 17 or (hora == 17 and minuto < 30):
         return False
     # Último pedido a las 10:45pm
     if hora > 22 or (hora == 22 and minuto >= 45):
@@ -68,7 +68,7 @@ Tienes personalidad amigable, con onda mexicana auténtica. Eres entusiasta con 
 - Ciudad: Tacna, Perú — cobertura a todo Tacna
 - Modalidad: Delivery y recojo
 - Dirección para recojo: Asoc. Ricardo Odonovan Mz H-5, calle Las Poncianas, atrás del Terminal Flores
-- Horario: Viernes, Sábado y Domingo de 5pm a 11pm · Último pedido: 10:45pm
+- Horario: Viernes, Sábado y Domingo de 5:30pm a 11pm · Último pedido: 10:45pm
 - Instagram: @chilangotacna
 - Formas de pago: Yape/Plin · Efectivo · Contra entrega (NO se acepta tarjeta — contra entrega se procesa igual que efectivo)
 - Número Yape/Plin: {YAPE_PLIN_NUMBER} (distinto al WhatsApp)
@@ -107,7 +107,7 @@ Si es de las incluidas → no la cobres por separado. Si es adicional → agrég
    - "¿Tienen opciones sin picante?" → Sí, puedes pedir tus tacos o birria sin salsa picante
    - "¿Cuánto demora el delivery?" → El motorizado llega a nuestro local en unos 10-15 min y de ahí sale a tu dirección; el tiempo total depende de tu zona
    - "¿Tienen cobertura en mi zona?" → Sí, llegamos a todo Tacna
-   - "¿Cuánto cuesta el delivery?" → El costo varía según tu zona; te lo confirmamos antes de que salga el pedido
+   - "¿Cuánto cuesta el delivery?" → El costo varía según tu zona; una vez que confirmes tu pedido te lo comunicamos. ⛔ NUNCA menciones cifras ni rangos de precio de delivery.
    - "¿Puedo pagar el delivery incluido en el pedido?" → ver punto 11
    - "¿Aceptan contra entrega?" → Sí, manejamos contra entrega. Trátalo exactamente igual que Efectivo en el flujo de pedido (mismo tag, mismo proceso).
    - "¿La quesabirria incluye algo más?" → Sí, viene con consomé para dipping 🍲
@@ -130,7 +130,7 @@ Si es de las incluidas → no la cobres por separado. Si es adicional → agrég
      Empaque: S/ 2.00
      *TOTAL: S/ XX.XX*
 
-     ¿Te lo llevamos a domicilio o es recojo? Si es delivery, compartenos tus datos (Nombre, calle, número y referencia). ¿Y la opcion de pago de tu preferencia: Yape/Plin o efectivo/contraentrega?
+     ¿Te lo llevamos a domicilio o recoges en el local? Si es delivery, dime tu dirección (calle, número y referencia). ¿Y cómo pagas: Yape/Plin o efectivo?
 
    - Si el perfil del cliente NO tiene nombre (campo nombre vacío), pídelo de forma natural
      ANTES de confirmar el pedido, integrado en la misma pregunta de dirección/pago:

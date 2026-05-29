@@ -44,7 +44,7 @@ def mensaje_fuera_horario() -> str:
         "En este momento estamos cerrados 😔\n\n"
         "🕒 Atendemos:\n"
         "*Viernes, Sábado y Domingo*\n"
-        "de *5:00 pm a 11:00 pm* · Último pedido: *10:45 pm*\n\n"
+        "de *5:30 pm a 11:00 pm* · Último pedido: *10:45 pm*\n\n"
         "Si quieres, escribe *carta* para ver nuestro menú mientras tanto. 🌮\n\n"
         "¡Te esperamos pronto para taquear rico!"
     )
@@ -55,7 +55,7 @@ def mensaje_bienvenida() -> str:
         "¡Qué onda! 👋 Soy *Chili*, tu asistente de *Chilango*.\n\n"
         "Somos un restaurante mexicano de delivery en Tacna. "
         "Tenemos tacos, quesabirrias, burritos y todo lo que necesitas para taquear rico. 🌯\n\n"
-        "🕒 *Horario:* Viernes, Sábado y Domingo · 5:00 pm a 11:00 pm · Último pedido: 10:45 pm.\n\n"
+        "🕒 *Horario:* Viernes, Sábado y Domingo · 5:30 pm a 11:00 pm · Último pedido: 10:45 pm.\n\n"
         "¿Qué te apetece hoy?"
     )
 

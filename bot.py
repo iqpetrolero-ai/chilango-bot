@@ -986,6 +986,7 @@ async def process_message(phone: str, message: str) -> tuple[str, bool]:
         print(f"[AUTO-PAUSA] Error: {_e}")
 
     # Verificar si esta conversación está escalada al equipo humano
+    # Cuando está escalada el bot se calla completamente — el dueño atiende directo
     phone_clean_esc = phone.replace("whatsapp:", "").replace("+", "")
     if db.is_escalated(phone_clean_esc):
         msgs = db.get_messages(phone)
@@ -993,13 +994,7 @@ async def process_message(phone: str, message: str) -> tuple[str, bool]:
         if sin_respuesta >= 1 and db.check_reescalation_cooldown(phone_clean_esc, minutes=30):
             await _notify_reescalacion(phone_clean_esc, sin_respuesta)
             db.mark_reescalation_sent(phone_clean_esc)
-            reply_esc = (
-                "Entendemos tu impaciencia 🙏 Ya alertamos nuevamente al equipo — "
-                "te responden en breve directamente aquí."
-            )
-        else:
-            reply_esc = "Nuestro equipo ya está atento a tu mensaje, en un momento te responden 🙏"
-        return reply_esc, False
+        return "", False  # Silencio total — el bot no responde nada al cliente
 
     now_ts = datetime.now(PERU_TZ).strftime("%H:%M")
     messages = db.get_messages(phone)

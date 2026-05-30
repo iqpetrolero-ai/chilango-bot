@@ -351,6 +351,18 @@ def get_active_orders_items() -> list[str]:
         return [r["items"] or "" for r in rows]
 
 
+def get_active_orders_with_time() -> list[dict]:
+    """Retorna items y hora de inicio de pedidos activos (Nuevo + En preparación) de hoy.
+    Permite calcular el tiempo ya transcurrido de cada pedido."""
+    today = datetime.now(PERU_TZ).strftime("%d/%m/%Y")
+    with _conn() as c:
+        rows = c.execute(
+            "SELECT items, hora FROM orders WHERE fecha=? AND estado IN ('Nuevo 🆕','En preparación 👨‍🍳')",
+            (today,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
 def get_orders_today() -> list:
     now = datetime.now(PERU_TZ)
     today = now.strftime("%d/%m/%Y")
@@ -729,8 +741,8 @@ def get_pending_reminders(minutos: int = 10, cooldown_min: int = 30) -> list[dic
                          "¡confirmado!", "pedido guardado", "¡con gusto", "en preparación"]
         if any(k in content for k in skip_keywords):
             continue
-        keywords = ["¿confirmamos", "confirmas", "yape", "yapea", "plina",
-                    "¿cómo pagas", "cómo pagas", "efectivo?", "total:"]
+        keywords = ["¿confirmamos", "confirmas", "plinea", "plina",
+                    "¿cómo pagas", "cómo pagas", "contra entrega", "total:"]
         if any(k in content for k in keywords):
             result.append({"phone": r["phone"], "last_msg": last.get("content", "")})
     return result

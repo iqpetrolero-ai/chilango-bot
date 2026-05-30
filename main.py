@@ -509,7 +509,8 @@ async def handle_message(phone: str, message: str, phone_number_id: str = None):
         )
         if msg_lower not in SALUDOS_GENERICOS and message.strip():
             reply, escalate = await process_message(phone, message)
-            await _send_reply(phone, reply, sending_id)
+            if reply:
+                await _send_reply(phone, reply, sending_id)
             if escalate:
                 await send_escalate_button(phone, sending_id)
         else:
@@ -521,7 +522,8 @@ async def handle_message(phone: str, message: str, phone_number_id: str = None):
     db.mark_unread(phone)
     try:
         reply, escalate = await process_message(phone, message)
-        await _send_reply(phone, reply, sending_id)
+        if reply:
+            await _send_reply(phone, reply, sending_id)
         if escalate:
             await send_escalate_button(phone, sending_id)
     except Exception as e:
@@ -578,7 +580,8 @@ async def receive_message(request: Request):
             image_bytes, mime_type = await download_meta_image(media_id)
             if image_bytes:
                 reply, _ = await process_message_with_image(phone, image_bytes, mime_type)
-                await send_whatsapp_message(phone, reply, phone_number_id)
+                if reply:
+                    await send_whatsapp_message(phone, reply, phone_number_id)
             else:
                 await send_whatsapp_message(phone, "No pude leer la imagen, ¿puedes enviarla de nuevo? 📸", phone_number_id)
         elif msg_type == "interactive":
@@ -612,6 +615,23 @@ async def receive_message(request: Request):
             else:
                 # Botón desconocido: tratar como texto normal
                 await handle_message(phone, btn_title or btn_id, phone_number_id)
+        elif msg_type == "location":
+            loc  = message_data.get("location", {})
+            lat  = loc.get("latitude", "")
+            lng  = loc.get("longitude", "")
+            name = loc.get("name", "")
+            addr = loc.get("address", "")
+            maps_url  = f"https://maps.google.com/?q={lat},{lng}"
+            # Texto legible para el panel y para Claude
+            loc_parts = ["📍 Ubicación compartida por GPS"]
+            if name:
+                loc_parts.append(f"Lugar: {name}")
+            if addr:
+                loc_parts.append(f"Referencia: {addr}")
+            loc_parts.append(f"Ver en mapa: {maps_url}")
+            loc_text = "\n".join(loc_parts)
+            # Procesar como si fuera un mensaje de texto (Claude entiende la dirección)
+            await handle_message(phone, loc_text, phone_number_id)
         else:
             await send_whatsapp_message(phone, "Por favor envía un mensaje de texto 😊", phone_number_id)
 
@@ -2140,8 +2160,8 @@ async def send_manual_message(
     now_ts = datetime.now(PERU_TZ).strftime("%H:%M")
     db.append_message(phone, "assistant", message, ts=now_ts, manual=True)
     db.mark_unread(phone)
-    # Pausar el bot automáticamente cuando el equipo escribe manualmente
-    db.mark_escalated(phone)
+    # NO se escala automáticamente — el bot sigue activo para esa conversación
+    # Si se quiere silenciar el bot, usar el botón de Escalar en el panel
     print(f"[MANUAL] Mensaje enviado a {phone}: {message[:60]}")
     return JSONResponse({"status": "ok"})
 

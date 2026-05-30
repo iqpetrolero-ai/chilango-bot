@@ -392,6 +392,19 @@ async def handle_message(phone: str, message: str, phone_number_id: str = None):
                 pago_txt     = consulta.get("pago", "")
                 client_phone = consulta["client_phone"]
 
+                # Verificar que el cliente no tenga ya un pedido confirmado hoy
+                # (evita enviar el costo si el cliente ya eligió contra entrega u otro método)
+                from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+                _hoy_str = _dt.now(_tz(_td(hours=-5))).strftime("%d/%m/%Y")
+                _pedidos_confirmados = [
+                    p for p in db.get_orders_for_date(_hoy_str)
+                    if p.get("phone") == client_phone and p.get("estado") not in ("Cancelado ❌",)
+                ]
+                if _pedidos_confirmados:
+                    db.delete_delivery_query(consulta["id"])
+                    print(f"[DELIVERY COST] ⚠️ Pedido ya confirmado para +{client_phone} — costo ignorado")
+                    return
+
                 msg_cliente = (
                     f"¡Ya tenemos el costo! 🛵\n\n"
                     f"🛒 {items_txt}\n"
@@ -400,7 +413,6 @@ async def handle_message(phone: str, message: str, phone_number_id: str = None):
                     f"💰 *Total completo: S/ {total_num:.2f}*\n\n"
                     f"¿Confirmamos tu pedido con {pago_txt}? 😊"
                 )
-                from datetime import datetime as _dt, timezone as _tz, timedelta as _td
                 _ts = _dt.now(_tz(_td(hours=-5))).strftime("%H:%M")
                 db.append_message(client_phone, "assistant", msg_cliente, ts=_ts)
                 db.mark_unread(client_phone)
@@ -2057,6 +2069,19 @@ async def api_enviar_costo_delivery(
 
     if not phone or monto <= 0:
         return JSONResponse({"status": "error", "msg": "phone y monto requeridos"}, status_code=400)
+
+    # Verificar que el cliente no tenga ya un pedido confirmado hoy
+    # (evita enviar el costo de delivery si el cliente ya eligió contra entrega u otro método)
+    from datetime import datetime as _dt2, timezone as _tz2, timedelta as _td2
+    _hoy = _dt2.now(_tz2(_td2(hours=-5))).strftime("%d/%m/%Y")
+    _pedidos_hoy = [
+        p for p in db.get_orders_for_date(_hoy)
+        if p.get("phone") == phone and p.get("estado") not in ("Cancelado ❌",)
+    ]
+    if _pedidos_hoy:
+        db.delete_pending_cost_query(phone)  # limpiar consulta obsoleta
+        print(f"[COSTO DELIVERY] ⚠️ Pedido ya confirmado para +{phone} — costo ignorado")
+        return JSONResponse({"status": "ignorado", "msg": "El cliente ya tiene un pedido confirmado"})
 
     # Calcular total: extraer número del subtotal + monto delivery
     import re as _re

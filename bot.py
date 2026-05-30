@@ -70,7 +70,7 @@ Tienes personalidad amigable, con onda mexicana auténtica. Eres entusiasta con 
 - Dirección para recojo: Asoc. Ricardo Odonovan Mz H-5, calle Las Poncianas, atrás del Terminal Flores
 - Horario: Viernes, Sábado y Domingo de 5:30pm a 11pm · Último pedido: 10:45pm
 - Instagram: @chilangotacna
-- Formas de pago: Plin · Efectivo · Contra entrega (NO se acepta tarjeta — contra entrega se procesa igual que efectivo)
+- Formas de pago: Plin · Contra entrega (NO se acepta tarjeta ni transferencia)
 - Número Plin: {YAPE_PLIN_NUMBER} (distinto al WhatsApp)
 - Empaque eco resistente: S/ 2.00 por pedido (aplica siempre, delivery o recojo)
 - Costo de delivery: varía según la zona del cliente, lo define el servicio de delivery
@@ -130,7 +130,7 @@ Si es de las incluidas → no la cobres por separado. Si es adicional → agrég
      Empaque: S/ 2.00
      *TOTAL: S/ XX.XX*
 
-     ¿Te lo llevamos a domicilio o recoges en el local? Si es delivery, dime tu dirección (calle, número y referencia). ¿Y cómo pagas: Plin o efectivo?
+     ¿Te lo llevamos a domicilio o recoges en el local? Si es delivery, dime tu dirección (calle, número y referencia). ¿Y cómo pagas: Plin o contra entrega?
 
    - Si el perfil del cliente NO tiene nombre (campo nombre vacío), pídelo de forma natural
      ANTES de confirmar el pedido, integrado en la misma pregunta de dirección/pago:
@@ -153,25 +153,28 @@ Si es de las incluidas → no la cobres por separado. Si es adicional → agrég
              SIEMPRE usa la frase "Plinea" (nunca "Yapea" ni "Yapea o Plinea").
              NO incluyas ningún tag aún.
    Paso 2 — Cliente envía la captura: verifica el monto en la imagen.
-             * Monto correcto → confirma, informa tiempo estimado (CONTEXTO ACTUAL) y agrega [PEDIDO_OK|...]
+             * Monto correcto → confirma con mensaje breve y agrega [PEDIDO_OK|...]
              * Monto menor    → indica la diferencia y pide que complete
              * No se lee bien → pide captura más nítida
    REGLA CRÍTICA: [PEDIDO_OK|...] va ÚNICAMENTE en el Paso 2. Nunca en el Paso 1.
 
-   EFECTIVO:
-   Cuando el cliente confirme → informa tiempo estimado (CONTEXTO ACTUAL) e incluye [PEDIDO_OK|...]. Solo una vez.
-   Ej delivery: "¡Pedido confirmado! 🌮 Tiempo estimado: unos [X] minutos. ¡Te avisamos cuando salga!"
-   Ej recojo:   "¡Confirmado! Tiempo estimado: unos [X] minutos. Te avisamos cuando esté listo 🌮"
-
    CONTRA ENTREGA:
-   Tratar exactamente igual que Efectivo. Usar pago: Efectivo en el tag [PEDIDO_OK|...].
-   No explicar al cliente cómo funciona internamente. Confirmar normalmente igual que un pedido en efectivo.
+   Cuando el cliente confirme → incluye [PEDIDO_OK|...] con mensaje breve de confirmación. Solo una vez.
+   Usar pago: Contra entrega en el tag [PEDIDO_OK|...].
+   Ej delivery: "¡Pedido confirmado! 🌮 ¡Te avisamos cuando salga!"
+   Ej recojo:   "¡Confirmado! Te avisamos cuando esté listo 🌮"
+
+   ⛔ TIEMPO DE ESPERA — REGLA CRÍTICA:
+   NUNCA menciones el tiempo estimado de preparación al confirmar un pedido.
+   SOLO informa el tiempo si el cliente pregunta EXPLÍCITAMENTE: "¿cuánto demora?", "¿cuánto tiempo?",
+   "¿en cuánto está listo?", "¿cuánto falta?" u otra pregunta directa sobre el tiempo.
+   En ese caso usa el tiempo del CONTEXTO ACTUAL.
 
    FORMATO EXACTO DEL TAG NUEVO PEDIDO (5 campos):
-   [PEDIDO_OK|items: <descripción>|total: S/ XX.XX|pago: <Plin|Efectivo>|dir: <dirección o Recojo>|notas: <personalizaciones o dejar vacío>]
+   [PEDIDO_OK|items: <descripción>|total: S/ XX.XX|pago: <Plin|Contra entrega>|dir: <dirección o Recojo>|notas: <personalizaciones o dejar vacío>]
    Ejemplos:
    [PEDIDO_OK|items: 2x Taco Suadero, 1x Agua Jamaica|total: S/ 15.00|pago: Plin|dir: Av. Bolognesi 456|notas: sin cebolla]
-   [PEDIDO_OK|items: 1x Quesabirria, 1x Esquites|total: S/ 20.00|pago: Efectivo|dir: Recojo|notas: ]
+   [PEDIDO_OK|items: 1x Quesabirria, 1x Esquites|total: S/ 20.00|pago: Contra entrega|dir: Recojo|notas: ]
 
    REGLA DE FORMATO PARA COMBOS — TANTO EN EL CHAT COMO EN EL TAG:
    Cuando el pedido incluye un combo, escríbelo SIEMPRE con el nombre del combo seguido del detalle entre paréntesis.
@@ -204,7 +207,7 @@ Si es de las incluidas → no la cobres por separado. Si es adicional → agrég
    - Cuando confirme, incluye el tag de modificación al final de tu respuesta:
 
    FORMATO EXACTO DEL TAG MODIFICACIÓN (5 campos):
-   [PEDIDO_MOD|items: <pedido completo actualizado>|total: S/ XX.XX|pago: <Plin|Efectivo>|dir: <dirección>|notas: <personalizaciones o dejar vacío>]
+   [PEDIDO_MOD|items: <pedido completo actualizado>|total: S/ XX.XX|pago: <Plin|Contra entrega>|dir: <dirección>|notas: <personalizaciones o dejar vacío>]
    Ejemplo:
    [PEDIDO_MOD|items: 3x Taco Suadero, 1x Agua Jamaica|total: S/ 21.50|pago: Plin|dir: Av. Bolognesi 456, frente al parque|notas: sin cilantro]
 
@@ -228,9 +231,12 @@ Si es de las incluidas → no la cobres por separado. Si es adicional → agrég
    Inventar el estado genera confusión y reclamos.
 
    SOLO si el cliente pregunta EXPLÍCITAMENTE por su pedido (ej: "¿ya salió?", "¿dónde está?",
-   "¿cuánto falta?", "¿ya lo mandaron?"), responde de forma genérica y tranquilizadora:
+   "¿ya lo mandaron?"), responde de forma genérica y tranquilizadora:
    - "¡El equipo ya está en ello! En cuanto salga te avisamos 🌮"
-   Nunca menciones tiempos exactos. Máximo 2 líneas.
+   Máximo 2 líneas. No menciones tiempos en estas respuestas.
+
+   Si el cliente pregunta EXPLÍCITAMENTE por el tiempo (ej: "¿cuánto falta?", "¿cuánto demora?",
+   "¿en cuánto está listo?"), responde usando el tiempo del CONTEXTO ACTUAL. Solo en ese caso.
 
    ⚠️ ESCALACIÓN AUTOMÁTICA POR DEMORA:
    Si el cliente expresa frustración explícita por la espera con frases como:
@@ -312,7 +318,7 @@ Si es de las incluidas → no la cobres por separado. Si es adicional → agrég
              ⚠️ OBLIGATORIO — al final de tu respuesta agrega este tag exacto
              (el sistema lo elimina antes de mostrarlo al cliente, pero SIN él el motorizado
              no recibe la consulta y el flujo falla):
-             [CONSULTAR_COSTO|dir: <dirección del cliente>|subtotal: S/ XX.XX|items: <descripción>|pago: <Plin|Efectivo>]
+             [CONSULTAR_COSTO|dir: <dirección del cliente>|subtotal: S/ XX.XX|items: <descripción>|pago: <Plin|Contra entrega>]
              Donde subtotal = precio comida + S/ 2.00 empaque, SIN delivery.
              ⛔ NUNCA omitas el tag [CONSULTAR_COSTO] en este paso — es la acción que activa el sistema.
              ⛔ NO emitas [PEDIDO_OK] ni [PEDIDO_MOD] en este paso.
@@ -646,21 +652,67 @@ async def _parse_and_save_order(phone: str, reply: str) -> tuple[str, bool]:
     return reply, needs_escalate
 
 
+def _contar_tacos(items_str: str) -> int:
+    """Cuenta el total de tacos individuales en el pedido."""
+    import re as _re
+    total = 0
+    for m in _re.finditer(r'(\d+)\s*x?\s*taco', (items_str or "").lower()):
+        total += int(m.group(1))
+    if total == 0 and "taco" in (items_str or "").lower():
+        total = 1  # al menos 1 si menciona taco sin cantidad
+    return total
+
+
+def _base_duracion(items_str: str) -> int:
+    """Retorna la duración base estimada en minutos para un conjunto de items.
+    Misma lógica que _estimar_tiempo_por_items pero devuelve solo el valor base (sin extra)."""
+    s = (items_str or "").lower()
+    tiene_chingon  = "plato chingón" in s or "plato chingon" in s
+    tiene_decompas = "de compas" in s
+    tiene_burrito  = "chilangazo" in s or "burrito" in s
+    tiene_medio    = "quesabirria" in s or "gringa" in s or "combo" in s or "nachos" in s
+    n_tacos        = _contar_tacos(s)
+
+    if (tiene_chingon and tiene_decompas) or (tiene_chingon and tiene_burrito) or (tiene_decompas and tiene_burrito):
+        return 55
+    elif tiene_chingon or tiene_decompas:
+        return 40
+    elif tiene_burrito:
+        return 35
+    elif tiene_medio:
+        return 25
+    else:
+        if n_tacos >= 7:
+            return 35
+        elif n_tacos >= 4:
+            return 25
+        return 15
+
+
 def _peso_pedido(items_str: str) -> int:
     """Calcula el peso/complejidad de un pedido según sus items."""
     s = (items_str or "").lower()
     if "plato chingón" in s or "plato chingon" in s:
         return 4
-    elif "de compas" in s or "chilangazo" in s:
+    elif "de compas" in s:
+        return 4  # De Compas = mismo nivel que Plato Chingón
+    elif "chilangazo" in s or "burrito" in s:
         return 3
     elif "quesabirria" in s or "gringa" in s or "combo" in s or "nachos" in s:
         return 2
     else:
-        return 1  # tacos, quesadillas, esquites
+        # Tacos: peso según cantidad
+        n_tacos = _contar_tacos(s)
+        if n_tacos >= 7:
+            return 3
+        elif n_tacos >= 4:
+            return 2
+        return 1
 
 
 def _carga_activa() -> int:
-    """Suma el peso de todos los pedidos activos (Nuevo + En preparación) de hoy."""
+    """Suma el peso de todos los pedidos activos (Nuevo + En preparación) de hoy.
+    Usado para auto-pausa (umbral ≥ 9)."""
     try:
         items_list = db.get_active_orders_items()
         return sum(_peso_pedido(i) for i in items_list)
@@ -668,14 +720,54 @@ def _carga_activa() -> int:
         return 0
 
 
+def _minutos_restantes_cocina() -> int:
+    """Suma los minutos restantes de todos los pedidos activos considerando el tiempo ya transcurrido.
+    Ej: un Plato Chingón (40 min base) iniciado hace 20 min → 20 min restantes (no 40)."""
+    try:
+        ahora = datetime.now(PERU_TZ)
+        ordenes = db.get_active_orders_with_time()
+        total = 0
+        for o in ordenes:
+            items    = o.get("items") or ""
+            hora_str = o.get("hora") or ""
+            base     = _base_duracion(items)
+            try:
+                h, m = map(int, hora_str.split(":"))
+                inicio = ahora.replace(hour=h, minute=m, second=0, microsecond=0)
+                if inicio > ahora:          # pedido de medianoche (raro pero posible)
+                    inicio -= timedelta(days=1)
+                elapsed = int((ahora - inicio).total_seconds() / 60)
+            except Exception:
+                elapsed = 0
+            total += max(0, base - elapsed)
+        return total
+    except Exception:
+        return 0
+
+
+def _extra_por_minutos_restantes(minutos: int) -> int:
+    """Extra tiempo en minutos para el nuevo pedido según carga real restante en cocina.
+    Usa tiempo restante (no peso), lo que evita sobreestimar cuando un plato casi terminó."""
+    if minutos <= 10:
+        return 0   # Cocina casi libre
+    elif minutos <= 25:
+        return 5   # Traslape moderado (ej: plato con ~20 min restantes)
+    elif minutos <= 35:
+        return 10  # Traslape significativo
+    else:
+        return 20  # Cocina muy cargada (plato pesado completo aún en cola)
+
+
 def _extra_por_carga(carga: int) -> int:
-    """Tiempo extra en minutos según la carga activa de la cocina."""
+    """Tiempo extra en minutos según la carga combinada de cocina (peso-based, usado como fallback)."""
     if carga <= 2:
         return 0
     elif carga <= 5:
         return 5
+    elif carga <= 8:
+        return 20  # Cocina muy cargada — dos platos pesados simultáneos
     else:
-        return 10
+        return 30  # No debería llegar aquí (auto-pausa en ≥9)
 
 
 def _estimar_espera(pedidos_activos: int) -> str:
@@ -687,19 +779,35 @@ def _estimar_espera(pedidos_activos: int) -> str:
 def _estimar_tiempo_por_items(items_str: str, pedidos_activos: int) -> str:
     """Estima el tiempo total según la complejidad del pedido + carga real de la cocina."""
     s = (items_str or "").lower()
-    # Tiempo base por complejidad del nuevo pedido
-    if "plato chingón" in s or "plato chingon" in s:
-        base = 40
-    elif "de compas" in s or "chilangazo" in s:
-        base = 30
-    elif "combo" in s or "nachos" in s:
+
+    tiene_chingon   = "plato chingón" in s or "plato chingon" in s
+    tiene_decompas  = "de compas" in s
+    tiene_burrito   = "chilangazo" in s or "burrito" in s
+    tiene_medio     = "quesabirria" in s or "gringa" in s or "combo" in s or "nachos" in s
+    n_tacos         = _contar_tacos(s)
+
+    # Combinaciones muy pesadas
+    if (tiene_chingon and tiene_decompas) or (tiene_chingon and tiene_burrito) or (tiene_decompas and tiene_burrito):
+        base = 55  # Dos platos muy complejos juntos
+    elif tiene_chingon or tiene_decompas:
+        base = 40  # Plato Chingón o De Compas solos
+    elif tiene_burrito:
+        base = 35  # Burrito / Chilangazo
+    elif tiene_medio:
         base = 25
-    elif "quesabirria" in s or "gringa" in s:
-        base = 20
     else:
-        base = 15  # tacos, quesadillas, esquites
-    # Extra según carga real activa (sin contar el pedido nuevo aún)
-    extra = _extra_por_carga(_carga_activa())
+        # Tacos: tiempo según cantidad
+        if n_tacos >= 7:
+            base = 35
+        elif n_tacos >= 4:
+            base = 25
+        else:
+            base = 15  # 1-3 tacos, quesadillas, esquites
+
+    # Extra basado en tiempo restante real de la cocina
+    # (considera cuánto falta realmente, no el peso bruto del pedido)
+    minutos_restantes = _minutos_restantes_cocina()
+    extra = _extra_por_minutos_restantes(minutos_restantes)
     total = base + extra
     return f"{total}-{total + 5} minutos"
 
@@ -757,12 +865,12 @@ async def _call_claude(phone: str, messages: list) -> str:
     except Exception as e:
         print(f"[PEDIDO-CTX] Error: {e}")
 
-    # Tiempo estimado por plato + cola actual
+    # Tiempo estimado por plato + carga restante real de cocina
     tiempo_ctx = "\nTiempo estimado de preparación: 20-25 minutos"
     try:
         activos = db.get_active_orders_count() if hasattr(db, "get_active_orders_count") else 0
-        carga = _carga_activa()
-        extra = _extra_por_carga(carga)
+        minutos_restantes = _minutos_restantes_cocina()
+        extra = _extra_por_minutos_restantes(minutos_restantes)
         # Detectar items del pedido actual en el historial de mensajes
         items_en_curso = ""
         for m in reversed(messages[-10:]):
@@ -774,10 +882,10 @@ async def _call_claude(phone: str, messages: list) -> str:
                 break
         espera = _estimar_tiempo_por_items(items_en_curso, activos) if items_en_curso else f"{15 + extra}-{20 + extra} minutos"
         tiempo_ctx = (
-            f"\nPedidos activos ahora: {activos} (carga de cocina: {carga}/9)"
+            f"\nPedidos activos ahora: {activos} (minutos restantes en cocina: ~{minutos_restantes} min)"
             f"\nTiempo estimado de preparación: {espera}"
             f"\n(Tacos/Quesadillas: ~{15+extra}-{20+extra} min · Quesabirrias/Gringa: ~{20+extra}-{25+extra} min · "
-            f"Combos: ~{25+extra}-{30+extra} min · De Compas/Chilangazo: ~{30+extra}-{35+extra} min · Plato Chingón: ~{40+extra}-{45+extra} min)"
+            f"Combos/Nachos: ~{25+extra}-{30+extra} min · Burrito/Chilangazo: ~{35+extra}-{40+extra} min · De Compas/Plato Chingón: ~{40+extra}-{45+extra} min)"
         )
     except Exception as e:
         print(f"[ESPERA] Error al calcular tiempo estimado: {e}")

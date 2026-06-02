@@ -150,6 +150,9 @@ def init_db():
         c.execute("UPDATE orders SET estado='En camino 🛵' WHERE estado='En camino'")
         c.execute("UPDATE orders SET estado='Entregado ✅' WHERE estado='Entregado'")
 
+    # Inicializar menú editable (fuera del with para evitar conflictos de lock)
+    init_menu_items()
+
 
 # ── Customer profiles ─────────────────────────────────────────
 
@@ -851,3 +854,287 @@ def mark_carta_followup_sent(phone: str):
     now = datetime.now(PERU_TZ).isoformat()
     with _conn() as c:
         c.execute("UPDATE conversations SET carta_followup_sent_at=? WHERE phone=?", (now, phone))
+
+
+# ── Menú editable ─────────────────────────────────────────────
+
+_MENU_INICIAL = [
+    # (categoria, nombre, descripcion, precio)
+    ("PA' TAQUEAR", "Quesadilla", "Tortilla de harina, queso derretido + guacamole y totopos", 6.50),
+    ("PA' TAQUEAR", "Quesabirria", "Queso derretido + birria jugosita · incluye consomé", 10.00),
+    ("PA' TAQUEAR", "Taco de Suadero", "Corte entre costilla y piel de res", 6.50),
+    ("PA' TAQUEAR", "Taco Campechano", "Carne de res + chorizo de puerco", 6.50),
+    ("PA' TAQUEAR", "Taco de Pastor", "Cerdo marinado en adobo con piña", 6.50),
+    ("PA' TAQUEAR", "Taco de Choriqueso", "Chorizo de cerdo con queso fundido", 7.50),
+    ("PA' TAQUEAR", "Gringa de Pastor", "Tortilla de harina, pastor y queso derretido", 14.00),
+    ("UNA BOTANITA", "Esquites", "Elote desgranado con mayo, queso, chile y limón", 8.00),
+    ("PA' COMPARTIR", "Orden Quesadillas (3 und)", "", 17.00),
+    ("PA' COMPARTIR", "Nachos Chilangos", "Birria, salsa de queso cheddar sobre cama de mozzarella", 28.00),
+    ("PA' COMPARTIR", "Orden Guacamole c/ Totopos", "", 4.00),
+    ("BURRITOS", "Chilangazo", "Pastor, salchicha huachana, suadero, queso gouda, frijoles, guacamole, cebolla y cilantro", 26.00),
+    ("COMBOS", "Plato Chingón", "2 Quesabirrias + 1 Gringa + 2 Tacos + ½ Nachos + Guacamole (para 2-3 personas)", 69.50),
+    ("COMBOS", "De Compas", "2 Tacos + 2 Quesabirrias + 1 Gringa + 1 Guacamole + 2 Aguas (para 2)", 57.50),
+    ("COMBOS", "Combo Pa' Ti Solito", "3 Quesabirrias + 1 Agua + 1 Guacamole c/totopos (personal)", 29.90),
+    ("AGUAS DEL CHAVO", "Agua de Horchata", "½ litro", 8.00),
+    ("AGUAS DEL CHAVO", "Agua de Jamaica", "½ litro", 7.00),
+    ("AGUAS DEL CHAVO", "Agua de Tamarindo", "½ litro", 7.00),
+    ("AGUAS DEL CHAVO", "Chamoyada de Mango", "½ litro", 13.00),
+    ("EXTRAS", "Extra queso", "", 2.00),
+    ("EXTRAS", "Extra guacamole", "", 2.00),
+    ("EXTRAS", "Extra proteína", "", 5.00),
+    ("EXTRAS", "Salsa adicional", "", 1.50),
+]
+
+_ORDEN_CATEGORIAS = [
+    "PA' TAQUEAR", "UNA BOTANITA", "PA' COMPARTIR",
+    "BURRITOS", "COMBOS", "AGUAS DEL CHAVO", "EXTRAS",
+]
+
+_EMOJI_CAT = {
+    "PA' TAQUEAR": "🌮",
+    "UNA BOTANITA": "🌽",
+    "PA' COMPARTIR": "🥑",
+    "BURRITOS": "🌯",
+    "COMBOS": "🎉",
+    "AGUAS DEL CHAVO": "💧",
+    "EXTRAS": "➕",
+}
+
+
+def init_menu_items():
+    """Crea la tabla menu_items y la puebla con el menú inicial si está vacía."""
+    with _conn() as c:
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS menu_items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                categoria TEXT NOT NULL,
+                nombre TEXT NOT NULL,
+                descripcion TEXT DEFAULT '',
+                precio REAL NOT NULL,
+                disponible INTEGER NOT NULL DEFAULT 1,
+                orden INTEGER NOT NULL DEFAULT 0
+            )
+        """)
+        # Poblar solo si está vacía
+        count = c.execute("SELECT COUNT(*) FROM menu_items").fetchone()[0]
+        if count == 0:
+            for i, (cat, nom, desc, precio) in enumerate(_MENU_INICIAL):
+                c.execute(
+                    "INSERT INTO menu_items (categoria, nombre, descripcion, precio, disponible, orden) VALUES (?,?,?,?,1,?)",
+                    (cat, nom, desc, precio, i)
+                )
+
+
+def get_menu_items() -> list[dict]:
+    """Retorna todos los items del menú ordenados por categoría y orden."""
+    with _conn() as c:
+        rows = c.execute(
+            "SELECT * FROM menu_items ORDER BY orden ASC"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def update_menu_item(item_id: int, nombre: str = None, descripcion: str = None,
+                     precio: float = None, disponible: int = None):
+    """Actualiza un item del menú."""
+    updates, vals = [], []
+    if nombre is not None:
+        updates.append("nombre=?"); vals.append(nombre)
+    if descripcion is not None:
+        updates.append("descripcion=?"); vals.append(descripcion)
+    if precio is not None:
+        updates.append("precio=?"); vals.append(precio)
+    if disponible is not None:
+        updates.append("disponible=?"); vals.append(disponible)
+    if not updates:
+        return
+    vals.append(item_id)
+    with _conn() as c:
+        c.execute(f"UPDATE menu_items SET {', '.join(updates)} WHERE id=?", vals)
+
+
+def get_menu_texto() -> str:
+    """Genera el MENU_TEXTO formateado desde la BD."""
+    items = get_menu_items()
+    if not items:
+        from menu import MENU_TEXTO as _fallback
+        return _fallback
+
+    from menu import EMPAQUE
+    grupos: dict = {}
+    for it in items:
+        cat = it["categoria"]
+        if cat not in grupos:
+            grupos[cat] = []
+        grupos[cat].append(it)
+
+    lineas = ["🌮 *CARTA CHILANGO - DELIVERY* 🌮",
+              "_Solo Viernes, Sábado y Domingo · 5:30pm a 11pm · Tacna_", ""]
+
+    for cat in _ORDEN_CATEGORIAS:
+        if cat not in grupos:
+            continue
+        emoji = _EMOJI_CAT.get(cat, "•")
+        lineas.append("━━━━━━━━━━━━━━━━━━━━")
+        lineas.append(f"{emoji} *{cat}*")
+        lineas.append("━━━━━━━━━━━━━━━━━━━━")
+        for it in grupos[cat]:
+            if not it.get("disponible", 1):
+                continue
+            precio_str = f"S/ {it['precio']:.2f}".rstrip("0").rstrip(".")
+            if not precio_str.endswith("0") and "." in precio_str:
+                pass
+            # Siempre 2 decimales
+            precio_str = f"S/ {it['precio']:.2f}"
+            lineas.append(f"• {it['nombre']} — {precio_str}")
+            if it.get("descripcion"):
+                lineas.append(f"  _{it['descripcion']}_")
+        lineas.append("")
+
+    lineas.append(f"📦 _Empaque eco resistente: S/ {EMPAQUE:.2f} por pedido_")
+    lineas.append("💳 _Pagos: Plin · Contra entrega_")
+    return "\n".join(lineas)
+
+
+# ── Métricas / Dashboard ──────────────────────────────────────
+
+def get_metricas() -> dict:
+    """Retorna datos agregados para el dashboard de métricas."""
+    import re as _re
+    from datetime import datetime as _dt
+
+    def _parse_total(val):
+        try:
+            m = _re.search(r"(\d+(?:[.,]\d{1,2})?)", (val or ""))
+            return float(m.group(1).replace(",", ".")) if m else 0.0
+        except Exception:
+            return 0.0
+
+    hoy = datetime.now(PERU_TZ).strftime("%d/%m/%Y")
+    with _conn() as c:
+        # Todos los pedidos no cancelados
+        rows = c.execute(
+            "SELECT fecha, hora, items, total, metodo_pago FROM orders WHERE estado != 'Cancelado ❌'"
+        ).fetchall()
+
+    pedidos = [dict(r) for r in rows]
+
+    # ── Ventas por día (últimos 14 días) ──────────────────────
+    from collections import defaultdict
+    ventas_dia: dict = defaultdict(float)
+    pedidos_dia: dict = defaultdict(int)
+    for p in pedidos:
+        ventas_dia[p["fecha"]] += _parse_total(p["total"])
+        pedidos_dia[p["fecha"]] += 1
+
+    # Generar últimos 14 días
+    dias_labels, dias_ventas, dias_pedidos = [], [], []
+    for i in range(13, -1, -1):
+        d = (datetime.now(PERU_TZ) - timedelta(days=i)).strftime("%d/%m/%Y")
+        label = (datetime.now(PERU_TZ) - timedelta(days=i)).strftime("%d/%m")
+        dias_labels.append(label)
+        dias_ventas.append(round(ventas_dia.get(d, 0), 2))
+        dias_pedidos.append(pedidos_dia.get(d, 0))
+
+    # ── Hora pico ─────────────────────────────────────────────
+    hora_conteo: dict = defaultdict(int)
+    for p in pedidos:
+        try:
+            h = int((p["hora"] or "0:0").split(":")[0])
+            hora_conteo[h] += 1
+        except Exception:
+            pass
+    horas_labels = [f"{h}:00" for h in range(17, 23)]
+    horas_data   = [hora_conteo.get(h, 0) for h in range(17, 23)]
+
+    # ── Top productos ─────────────────────────────────────────
+    producto_conteo: dict = defaultdict(int)
+    import re as _re2
+    for p in pedidos:
+        items_str = p["items"] or ""
+        for m in _re2.finditer(r'(\d+)x\s+([^,\n\|\-]+)', items_str):
+            qty  = int(m.group(1))
+            name = m.group(2).strip().rstrip(" —")
+            if len(name) > 3:
+                producto_conteo[name] += qty
+    top_productos = sorted(producto_conteo.items(), key=lambda x: x[1], reverse=True)[:7]
+
+    # ── Totales generales ─────────────────────────────────────
+    total_hoy    = sum(_parse_total(p["total"]) for p in pedidos if p["fecha"] == hoy)
+    pedidos_hoy  = sum(1 for p in pedidos if p["fecha"] == hoy)
+
+    # Semana actual (últimos 7 días)
+    semana_fechas = {(datetime.now(PERU_TZ) - timedelta(days=i)).strftime("%d/%m/%Y") for i in range(7)}
+    total_semana  = sum(_parse_total(p["total"]) for p in pedidos if p["fecha"] in semana_fechas)
+    pedidos_semana = sum(1 for p in pedidos if p["fecha"] in semana_fechas)
+
+    # Mes actual
+    mes_actual = datetime.now(PERU_TZ).strftime("%m/%Y")
+    total_mes   = sum(_parse_total(p["total"]) for p in pedidos if (p["fecha"] or "")[-7:] == mes_actual)
+    pedidos_mes  = sum(1 for p in pedidos if (p["fecha"] or "")[-7:] == mes_actual)
+
+    # ── Métodos de pago ───────────────────────────────────────
+    pago_conteo: dict = defaultdict(int)
+    for p in pedidos:
+        pago_conteo[p.get("metodo_pago") or "Efectivo"] += 1
+
+    return {
+        "dias_labels":    dias_labels,
+        "dias_ventas":    dias_ventas,
+        "dias_pedidos":   dias_pedidos,
+        "horas_labels":   horas_labels,
+        "horas_data":     horas_data,
+        "top_productos":  [{"nombre": n, "qty": q} for n, q in top_productos],
+        "total_hoy":      round(total_hoy, 2),
+        "pedidos_hoy":    pedidos_hoy,
+        "total_semana":   round(total_semana, 2),
+        "pedidos_semana": pedidos_semana,
+        "total_mes":      round(total_mes, 2),
+        "pedidos_mes":    pedidos_mes,
+        "pago_conteo":    dict(pago_conteo),
+    }
+
+
+# ── Historial de costos por zona ──────────────────────────────
+
+def get_delivery_zones_summary() -> list[dict]:
+    """Retorna un resumen de costos de delivery aprendidos por zona."""
+    import re as _re
+    with _conn() as c:
+        rows = c.execute(
+            "SELECT direccion, costo, fecha FROM delivery_costs ORDER BY id DESC"
+        ).fetchall()
+
+    if not rows:
+        return []
+
+    # Agrupar por palabras clave de la dirección (>4 letras)
+    from collections import defaultdict
+    zonas: dict = defaultdict(list)
+    for r in rows:
+        dir_clean = (r["direccion"] or "").strip()
+        if not dir_clean:
+            continue
+        # Usar los primeros 2-3 tokens significativos como clave de zona
+        palabras = [w for w in dir_clean.split() if len(w) > 3][:3]
+        if not palabras:
+            continue
+        zona_key = " ".join(palabras).title()
+        zonas[zona_key].append({"costo": r["costo"], "fecha": r["fecha"], "dir": dir_clean})
+
+    result = []
+    for zona, registros in zonas.items():
+        costos = [r["costo"] for r in registros]
+        result.append({
+            "zona":      zona,
+            "ultima_dir": registros[0]["dir"],
+            "ultimo_costo": registros[0]["costo"],
+            "costo_promedio": round(sum(costos) / len(costos), 1),
+            "costo_min":  min(costos),
+            "costo_max":  max(costos),
+            "frecuencia": len(registros),
+            "ultima_vez": registros[0]["fecha"],
+        })
+
+    result.sort(key=lambda x: x["frecuencia"], reverse=True)
+    return result

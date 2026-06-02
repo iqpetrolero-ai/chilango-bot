@@ -3,11 +3,40 @@ import base64
 import httpx
 from datetime import datetime, timezone, timedelta
 from anthropic import AsyncAnthropic
-from menu import MENU_TEXTO
+from menu import MENU_TEXTO as _MENU_TEXTO_FALLBACK
 from orders import save_order, update_order, cancel_order, notify_delivery_cost_query
 import db
 
 db.init_db()
+
+def _get_menu() -> str:
+    """Retorna el menú desde la BD (editable). Si falla, usa el fallback hardcodeado."""
+    try:
+        return db.get_menu_texto()
+    except Exception:
+        return _MENU_TEXTO_FALLBACK
+
+MENU_TEXTO = _get_menu()
+
+
+def refresh_menu():
+    """Actualiza el menú en el SYSTEM_PROMPT en vivo cuando el panel lo modifica.
+    No requiere reiniciar el servidor."""
+    global SYSTEM_PROMPT
+    nuevo_menu = _get_menu()
+    marcador_inicio = "━━━ CARTA COMPLETA ━━━"
+    marcador_fin    = "━━━ COMBOS — ACLARACIÓN"
+    try:
+        start = SYSTEM_PROMPT.index(marcador_inicio)
+        end   = SYSTEM_PROMPT.index(marcador_fin)
+        SYSTEM_PROMPT = (
+            SYSTEM_PROMPT[:start] +
+            f"{marcador_inicio}\n{nuevo_menu}\n\n" +
+            SYSTEM_PROMPT[end:]
+        )
+        print("[MENÚ] ✅ Sistema actualizado con nuevos precios/items")
+    except Exception as e:
+        print(f"[MENÚ] ⚠️ No se pudo actualizar el prompt en vivo: {e}")
 
 _client = None
 
@@ -237,6 +266,8 @@ Si es de las incluidas → no la cobres por separado. Si es adicional → agrég
 
    Si el cliente pregunta EXPLÍCITAMENTE por el tiempo (ej: "¿cuánto falta?", "¿cuánto demora?",
    "¿en cuánto está listo?"), responde usando el tiempo del CONTEXTO ACTUAL. Solo en ese caso.
+   ⛔ NUNCA menciones dos cifras de tiempo (ej: "X min de espera + Y min de preparación").
+   Solo da UN número total: "unos 30 minutos" o "entre 25 y 30 minutos". Nada más.
 
    ⚠️ ESCALACIÓN AUTOMÁTICA POR DEMORA:
    Si el cliente expresa frustración explícita por la espera con frases como:
@@ -674,19 +705,19 @@ def _base_duracion(items_str: str) -> int:
     n_tacos        = _contar_tacos(s)
 
     if (tiene_chingon and tiene_decompas) or (tiene_chingon and tiene_burrito) or (tiene_decompas and tiene_burrito):
-        return 55
+        return 55  # 2 combos pesados: 55-60 min
     elif tiene_chingon or tiene_decompas:
-        return 40
+        return 40  # Plato Chingón / De Compas: 40-45 min
     elif tiene_burrito:
-        return 35
+        return 35  # Chilangazo: 35-40 min
     elif tiene_medio:
-        return 25
+        return 25  # Quesabirrias / Gringa / Nachos: 25-30 min
     else:
         if n_tacos >= 7:
             return 35
         elif n_tacos >= 4:
             return 25
-        return 15
+        return 15  # 1-3 tacos / Quesadillas: 15-20 min
 
 
 def _peso_pedido(items_str: str) -> int:
@@ -788,13 +819,13 @@ def _estimar_tiempo_por_items(items_str: str, pedidos_activos: int) -> str:
 
     # Combinaciones muy pesadas
     if (tiene_chingon and tiene_decompas) or (tiene_chingon and tiene_burrito) or (tiene_decompas and tiene_burrito):
-        base = 55  # Dos platos muy complejos juntos
+        base = 55  # 2 combos pesados: 55-60 min
     elif tiene_chingon or tiene_decompas:
-        base = 40  # Plato Chingón o De Compas solos
+        base = 40  # Plato Chingón / De Compas: 40-45 min
     elif tiene_burrito:
-        base = 35  # Burrito / Chilangazo
+        base = 35  # Chilangazo: 35-40 min
     elif tiene_medio:
-        base = 25
+        base = 25  # Quesabirrias / Gringa / Nachos: 25-30 min
     else:
         # Tacos: tiempo según cantidad
         if n_tacos >= 7:
@@ -802,7 +833,7 @@ def _estimar_tiempo_por_items(items_str: str, pedidos_activos: int) -> str:
         elif n_tacos >= 4:
             base = 25
         else:
-            base = 15  # 1-3 tacos, quesadillas, esquites
+            base = 15  # 1-3 tacos / Quesadillas: 15-20 min
 
     # Extra basado en tiempo restante real de la cocina
     # (considera cuánto falta realmente, no el peso bruto del pedido)
@@ -865,13 +896,42 @@ async def _call_claude(phone: str, messages: list) -> str:
     except Exception as e:
         print(f"[PEDIDO-CTX] Error: {e}")
 
-    # Tiempo estimado por plato + carga restante real de cocina
+    # Tiempo estimado — considera tiempo ya transcurrido del pedido del cliente
     tiempo_ctx = "\nTiempo estimado de preparación: 20-25 minutos"
     try:
+        ahora = datetime.now(PERU_TZ)
         activos = db.get_active_orders_count() if hasattr(db, "get_active_orders_count") else 0
-        minutos_restantes = _minutos_restantes_cocina()
-        extra = _extra_por_minutos_restantes(minutos_restantes)
-        # Detectar items del pedido actual en el historial de mensajes
+        minutos_restantes_global = _minutos_restantes_cocina()
+        extra = _extra_por_minutos_restantes(minutos_restantes_global)
+
+        # ── Tiempo RESTANTE específico del pedido de ESTE cliente ──────────
+        # Si el cliente tiene un pedido activo hoy, calculamos cuánto tiempo
+        # le FALTA (no cuánto tarda desde cero).
+        restante_cliente: int | None = None
+        try:
+            pedidos_activos_cliente = [
+                p for p in db.get_orders_today()
+                if str(p.get("phone", "")) == phone_clean
+                and p.get("estado") in ("Nuevo 🆕", "En preparación 👨‍🍳")
+            ]
+            if pedidos_activos_cliente:
+                p_cli = pedidos_activos_cliente[0]
+                hora_str = p_cli.get("hora") or ""
+                items_cli = p_cli.get("items") or ""
+                base_cli = _base_duracion(items_cli)
+                try:
+                    h, mn = map(int, hora_str.split(":"))
+                    inicio_cli = ahora.replace(hour=h, minute=mn, second=0, microsecond=0)
+                    if inicio_cli > ahora:
+                        inicio_cli -= timedelta(days=1)
+                    elapsed_cli = int((ahora - inicio_cli).total_seconds() / 60)
+                except Exception:
+                    elapsed_cli = 0
+                restante_cliente = max(0, base_cli - elapsed_cli)
+        except Exception as e:
+            print(f"[TIEMPO-CLI] Error calculando restante cliente: {e}")
+
+        # ── Tiempo para nuevo pedido (si aún no confirmó) ──────────────────
         items_en_curso = ""
         for m in reversed(messages[-10:]):
             content = str(m.get("content", ""))
@@ -880,13 +940,33 @@ async def _call_claude(phone: str, messages: list) -> str:
             ):
                 items_en_curso = content
                 break
-        espera = _estimar_tiempo_por_items(items_en_curso, activos) if items_en_curso else f"{15 + extra}-{20 + extra} minutos"
-        tiempo_ctx = (
-            f"\nPedidos activos ahora: {activos} (minutos restantes en cocina: ~{minutos_restantes} min)"
-            f"\nTiempo estimado de preparación: {espera}"
-            f"\n(Tacos/Quesadillas: ~{15+extra}-{20+extra} min · Quesabirrias/Gringa: ~{20+extra}-{25+extra} min · "
-            f"Combos/Nachos: ~{25+extra}-{30+extra} min · Burrito/Chilangazo: ~{35+extra}-{40+extra} min · De Compas/Plato Chingón: ~{40+extra}-{45+extra} min)"
-        )
+        espera_nuevo = _estimar_tiempo_por_items(items_en_curso, activos) if items_en_curso else f"{12 + extra}-{17 + extra} minutos"
+
+        # ── Contexto final para Claude ─────────────────────────────────────
+        if restante_cliente is not None:
+            # Hay pedido activo: decir cuánto FALTA, no cuánto tarda desde cero
+            if restante_cliente <= 3:
+                restante_txt = "menos de 5 minutos (casi listo)"
+            elif restante_cliente <= 10:
+                restante_txt = f"~{restante_cliente} minutos"
+            else:
+                restante_txt = f"~{restante_cliente}-{restante_cliente + 5} minutos"
+            tiempo_ctx = (
+                f"\nTiempo RESTANTE para el pedido de ESTE cliente: {restante_txt}"
+                f"\n⚠️ Usa SOLO este dato cuando el cliente pregunte cuánto falta."
+                f"\nNO uses el tiempo base del plato — el pedido ya lleva tiempo en cocina."
+            )
+        else:
+            # No hay pedido confirmado aún: tiempo estimado para nuevo pedido
+            tiempo_ctx = (
+                f"\nTiempo estimado si pide ahora (total): {espera_nuevo}"
+                f"\n[Referencia — NO mencionar al cliente como datos separados]"
+                f"\nTacos/Quesadillas: ~{15+extra}-{20+extra} min · "
+                f"Quesabirrias/Gringa/Nachos: ~{25+extra}-{30+extra} min · "
+                f"Chilangazo: ~{35+extra}-{40+extra} min · "
+                f"Plato Chingón/De Compas: ~{40+extra}-{45+extra} min · "
+                f"2 combos pesados: ~{55+extra}-{60+extra} min"
+            )
     except Exception as e:
         print(f"[ESPERA] Error al calcular tiempo estimado: {e}")
 

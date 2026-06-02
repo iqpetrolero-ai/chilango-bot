@@ -888,7 +888,8 @@ def _render_card(p: dict) -> str:
         btn_cancel = btn_delivery = btn_cost = btn_listo = ""
         btn_next = f'<span class="oa-done">{"❌ Cancelado" if es_cancelado else "✅ Entregado"}</span>'
 
-    btn_del = f'<button class="oa oa-del" onclick="eliminarPedido({pid},this)" title="Eliminar">🗑️</button>'
+    btn_del   = f'<button class="oa oa-del" onclick="eliminarPedido({pid},this)" title="Eliminar">🗑️</button>'
+    btn_print = f'<button class="oa oa-print" onclick="window.open(\'/admin/imprimir/{pid}\',\'_blank\')" title="Imprimir recibo">🖨️</button>'
 
     return f"""<div class="card" id="card-{pid}" data-estado="{html.escape(estado)}" data-recojo="{1 if es_recojo else 0}">
   <div class="oc-hdr">
@@ -920,7 +921,7 @@ def _render_card(p: dict) -> str:
     </div>
   </div>
   {altoke_banner}
-  <div class="oc-actions">{btn_cancel}{btn_delivery}{btn_listo}{btn_cost}{btn_next}{btn_del}</div>
+  <div class="oc-actions">{btn_cancel}{btn_delivery}{btn_listo}{btn_cost}{btn_next}{btn_print}{btn_del}</div>
 </div>"""
 
 
@@ -1130,6 +1131,8 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgro
 .oa-next:disabled{{background:#bbb;cursor:not-allowed}}
 .oa-next.recojo-next{{background:var(--ch-purple)}}
 .oa-next.recojo-next:hover{{background:#7B1FA2}}
+.oa-print{{color:#555;flex:0 0 44px}}
+.oa-print:hover{{background:#eee}}
 .oa-del{{flex:0 0 44px;color:#ccc}}
 .oa-del:hover{{background:var(--ch-red-bg);color:var(--ch-red)}}
 .oa-listo{{color:var(--ch-purple)}}
@@ -1192,6 +1195,9 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgro
   <a href="/pedidos" class="active">📦 Pedidos <span class="nav-badge" id="navBadge" style="display:none">0</span></a>
   <a href="/admin">💬 Conversaciones</a>
   <a href="/admin/clientes">👥 Clientes</a>
+  <a href="/admin/metricas">📊 Métricas</a>
+  <a href="/admin/zonas-delivery">🛵 Zonas</a>
+  <a href="/admin/menu">🍽️ Menú</a>
 </nav>
 
 <div class="toolbar">
@@ -1581,7 +1587,8 @@ function buildCard(p) {{
       ? `<span class="oa-done">❌ Cancelado</span>`
       : `<span class="oa-done">✅ Entregado</span>`;
   }}
-  const btnDelHtml = `<button class="oa oa-del" onclick="eliminarPedido(${{p.id}},this)" title="Eliminar">🗑️</button>`;
+  const btnDelHtml   = `<button class="oa oa-del" onclick="eliminarPedido(${{p.id}},this)" title="Eliminar">🗑️</button>`;
+  const btnPrintHtml = `<button class="oa oa-print" onclick="window.open('/admin/imprimir/${{p.id}}','_blank')" title="Imprimir recibo">🖨️</button>`;
 
   return `<div class="card" id="card-${{p.id}}" data-estado="${{esc(estado)}}" data-recojo="${{esRecojo?1:0}}">
   <div class="oc-hdr">
@@ -1627,7 +1634,7 @@ function buildCard(p) {{
     }}
     return `<div style="background:${{bg}};border:1px solid ${{border}};border-radius:8px;padding:7px 12px;margin:8px 12px 0;font-size:12px;font-weight:700;color:${{color}}">⚡ Dile al moto: ${{cobro}}</div>`;
   }})() : ''}}
-  <div class="oc-actions">${{btnCancelHtml}}${{btnDeliveryHtml}}${{btnListoHtml}}${{btnCostHtml}}${{btnSigHtml}}${{btnDelHtml}}</div>
+  <div class="oc-actions">${{btnCancelHtml}}${{btnDeliveryHtml}}${{btnListoHtml}}${{btnCostHtml}}${{btnSigHtml}}${{btnPrintHtml}}${{btnDelHtml}}</div>
 </div>`;
 }}
 
@@ -2166,6 +2173,353 @@ async def mark_read(phone: str, credentials: HTTPBasicCredentials = Depends(veri
     return JSONResponse({"status": "ok"})
 
 
+# ══════════════════════════════════════════════════════════════
+# ── MENÚ EDITABLE ─────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════
+
+@app.get("/admin/menu", response_class=HTMLResponse)
+async def admin_menu(credentials: HTTPBasicCredentials = Depends(verificar_admin)):
+    items = db.get_menu_items()
+    from menu import EMPAQUE
+    # Agrupar por categoría
+    grupos: dict = {}
+    for it in items:
+        grupos.setdefault(it["categoria"], []).append(it)
+
+    filas = ""
+    for cat, cat_items in grupos.items():
+        filas += f'<tr class="cat-row"><td colspan="5"><strong>{cat}</strong></td></tr>'
+        for it in cat_items:
+            disp_checked = "checked" if it["disponible"] else ""
+            filas += f"""
+<tr data-id="{it['id']}">
+  <td><input class="mi-nombre" value="{html.escape(it['nombre'])}" style="width:100%"></td>
+  <td><input class="mi-desc" value="{html.escape(it['descripcion'] or '')}" style="width:100%"></td>
+  <td style="width:80px"><input class="mi-precio" type="number" step="0.5" value="{it['precio']}" style="width:70px"></td>
+  <td style="width:60px;text-align:center"><input class="mi-disp" type="checkbox" {disp_checked}></td>
+  <td style="width:70px"><button onclick="guardarItem(this)" style="background:#2d6a2d;color:#fff;border:none;padding:4px 10px;border-radius:6px;cursor:pointer">💾 Guardar</button></td>
+</tr>"""
+
+    page = f"""<!DOCTYPE html>
+<html lang="es"><head><meta charset="UTF-8">
+<title>Menú — Chilango</title>
+<style>
+  body{{font-family:sans-serif;background:#f5f5f5;margin:0;padding:20px}}
+  h1{{color:#2d6a2d;margin-bottom:4px}}
+  p.sub{{color:#666;margin-top:0;margin-bottom:20px}}
+  table{{width:100%;border-collapse:collapse;background:#fff;border-radius:10px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.08)}}
+  th{{background:#2d6a2d;color:#fff;padding:10px 12px;text-align:left}}
+  td{{padding:8px 12px;border-bottom:1px solid #eee;vertical-align:middle}}
+  tr.cat-row td{{background:#e8f5e9;font-weight:700;font-size:.95em;color:#1b5e20}}
+  input[type=text],input.mi-nombre,input.mi-desc{{border:1px solid #ccc;border-radius:4px;padding:4px 6px;font-size:.9em}}
+  input[type=number]{{border:1px solid #ccc;border-radius:4px;padding:4px 6px;font-size:.9em}}
+  .back{{display:inline-block;margin-bottom:16px;color:#2d6a2d;text-decoration:none;font-weight:600}}
+  .back:hover{{text-decoration:underline}}
+  #toast{{position:fixed;bottom:24px;right:24px;background:#2d6a2d;color:#fff;padding:10px 20px;border-radius:8px;display:none;font-size:.95em;box-shadow:0 4px 12px rgba(0,0,0,.2)}}
+</style>
+</head><body>
+<a class="back" href="/admin">← Volver al panel</a>
+<h1>🍽️ Menú editable</h1>
+<p class="sub">Edita precios, nombres o desactiva items sin tocar el código. Los cambios se reflejan en nuevas conversaciones de forma inmediata.</p>
+<table>
+  <thead><tr>
+    <th>Producto</th><th>Descripción</th>
+    <th>Precio (S/)</th><th>Activo</th><th></th>
+  </tr></thead>
+  <tbody>{filas}</tbody>
+</table>
+<div id="toast">✅ Guardado</div>
+<script>
+async function guardarItem(btn) {{
+  const tr = btn.closest('tr');
+  const id = tr.dataset.id;
+  const nombre    = tr.querySelector('.mi-nombre').value.trim();
+  const descripcion = tr.querySelector('.mi-desc').value.trim();
+  const precio    = parseFloat(tr.querySelector('.mi-precio').value);
+  const disponible = tr.querySelector('.mi-disp').checked ? 1 : 0;
+  btn.textContent = '⏳';
+  const r = await fetch('/api/menu/item', {{
+    method:'POST', credentials:'same-origin',
+    headers:{{'Content-Type':'application/json'}},
+    body: JSON.stringify({{id, nombre, descripcion, precio, disponible}})
+  }});
+  const d = await r.json();
+  btn.textContent = '💾 Guardar';
+  if(d.status==='ok') {{
+    const t = document.getElementById('toast');
+    t.style.display='block';
+    setTimeout(()=>t.style.display='none', 2500);
+  }}
+}}
+</script>
+</body></html>"""
+    return HTMLResponse(page)
+
+
+@app.post("/api/menu/item")
+async def api_update_menu_item(
+    request: Request,
+    credentials: HTTPBasicCredentials = Depends(verificar_admin)
+):
+    """Actualiza un item del menú desde el panel y recarga el prompt del bot."""
+    from bot import refresh_menu
+    data = await request.json()
+    item_id    = int(data.get("id", 0))
+    nombre     = (data.get("nombre") or "").strip()
+    descripcion = (data.get("descripcion") or "").strip()
+    precio     = float(data.get("precio", 0))
+    disponible = int(data.get("disponible", 1))
+    if not item_id or not nombre or precio < 0:
+        return JSONResponse({"status": "error", "msg": "Datos inválidos"}, status_code=400)
+    db.update_menu_item(item_id, nombre=nombre, descripcion=descripcion,
+                        precio=precio, disponible=disponible)
+    # Recargar el menú en el sistema prompt sin reiniciar
+    try:
+        refresh_menu()
+    except Exception as e:
+        print(f"[MENÚ] refresh_menu error: {e}")
+    return JSONResponse({"status": "ok"})
+
+
+# ══════════════════════════════════════════════════════════════
+# ── DASHBOARD DE MÉTRICAS ─────────────────────────────────────
+# ══════════════════════════════════════════════════════════════
+
+@app.get("/admin/metricas", response_class=HTMLResponse)
+async def admin_metricas(credentials: HTTPBasicCredentials = Depends(verificar_admin)):
+    m = db.get_metricas()
+    import json as _json
+    dias_labels   = _json.dumps(m["dias_labels"])
+    dias_ventas   = _json.dumps(m["dias_ventas"])
+    dias_pedidos  = _json.dumps(m["dias_pedidos"])
+    horas_labels  = _json.dumps(m["horas_labels"])
+    horas_data    = _json.dumps(m["horas_data"])
+    top_nombres   = _json.dumps([p["nombre"] for p in m["top_productos"]])
+    top_qtys      = _json.dumps([p["qty"]    for p in m["top_productos"]])
+    pago_labels   = _json.dumps(list(m["pago_conteo"].keys()))
+    pago_data     = _json.dumps(list(m["pago_conteo"].values()))
+
+    page = f"""<!DOCTYPE html>
+<html lang="es"><head><meta charset="UTF-8">
+<title>Métricas — Chilango</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+  *{{box-sizing:border-box;margin:0;padding:0}}
+  body{{font-family:sans-serif;background:#f0f4f0;padding:20px;color:#222}}
+  h1{{color:#2d6a2d;margin-bottom:4px}}
+  .sub{{color:#666;margin-bottom:20px;font-size:.9em}}
+  .back{{display:inline-block;margin-bottom:16px;color:#2d6a2d;text-decoration:none;font-weight:600}}
+  .back:hover{{text-decoration:underline}}
+  .cards{{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px;margin-bottom:24px}}
+  .card{{background:#fff;border-radius:12px;padding:16px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,.07)}}
+  .card .val{{font-size:1.8em;font-weight:700;color:#2d6a2d}}
+  .card .lbl{{font-size:.8em;color:#666;margin-top:4px}}
+  .charts{{display:grid;grid-template-columns:1fr 1fr;gap:16px}}
+  .chart-box{{background:#fff;border-radius:12px;padding:16px;box-shadow:0 2px 8px rgba(0,0,0,.07)}}
+  .chart-box h3{{font-size:.95em;color:#2d6a2d;margin-bottom:12px}}
+  @media(max-width:700px){{.charts{{grid-template-columns:1fr}}}}
+</style>
+</head><body>
+<a class="back" href="/admin">← Volver al panel</a>
+<h1>📊 Métricas de ventas</h1>
+<p class="sub">Actualizado al abrir esta página</p>
+
+<div class="cards">
+  <div class="card"><div class="val">S/ {m['total_hoy']:.2f}</div><div class="lbl">💰 Ventas hoy</div></div>
+  <div class="card"><div class="val">{m['pedidos_hoy']}</div><div class="lbl">📦 Pedidos hoy</div></div>
+  <div class="card"><div class="val">S/ {m['total_semana']:.2f}</div><div class="lbl">📅 Esta semana</div></div>
+  <div class="card"><div class="val">{m['pedidos_semana']}</div><div class="lbl">📦 Pedidos semana</div></div>
+  <div class="card"><div class="val">S/ {m['total_mes']:.2f}</div><div class="lbl">🗓️ Este mes</div></div>
+  <div class="card"><div class="val">{m['pedidos_mes']}</div><div class="lbl">📦 Pedidos mes</div></div>
+</div>
+
+<div class="charts">
+  <div class="chart-box" style="grid-column:1/-1">
+    <h3>📈 Ventas últimos 14 días (S/)</h3>
+    <canvas id="cVentas" height="90"></canvas>
+  </div>
+  <div class="chart-box">
+    <h3>🌮 Top productos más pedidos</h3>
+    <canvas id="cTop"></canvas>
+  </div>
+  <div class="chart-box">
+    <h3>🕐 Hora pico</h3>
+    <canvas id="cHora"></canvas>
+  </div>
+  <div class="chart-box">
+    <h3>💳 Método de pago</h3>
+    <canvas id="cPago"></canvas>
+  </div>
+  <div class="chart-box">
+    <h3>📦 Pedidos por día</h3>
+    <canvas id="cPedidos" height="90"></canvas>
+  </div>
+</div>
+
+<script>
+const green = '#2d6a2d', lightGreen = '#81c784', lime = '#c8e6c9';
+Chart.defaults.font.family = 'sans-serif';
+Chart.defaults.font.size   = 12;
+
+new Chart(document.getElementById('cVentas'), {{
+  type:'bar',
+  data:{{ labels:{dias_labels}, datasets:[{{
+    label:'S/', data:{dias_ventas},
+    backgroundColor: lightGreen, borderColor: green, borderWidth:1, borderRadius:4
+  }}]}},
+  options:{{ plugins:{{legend:{{display:false}}}}, scales:{{ y:{{beginAtZero:true}} }} }}
+}});
+
+new Chart(document.getElementById('cTop'), {{
+  type:'bar',
+  data:{{ labels:{top_nombres}, datasets:[{{
+    label:'Unidades', data:{top_qtys},
+    backgroundColor: green, borderRadius:4
+  }}]}},
+  options:{{ indexAxis:'y', plugins:{{legend:{{display:false}}}} }}
+}});
+
+new Chart(document.getElementById('cHora'), {{
+  type:'bar',
+  data:{{ labels:{horas_labels}, datasets:[{{
+    label:'Pedidos', data:{horas_data},
+    backgroundColor: '#ff8f00', borderRadius:4
+  }}]}},
+  options:{{ plugins:{{legend:{{display:false}}}}, scales:{{ y:{{beginAtZero:true}} }} }}
+}});
+
+new Chart(document.getElementById('cPago'), {{
+  type:'doughnut',
+  data:{{ labels:{pago_labels}, datasets:[{{
+    data:{pago_data},
+    backgroundColor:[green, '#ff8f00', '#1565c0', '#6a1b9a']
+  }}]}}
+}});
+
+new Chart(document.getElementById('cPedidos'), {{
+  type:'line',
+  data:{{ labels:{dias_labels}, datasets:[{{
+    label:'Pedidos', data:{dias_pedidos},
+    borderColor: green, backgroundColor: lime,
+    fill:true, tension:.3, pointRadius:3
+  }}]}},
+  options:{{ plugins:{{legend:{{display:false}}}}, scales:{{ y:{{beginAtZero:true}} }} }}
+}});
+</script>
+</body></html>"""
+    return HTMLResponse(page)
+
+
+# ══════════════════════════════════════════════════════════════
+# ── HISTORIAL DE COSTOS POR ZONA ──────────────────────────────
+# ══════════════════════════════════════════════════════════════
+
+@app.get("/admin/zonas-delivery", response_class=HTMLResponse)
+async def admin_zonas_delivery(credentials: HTTPBasicCredentials = Depends(verificar_admin)):
+    zonas = db.get_delivery_zones_summary()
+
+    if zonas:
+        filas = ""
+        for z in zonas:
+            filas += f"""
+<tr>
+  <td>{html.escape(z['zona'])}</td>
+  <td style="text-align:center"><strong>S/ {z['costo_promedio']:.1f}</strong></td>
+  <td style="text-align:center">S/ {z['ultimo_costo']:.1f}</td>
+  <td style="text-align:center">S/ {z['costo_min']:.1f} – S/ {z['costo_max']:.1f}</td>
+  <td style="text-align:center">{z['frecuencia']}x</td>
+  <td style="color:#888;font-size:.85em">{z['ultima_vez']}</td>
+  <td style="font-size:.8em;color:#555;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
+      title="{html.escape(z['ultima_dir'])}">{html.escape(z['ultima_dir'])}</td>
+</tr>"""
+        tabla = f"""<table>
+<thead><tr>
+  <th>Zona / Referencia</th><th>Promedio</th><th>Último</th>
+  <th>Rango</th><th>Veces</th><th>Última vez</th><th>Dirección ejemplo</th>
+</tr></thead>
+<tbody>{filas}</tbody>
+</table>"""
+    else:
+        tabla = '<p style="color:#888;margin-top:20px">Aún no hay datos de costos de delivery registrados.</p>'
+
+    page = f"""<!DOCTYPE html>
+<html lang="es"><head><meta charset="UTF-8">
+<title>Zonas Delivery — Chilango</title>
+<style>
+  body{{font-family:sans-serif;background:#f5f5f5;margin:0;padding:20px}}
+  h1{{color:#2d6a2d;margin-bottom:4px}}
+  p.sub{{color:#666;margin-bottom:20px;font-size:.9em}}
+  .back{{display:inline-block;margin-bottom:16px;color:#2d6a2d;text-decoration:none;font-weight:600}}
+  .back:hover{{text-decoration:underline}}
+  table{{width:100%;border-collapse:collapse;background:#fff;border-radius:10px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.08)}}
+  th{{background:#2d6a2d;color:#fff;padding:10px 12px;text-align:left;font-size:.9em}}
+  td{{padding:9px 12px;border-bottom:1px solid #eee;font-size:.9em}}
+  tr:hover td{{background:#f1f8f1}}
+</style>
+</head><body>
+<a class="back" href="/admin">← Volver al panel</a>
+<h1>🛵 Historial de costos por zona</h1>
+<p class="sub">Costos aprendidos automáticamente de cada pedido con delivery. Úsalos como referencia para responder rápido.</p>
+{tabla}
+</body></html>"""
+    return HTMLResponse(page)
+
+
+# ══════════════════════════════════════════════════════════════
+# ── IMPRESIÓN DE PEDIDOS ───────────────────────────────────────
+# ══════════════════════════════════════════════════════════════
+
+@app.get("/admin/imprimir/{order_id}", response_class=HTMLResponse)
+async def imprimir_pedido(
+    order_id: int,
+    credentials: HTTPBasicCredentials = Depends(verificar_admin)
+):
+    """Genera un recibo imprimible para un pedido."""
+    order = db.get_order_by_id(order_id)
+    if not order:
+        return HTMLResponse("<p>Pedido no encontrado</p>", status_code=404)
+    # Obtener fecha/hora del pedido desde la tabla
+    with db._conn() as c:
+        row = c.execute("SELECT fecha, hora FROM orders WHERE id=?", (order_id,)).fetchone()
+    fecha = row["fecha"] if row else "—"
+    hora  = row["hora"]  if row else "—"
+
+    page = f"""<!DOCTYPE html>
+<html lang="es"><head><meta charset="UTF-8">
+<title>Recibo #{order_id}</title>
+<style>
+  @media print {{
+    body{{ margin:0 }} .no-print{{display:none}}
+  }}
+  body{{font-family:'Courier New',monospace;max-width:320px;margin:0 auto;padding:16px;font-size:13px}}
+  h2{{text-align:center;margin:0;font-size:1.1em}}
+  .sep{{border:none;border-top:1px dashed #000;margin:8px 0}}
+  .row{{display:flex;justify-content:space-between}}
+  .label{{font-weight:bold;color:#555}}
+  .print-btn{{display:block;margin:16px auto;padding:10px 24px;background:#2d6a2d;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:1em}}
+</style>
+</head><body>
+<h2>🌮 CHILANGO</h2>
+<p style="text-align:center;font-size:.85em;margin:2px 0">Pedido #{order_id}</p>
+<p style="text-align:center;font-size:.85em;margin:2px 0">{fecha} · {hora}</p>
+<hr class="sep">
+<p><span class="label">Cliente:</span> +{order['phone']}</p>
+<p><span class="label">Dirección:</span> {html.escape(order.get('direccion') or 'Recojo')}</p>
+<p><span class="label">Pago:</span> {html.escape(order.get('metodo_pago') or '—')}</p>
+<hr class="sep">
+<p><span class="label">Pedido:</span></p>
+<p style="white-space:pre-wrap">{html.escape(order['items'])}</p>
+<hr class="sep">
+<p class="row"><span class="label">TOTAL:</span><strong>{html.escape(order['total'])}</strong></p>
+{'<p><span class="label">Notas:</span> ' + html.escape(order.get("notas") or "") + '</p>' if order.get("notas") else ""}
+<hr class="sep">
+<p style="text-align:center;font-size:.8em">¡Gracias por elegir Chilango! 🌮</p>
+<button class="print-btn no-print" onclick="window.print()">🖨️ Imprimir</button>
+<script>window.onload = () => window.print();</script>
+</body></html>"""
+    return HTMLResponse(page)
+
+
 @app.post("/admin/send-message")
 async def send_manual_message(
     request: Request,
@@ -2423,6 +2777,9 @@ td{{padding:10px 14px;font-size:13px;color:#333}}
   <a href="/pedidos">📦 Pedidos</a>
   <a href="/admin">💬 Conversaciones</a>
   <a href="/admin/clientes" class="active">👥 Clientes</a>
+  <a href="/admin/metricas">📊 Métricas</a>
+  <a href="/admin/zonas-delivery">🛵 Zonas</a>
+  <a href="/admin/menu">🍽️ Menú</a>
 </nav>
 <div class="wrap">
   <div class="toolbar-cl">

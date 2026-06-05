@@ -3224,10 +3224,18 @@ async def admin(credentials: HTTPBasicCredentials = Depends(verificar_admin)):
                 // Actualizar sidebar
                 const lista = document.querySelector('.sidebar-list');
                 if (!lista) return;
+                // Guardar selección actual antes de reemplazar HTML
+                const prevChecked = new Set(
+                    [...document.querySelectorAll('.conv-chk:checked')].map(c => c.dataset.phone)
+                );
                 lista.innerHTML = data.contacts_html || '';
-                // Restaurar visibilidad de checkboxes si estamos en modo selección
+                // Restaurar checkboxes si estamos en modo selección
                 if (modoSeleccion) {{
-                    document.querySelectorAll('.conv-chk').forEach(chk => chk.style.display = 'block');
+                    document.querySelectorAll('.conv-chk').forEach(chk => {{
+                        chk.style.display = 'block';
+                        if (prevChecked.has(chk.dataset.phone)) chk.checked = true;
+                    }});
+                    actualizarBulkBar();
                 }}
                 // Actualizar mensajes del chat abierto (si hay uno)
                 const activePhone = sessionStorage.getItem('activePhone');

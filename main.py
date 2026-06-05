@@ -2633,7 +2633,10 @@ async def api_conversations(credentials: HTTPBasicCredentials = Depends(verifica
         avatar = "🛵" if es_delivery else "👤"
         tiempo = _format_contact_time(data.get("last_msg_at", ""))
         contacts_html += (
-            f'<div class="contact{unread_class}" id="c_{html.escape(phone)}" onclick="showChat(\'{html.escape(phone)}\')">'
+            f'<div class="contact{unread_class}" id="c_{html.escape(phone)}" onclick="contactClick(event,\'{html.escape(phone)}\')" data-phone="{html.escape(phone)}">'
+            f'<input type="checkbox" class="conv-chk" data-phone="{html.escape(phone)}"'
+            f' onclick="event.stopPropagation()" onchange="onChkChange()"'
+            f' style="display:none;width:14px;height:14px;flex-shrink:0;cursor:pointer;accent-color:#25d366;margin-right:4px">'
             f'<div class="avatar">{avatar}</div>'
             f'<div class="contact-info">'
             f'<div class="contact-row1"><div class="contact-name">{html.escape(display_name)}</div>'
@@ -3222,6 +3225,10 @@ async def admin(credentials: HTTPBasicCredentials = Depends(verificar_admin)):
                 const lista = document.querySelector('.sidebar-list');
                 if (!lista) return;
                 lista.innerHTML = data.contacts_html || '';
+                // Restaurar visibilidad de checkboxes si estamos en modo selección
+                if (modoSeleccion) {{
+                    document.querySelectorAll('.conv-chk').forEach(chk => chk.style.display = 'block');
+                }}
                 // Actualizar mensajes del chat abierto (si hay uno)
                 const activePhone = sessionStorage.getItem('activePhone');
                 if (activePhone && data.convs[activePhone]) {{

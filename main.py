@@ -173,7 +173,7 @@ PALABRAS_CARTA = ["carta", "menu", "menú", "ver carta", "ver menu", "qué tiene
 
 # Saludos genéricos que no necesitan procesarse después de la bienvenida
 SALUDOS_GENERICOS = {"hola", "buenas", "buenos días", "buenas tardes", "buenas noches",
-                     "hi", "hello", "hey", "ola", "buenas noches", "2"}
+                     "hi", "hello", "hey", "ola", "2"}
 
 # ── Deduplicación de webhooks ─────────────────────────────────
 # Meta reenvía el mismo mensaje si no recibe respuesta rápida.
@@ -490,6 +490,14 @@ async def handle_message(phone: str, message: str, phone_number_id: str = None):
                 corte = mitad
             await send_whatsapp_message(phone, MENU_TEXTO[:corte].strip(), sending_id)
             await send_whatsapp_message(phone, MENU_TEXTO[corte:].strip(), sending_id)
+        # CTA inmediato después de la carta (solo en horario de atención)
+        if esta_en_horario():
+            await send_whatsapp_buttons(
+                phone,
+                "¿Se te antojó algo? 👇",
+                [{"id": "hacer_pedido", "title": "🛵 Hacer un pedido"}],
+                sending_id,
+            )
         return
 
     if message.lower() in ["/reset", "reiniciar"]:
@@ -829,8 +837,31 @@ def _render_card(p: dict) -> str:
     entrega_cls = "recojo" if es_recojo else "delivery"
     entrega_txt = "🏪 Recojo" if es_recojo else "🏍️ Delivery"
     dir_label = "📦 Entrega" if es_recojo else "📍 Dirección:"
-    dir_value = "El cliente retira" if es_recojo else (html.escape(direccion) if direccion else "Sin especificar")
+    if es_recojo:
+        dir_value = "El cliente retira"
+    elif direccion:
+        from urllib.parse import quote as _quote
+        _maps_url = "https://www.google.com/maps/search/?api=1&query=" + _quote(f"{direccion}, Tacna, Perú")
+        dir_value = f'<a href="{_maps_url}" target="_blank" title="Ver en Google Maps">{html.escape(direccion)} 🗺️</a>'
+    else:
+        dir_value = "Sin especificar"
     dir_cls = " sin-dir" if (not es_recojo and not direccion) else ""
+
+    # Chip de tiempo transcurrido desde que entró el pedido (solo activos)
+    elapsed_chip = ""
+    if activo and p.get("hora"):
+        try:
+            from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+            _now = _dt.now(_tz(_td(hours=-5)))
+            _h, _m = map(int, str(p["hora"]).split(":"))
+            _mins = (_now.hour * 60 + _now.minute) - (_h * 60 + _m)
+            if _mins < 0:
+                _mins += 1440
+            if 0 <= _mins < 600:
+                _ecls = "late" if _mins >= 45 else ("warn" if _mins >= 25 else "")
+                elapsed_chip = f'<span class="oc-elapsed {_ecls}">⏱️ hace {_mins} min</span>'
+        except Exception:
+            pass
 
     notas = (p.get("notas") or "").strip()
     notas_html = (
@@ -841,7 +872,9 @@ def _render_card(p: dict) -> str:
     mod_badge = '<span class="oc-mod">✏️ Mod</span>' if p.get("modificado") else ""
 
     items_raw = p.get("items") or ""
-    items_list = [i.strip() for i in items_raw.split(",") if i.strip()]
+    # Separar por comas, pero NO las que están dentro de paréntesis (detalle de combos)
+    import re as _re_items
+    items_list = [i.strip() for i in _re_items.split(r',\s*(?![^()]*\))', items_raw) if i.strip()]
     items_html = "".join(f'<div class="oc-item-line">• {html.escape(i)}</div>' for i in items_list) if len(items_list) > 1 else html.escape(items_raw)
 
     # Badge cuando el cliente pagó el delivery incluido en el pedido
@@ -895,7 +928,7 @@ def _render_card(p: dict) -> str:
   <div class="oc-hdr">
     <div class="oc-hdr-left">
       <div class="oc-title">Pedido <span class="oc-num">#{pid}</span></div>
-      <div class="oc-meta">🕒 {p['hora']} · +{html.escape(p['phone'])} <span class="oc-entrega {entrega_cls}">{entrega_txt}</span>{mod_badge}</div>
+      <div class="oc-meta">🕒 {p['hora']} · <a href="https://wa.me/{html.escape(p['phone'])}" target="_blank" title="Abrir chat de WhatsApp">+{html.escape(p['phone'])}</a> <span class="oc-entrega {entrega_cls}">{entrega_txt}</span>{elapsed_chip}{mod_badge}</div>
     </div>
     <span class="oc-status" style="background:{badge_color}">{html.escape(estado)}</span>
   </div>
@@ -1023,9 +1056,15 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgro
 .chip.efec{{background:#2D5016;border:1px solid rgba(255,255,255,.3)}}
 
 /* ── Nav ── */
-.nav{{background:#1b3a0e;display:flex}}
-.nav a{{color:rgba(255,255,255,.7);text-decoration:none;padding:9px 18px;font-size:13px;transition:background .15s}}
+.nav{{background:#1b3a0e;display:flex;overflow-x:auto;-webkit-overflow-scrolling:touch}}
+.nav a{{color:rgba(255,255,255,.7);text-decoration:none;padding:9px 18px;font-size:13px;transition:background .15s;white-space:nowrap}}
 .nav a:hover,.nav a.active{{color:#fff;background:rgba(255,255,255,.12)}}
+@media(max-width:600px){{
+  .hdr{{padding:8px 12px;gap:8px}}
+  .hdr img{{height:32px}}
+  .chip{{font-size:11px;padding:4px 10px}}
+  .grid{{padding:10px;gap:10px}}
+}}
 
 /* ── Toolbar ── */
 .toolbar{{background:#fff;padding:10px 16px;display:flex;align-items:center;gap:10px;border-bottom:1px solid #e0e0e0;flex-wrap:wrap}}
@@ -1039,6 +1078,13 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgro
 .tab{{border:none;background:#f0f2f5;color:#555;padding:6px 14px;border-radius:20px;cursor:pointer;font-size:12px;font-weight:600;white-space:nowrap;transition:all .15s}}
 .tab:hover{{background:#e0e0e0}}
 .tab.active{{background:#2D5016;color:#fff}}
+
+/* ── Búsqueda y sonido ── */
+.search-box{{border:1px solid #ddd;border-radius:20px;padding:6px 14px;font-size:13px;outline:none;min-width:170px;flex:1;max-width:280px;transition:border-color .15s}}
+.search-box:focus{{border-color:#2D5016;box-shadow:0 0 0 2px rgba(45,80,22,.1)}}
+.btn-sound{{background:#fff;border:1px solid #ccc;border-radius:20px;padding:6px 12px;cursor:pointer;font-size:13px;font-weight:600;color:#555;transition:all .15s;white-space:nowrap}}
+.btn-sound.on{{background:#e8f5e9;border-color:#2E7D32;color:#2E7D32}}
+.btn-sound.off{{background:#f5f5f5;color:#aaa;text-decoration:line-through}}
 
 /* ── Grid de tarjetas ── */
 .grid{{padding:14px;display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:12px;max-width:1100px;margin:0 auto}}
@@ -1065,7 +1111,8 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgro
 }}
 
 /* ── Tarjeta ── */
-.card{{border-radius:16px;background:#fff;box-shadow:var(--ch-shadow);transition:box-shadow .2s,opacity .3s;overflow:hidden;font-family:'Segoe UI',system-ui,sans-serif}}
+@keyframes card-in{{from{{opacity:0;transform:translateY(8px)}}to{{opacity:1;transform:none}}}}
+.card{{border-radius:16px;background:#fff;box-shadow:var(--ch-shadow);transition:box-shadow .2s,opacity .3s;overflow:hidden;font-family:'Segoe UI',system-ui,sans-serif;animation:card-in .25s ease-out}}
 .card:hover{{box-shadow:0 6px 24px rgba(0,0,0,.14)}}
 .card.hidden{{display:none}}
 
@@ -1075,6 +1122,13 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgro
 .oc-title{{font-size:16px;font-weight:800;color:var(--ch-text);letter-spacing:-.2px;line-height:1.2}}
 .oc-num{{color:var(--ch-red)}}
 .oc-meta{{font-size:11px;color:var(--ch-text3);margin-top:4px;display:flex;align-items:center;gap:5px;flex-wrap:wrap}}
+.oc-meta a{{color:var(--ch-green);text-decoration:none;font-weight:700}}
+.oc-meta a:hover{{text-decoration:underline}}
+.oc-addr a{{color:inherit;text-decoration:none;border-bottom:1px dashed #bbb}}
+.oc-addr a:hover{{color:var(--ch-blue);border-color:var(--ch-blue)}}
+.oc-elapsed{{font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;white-space:nowrap;background:var(--ch-green-bg);color:var(--ch-green)}}
+.oc-elapsed.warn{{background:var(--ch-yellow-bg);color:#F57F17}}
+.oc-elapsed.late{{background:var(--ch-red-bg);color:var(--ch-red);animation:pulse-demora 1.5s ease-in-out infinite}}
 .oc-status{{font-size:11px;font-weight:800;color:#fff;padding:5px 13px;border-radius:20px;white-space:nowrap;letter-spacing:.3px;flex-shrink:0}}
 .oc-entrega{{font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;white-space:nowrap}}
 .oc-entrega.delivery{{background:#E3F2FD;color:var(--ch-blue)}}
@@ -1143,7 +1197,8 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgro
 @keyframes pulse-demora{{0%,100%{{opacity:1}}50%{{opacity:.6}}}}
 
 /* ── Misc ── */
-.empty{{text-align:center;padding:60px 20px;color:#aaa;font-size:15px;grid-column:1/-1}}
+.empty{{text-align:center;padding:50px 20px 60px;color:#aaa;font-size:15px;grid-column:1/-1}}
+.empty::before{{content:"🌮";display:block;font-size:46px;margin-bottom:10px;opacity:.55}}
 .footer-note{{text-align:center;font-size:11px;color:#bbb;padding:12px}}
 
 /* ── Banner de consultas de costo pendientes ── */
@@ -1202,9 +1257,11 @@ body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgro
 
 <div class="toolbar">
   <span class="toolbar-info">📅 <strong id="totalCount">{len(pedidos)}</strong> pedidos &nbsp;·&nbsp; <span id="activosCount">{total_activos}</span> activos</span>
+  <input type="search" id="searchBox" class="search-box" placeholder="🔍 Buscar #, teléfono, producto, dirección…" oninput="setSearch(this.value)">
   <select id="fechaSelect" onchange="if(this.value)location.href='/pedidos?fecha='+encodeURIComponent(this.value)" style="border:1px solid #ccc;border-radius:8px;padding:5px 10px;font-size:13px;cursor:pointer">
     {"".join(f'<option value="{f}" {"selected" if f == fecha_sel else ""}>{f}{" (hoy)" if f == hoy else ""}</option>' for f in fechas_disponibles)}
   </select>
+  <button class="btn-sound" id="btnSound" onclick="toggleSound()" title="Sonido y notificaciones de pedidos nuevos">🔔 Sonido</button>
   <button class="btn-test" onclick="probarNotif()">🔔 Probar notificación</button>
   <button id="btnPausa" onclick="togglePausa()"
     style="border:none;padding:7px 18px;border-radius:20px;cursor:pointer;font-size:13px;font-weight:700;
@@ -1287,6 +1344,10 @@ const STEP_LBL  = {step_lbl_js};
 let knownIds  = new Set(Array.from(document.querySelectorAll('.card')).map(c => +c.id.replace('card-','')));
 let curFilter = 'all';
 let audioCtx  = null;
+let searchQ   = '';
+let lastPayload  = '';
+let lastRenderTs = 0;
+let soundOn = localStorage.getItem('ch_sound') !== '0';
 
 /* ── Sonido ── */
 function playBeep() {{
@@ -1305,6 +1366,36 @@ function playBeep() {{
   }} catch(e) {{}}
 }}
 
+/* ── Toggle de sonido + permiso de notificaciones ── */
+function initSoundBtn() {{
+  const b = document.getElementById('btnSound');
+  if (!b) return;
+  b.classList.toggle('on', soundOn);
+  b.classList.toggle('off', !soundOn);
+  b.textContent = soundOn ? '🔔 Sonido' : '🔕 Silencio';
+}}
+function toggleSound() {{
+  soundOn = !soundOn;
+  localStorage.setItem('ch_sound', soundOn ? '1' : '0');
+  if (soundOn) {{
+    playBeep();  // gesto del usuario → desbloquea AudioContext para futuros beeps
+    if ('Notification' in window && Notification.permission === 'default') {{
+      Notification.requestPermission();
+    }}
+  }}
+  initSoundBtn();
+}}
+initSoundBtn();
+
+/* ── Notificación del navegador (cuando la pestaña está en segundo plano) ── */
+function notifyBrowser(msg) {{
+  if (!('Notification' in window) || Notification.permission !== 'granted' || !document.hidden) return;
+  try {{
+    const n = new Notification('🌮 Chilango — Pedidos', {{ body: msg, tag: 'chilango-new-order' }});
+    n.onclick = () => {{ window.focus(); n.close(); }};
+  }} catch(e) {{}}
+}}
+
 /* ── Toast ── */
 function showToast(msg) {{
   const t = document.getElementById('toast');
@@ -1312,21 +1403,31 @@ function showToast(msg) {{
   setTimeout(() => t.classList.remove('show'), 3500);
 }}
 
-/* ── Filtro ── */
+/* ── Filtro por estado + búsqueda ── */
+function applyFilters() {{
+  document.querySelectorAll('.card').forEach(c => {{
+    const matchEstado = curFilter === 'all' || c.dataset.estado === curFilter;
+    const matchQ = !searchQ || c.textContent.toLowerCase().includes(searchQ);
+    c.classList.toggle('hidden', !(matchEstado && matchQ));
+  }});
+}}
+
 function filterCards(estado, btn) {{
   curFilter = estado;
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   if (btn) btn.classList.add('active');
-  document.querySelectorAll('.card').forEach(c => {{
-    const e = c.dataset.estado;
-    c.classList.toggle('hidden', estado !== 'all' && e !== estado);
-  }});
+  applyFilters();
+}}
+
+function setSearch(q) {{
+  searchQ = (q || '').trim().toLowerCase();
+  applyFilters();
 }}
 
 /* ── Cambiar estado (AJAX) ── */
 async function cambiarEstado(id, nuevoEstado) {{
   const card = document.getElementById('card-' + id);
-  const btn  = card ? card.querySelector('.btn-next') : null;
+  const btn  = card ? card.querySelector('.oa-next') : null;
   if (btn) {{ btn.disabled = true; btn.textContent = '⏳'; }}
   try {{
     const r = await fetch('/api/pedidos/estado', {{
@@ -1518,18 +1619,34 @@ function buildCard(p) {{
   const entregaTxt = esRecojo ? '🏪 Recojo' : '🏍️ Delivery';
   const modBadge   = p.modificado ? `<span class="oc-mod">✏️ Mod</span>` : '';
 
-  // Items con bullets
-  const itemsList = (p.items || '').split(',').map(s => s.trim()).filter(Boolean);
+  // Items con bullets — comas dentro de paréntesis (combos) no separan
+  const itemsList = (p.items || '').split(/,(?![^(]*\))/).map(s => s.trim()).filter(Boolean);
   const itemsHtml = itemsList.length > 1
     ? itemsList.map(i => `<div class="oc-item-line">• ${{esc(i)}}</div>`).join('')
     : esc(p.items || '');
 
-  // Dirección
+  // Dirección (con link a Google Maps si es delivery)
   let dirValue, dirCls = '';
   if (esRecojo) {{ dirValue = 'El cliente retira'; }}
-  else if (p.direccion) {{ dirValue = esc(p.direccion); }}
+  else if (p.direccion) {{
+    const mapsUrl = 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(p.direccion + ', Tacna, Perú');
+    dirValue = `<a href="${{mapsUrl}}" target="_blank" title="Ver en Google Maps">${{esc(p.direccion)}} 🗺️</a>`;
+  }}
   else {{ dirValue = 'Sin especificar'; dirCls = ' sin-dir'; }}
   const dirLabel = esRecojo ? '📦 Entrega' : '📍 Dirección:';
+
+  // Chip de tiempo transcurrido desde que entró el pedido (solo activos)
+  let elapsedChip = '';
+  if (esActivo && p.hora) {{
+    const [eh, em] = p.hora.split(':').map(Number);
+    const nowE = new Date();
+    let diffE = (nowE.getHours() * 60 + nowE.getMinutes()) - (eh * 60 + em);
+    if (diffE < 0) diffE += 1440;
+    if (diffE >= 0 && diffE < 600) {{
+      const eCls = diffE >= 45 ? 'late' : (diffE >= 25 ? 'warn' : '');
+      elapsedChip = `<span class="oc-elapsed ${{eCls}}">⏱️ hace ${{diffE}} min</span>`;
+    }}
+  }}
 
   // Notas
   const notasHtml = (p.notas || '').trim()
@@ -1594,7 +1711,7 @@ function buildCard(p) {{
   <div class="oc-hdr">
     <div class="oc-hdr-left">
       <div class="oc-title">Pedido <span class="oc-num">#${{p.id}}</span></div>
-      <div class="oc-meta">🕒 ${{esc(p.hora)}} · +${{esc(p.phone)}} <span class="oc-entrega ${{entregaCls}}">${{entregaTxt}}</span>${{modBadge}}</div>
+      <div class="oc-meta">🕒 ${{esc(p.hora)}} · <a href="https://wa.me/${{esc(p.phone)}}" target="_blank" title="Abrir chat de WhatsApp">+${{esc(p.phone)}}</a> <span class="oc-entrega ${{entregaCls}}">${{entregaTxt}}</span>${{elapsedChip}}${{modBadge}}</div>
     </div>
     <span class="oc-status" style="background:${{badgeClr}}">${{esc(estado)}}</span>
   </div>
@@ -1655,20 +1772,30 @@ async function refreshOrders() {{
     // Detectar pedidos nuevos
     const newOnes = pedidos.filter(p => !knownIds.has(p.id));
     if (newOnes.length > 0 && knownIds.size > 0) {{
-      playBeep();
+      if (soundOn) playBeep();
+      const msg = newOnes.length === 1
+        ? `Pedido #${{newOnes[0].id}} — ${{(newOnes[0].items || '').slice(0, 60)}}`
+        : `${{newOnes.length}} nuevos pedidos llegaron`;
       showToast(`🔔 ${{newOnes.length === 1 ? 'Nuevo pedido llegó' : newOnes.length + ' nuevos pedidos'}}`);
+      notifyBrowser(msg);
       document.title = '🔔 Nuevo pedido — Chilango';
       setTimeout(() => {{ document.title = 'Pedidos — Chilango'; }}, 5000);
     }}
     knownIds = new Set(pedidos.map(p => p.id));
 
-    // Re-renderizar tarjetas
-    const grid = document.getElementById('ordersGrid');
-    if (pedidos.length === 0) {{
-      const fechaSel2 = document.getElementById('fechaSelect')?.value || '';
-      grid.innerHTML = `<div class="empty">${{fechaSel2 ? 'Sin pedidos para ' + fechaSel2 : 'No hay pedidos hoy todavía'}} 🌮</div>`;
-    }} else {{
-      grid.innerHTML = pedidos.map(buildCard).join('');
+    // Re-renderizar solo si los datos cambiaron (o cada 60 s para refrescar los chips de tiempo)
+    const payload = JSON.stringify(pedidos);
+    const mustRender = payload !== lastPayload || (Date.now() - lastRenderTs) > 60000;
+    if (mustRender) {{
+      lastPayload = payload;
+      lastRenderTs = Date.now();
+      const grid = document.getElementById('ordersGrid');
+      if (pedidos.length === 0) {{
+        const fechaSel2 = document.getElementById('fechaSelect')?.value || '';
+        grid.innerHTML = `<div class="empty">${{fechaSel2 ? 'Sin pedidos para ' + fechaSel2 : 'No hay pedidos hoy todavía'}} 🌮</div>`;
+      }} else {{
+        grid.innerHTML = pedidos.map(buildCard).join('');
+      }}
     }}
 
     // Actualizar burbuja de pedidos nuevos en el nav

@@ -998,10 +998,12 @@ def get_menu_texto() -> str:
 
 # ── Métricas / Dashboard ──────────────────────────────────────
 
-def get_metricas() -> dict:
-    """Retorna datos agregados para el dashboard de métricas."""
+def get_metricas(dias: int = 14) -> dict:
+    """Retorna datos agregados para el dashboard de métricas.
+    `dias` controla el rango de los gráficos y rankings (7-180).
+    Los KPI de hoy / semana / mes son independientes del rango."""
     import re as _re
-    from datetime import datetime as _dt
+    from collections import defaultdict
 
     def _parse_total(val):
         try:
@@ -1010,35 +1012,36 @@ def get_metricas() -> dict:
         except Exception:
             return 0.0
 
-    hoy = datetime.now(PERU_TZ).strftime("%d/%m/%Y")
+    try:
+        dias = max(7, min(int(dias or 14), 180))
+    except Exception:
+        dias = 14
+    ahora = datetime.now(PERU_TZ)
+    hoy = ahora.strftime("%d/%m/%Y")
     with _conn() as c:
-        # Todos los pedidos no cancelados
         rows = c.execute(
             "SELECT fecha, hora, items, total, metodo_pago FROM orders WHERE estado != 'Cancelado ❌'"
         ).fetchall()
-
     pedidos = [dict(r) for r in rows]
 
-    # ── Ventas por día (últimos 14 días) ──────────────────────
-    from collections import defaultdict
+    # ── Período seleccionado ──────────────────────────────────
+    fechas_periodo = [(ahora - timedelta(days=i)).strftime("%d/%m/%Y") for i in range(dias - 1, -1, -1)]
+    set_periodo = set(fechas_periodo)
+    en_periodo = [p for p in pedidos if p["fecha"] in set_periodo]
+
+    # ── Ventas y pedidos por día ──────────────────────────────
     ventas_dia: dict = defaultdict(float)
     pedidos_dia: dict = defaultdict(int)
-    for p in pedidos:
+    for p in en_periodo:
         ventas_dia[p["fecha"]] += _parse_total(p["total"])
         pedidos_dia[p["fecha"]] += 1
+    dias_labels  = [f[:5] for f in fechas_periodo]
+    dias_ventas  = [round(ventas_dia.get(f, 0), 2) for f in fechas_periodo]
+    dias_pedidos = [pedidos_dia.get(f, 0) for f in fechas_periodo]
 
-    # Generar últimos 14 días
-    dias_labels, dias_ventas, dias_pedidos = [], [], []
-    for i in range(13, -1, -1):
-        d = (datetime.now(PERU_TZ) - timedelta(days=i)).strftime("%d/%m/%Y")
-        label = (datetime.now(PERU_TZ) - timedelta(days=i)).strftime("%d/%m")
-        dias_labels.append(label)
-        dias_ventas.append(round(ventas_dia.get(d, 0), 2))
-        dias_pedidos.append(pedidos_dia.get(d, 0))
-
-    # ── Hora pico ─────────────────────────────────────────────
+    # ── Hora pico (período) ───────────────────────────────────
     hora_conteo: dict = defaultdict(int)
-    for p in pedidos:
+    for p in en_periodo:
         try:
             h = int((p["hora"] or "0:0").split(":")[0])
             hora_conteo[h] += 1
@@ -1047,51 +1050,87 @@ def get_metricas() -> dict:
     horas_labels = [f"{h}:00" for h in range(17, 23)]
     horas_data   = [hora_conteo.get(h, 0) for h in range(17, 23)]
 
-    # ── Top productos ─────────────────────────────────────────
+    # ── Top productos (período) ───────────────────────────────
     producto_conteo: dict = defaultdict(int)
-    import re as _re2
-    for p in pedidos:
-        items_str = p["items"] or ""
-        for m in _re2.finditer(r'(\d+)x\s+([^,\n\|\-]+)', items_str):
+    for p in en_periodo:
+        # Quitar el detalle entre paréntesis de los combos: el combo cuenta
+        # como un producto, no sus componentes sueltos
+        items_str = _re.sub(r"\([^)]*\)", "", p["items"] or "")
+        for m in _re.finditer(r'(\d+)x\s+([^,\n\|\-]+)', items_str):
             qty  = int(m.group(1))
             name = m.group(2).strip().rstrip(" —")
             if len(name) > 3:
                 producto_conteo[name] += qty
     top_productos = sorted(producto_conteo.items(), key=lambda x: x[1], reverse=True)[:7]
 
-    # ── Totales generales ─────────────────────────────────────
-    total_hoy    = sum(_parse_total(p["total"]) for p in pedidos if p["fecha"] == hoy)
-    pedidos_hoy  = sum(1 for p in pedidos if p["fecha"] == hoy)
+    # ── Día de la semana (período) — el negocio abre Vie/Sáb/Dom ──
+    dow_v_raw: dict = defaultdict(float)
+    dow_p_raw: dict = defaultdict(int)
+    for p in en_periodo:
+        try:
+            wd = datetime.strptime(p["fecha"], "%d/%m/%Y").weekday()
+        except Exception:
+            continue
+        dow_v_raw[wd] += _parse_total(p["total"])
+        dow_p_raw[wd] += 1
+    dow_labels  = ["Viernes", "Sábado", "Domingo"]
+    dow_ventas  = [round(dow_v_raw.get(4, 0), 2), round(dow_v_raw.get(5, 0), 2), round(dow_v_raw.get(6, 0), 2)]
+    dow_pedidos = [dow_p_raw.get(4, 0), dow_p_raw.get(5, 0), dow_p_raw.get(6, 0)]
+    otros_p = sum(v for k, v in dow_p_raw.items() if k not in (4, 5, 6))
+    if otros_p:
+        dow_labels.append("Otros")
+        dow_ventas.append(round(sum(v for k, v in dow_v_raw.items() if k not in (4, 5, 6)), 2))
+        dow_pedidos.append(otros_p)
 
-    # Semana actual (últimos 7 días)
-    semana_fechas = {(datetime.now(PERU_TZ) - timedelta(days=i)).strftime("%d/%m/%Y") for i in range(7)}
-    total_semana  = sum(_parse_total(p["total"]) for p in pedidos if p["fecha"] in semana_fechas)
-    pedidos_semana = sum(1 for p in pedidos if p["fecha"] in semana_fechas)
+    # ── KPIs fijos (independientes del rango) ─────────────────
+    total_hoy   = sum(_parse_total(p["total"]) for p in pedidos if p["fecha"] == hoy)
+    pedidos_hoy = sum(1 for p in pedidos if p["fecha"] == hoy)
 
-    # Mes actual
-    mes_actual = datetime.now(PERU_TZ).strftime("%m/%Y")
+    semana_fechas       = {(ahora - timedelta(days=i)).strftime("%d/%m/%Y") for i in range(7)}
+    semana_prev_fechas  = {(ahora - timedelta(days=i)).strftime("%d/%m/%Y") for i in range(7, 14)}
+    total_semana        = sum(_parse_total(p["total"]) for p in pedidos if p["fecha"] in semana_fechas)
+    pedidos_semana      = sum(1 for p in pedidos if p["fecha"] in semana_fechas)
+    total_semana_prev   = sum(_parse_total(p["total"]) for p in pedidos if p["fecha"] in semana_prev_fechas)
+    pedidos_semana_prev = sum(1 for p in pedidos if p["fecha"] in semana_prev_fechas)
+
+    mes_actual  = ahora.strftime("%m/%Y")
     total_mes   = sum(_parse_total(p["total"]) for p in pedidos if (p["fecha"] or "")[-7:] == mes_actual)
-    pedidos_mes  = sum(1 for p in pedidos if (p["fecha"] or "")[-7:] == mes_actual)
+    pedidos_mes = sum(1 for p in pedidos if (p["fecha"] or "")[-7:] == mes_actual)
 
-    # ── Métodos de pago ───────────────────────────────────────
+    # ── Métodos de pago (período) ─────────────────────────────
     pago_conteo: dict = defaultdict(int)
-    for p in pedidos:
+    for p in en_periodo:
         pago_conteo[p.get("metodo_pago") or "Efectivo"] += 1
 
+    # ── Resumen del período ───────────────────────────────────
+    total_periodo   = round(sum(dias_ventas), 2)
+    pedidos_periodo = sum(dias_pedidos)
+    ticket_promedio = round(total_periodo / pedidos_periodo, 2) if pedidos_periodo else 0.0
+
     return {
-        "dias_labels":    dias_labels,
-        "dias_ventas":    dias_ventas,
-        "dias_pedidos":   dias_pedidos,
-        "horas_labels":   horas_labels,
-        "horas_data":     horas_data,
-        "top_productos":  [{"nombre": n, "qty": q} for n, q in top_productos],
-        "total_hoy":      round(total_hoy, 2),
-        "pedidos_hoy":    pedidos_hoy,
-        "total_semana":   round(total_semana, 2),
-        "pedidos_semana": pedidos_semana,
-        "total_mes":      round(total_mes, 2),
-        "pedidos_mes":    pedidos_mes,
-        "pago_conteo":    dict(pago_conteo),
+        "dias":            dias,
+        "dias_fechas":     fechas_periodo,
+        "dias_labels":     dias_labels,
+        "dias_ventas":     dias_ventas,
+        "dias_pedidos":    dias_pedidos,
+        "horas_labels":    horas_labels,
+        "horas_data":      horas_data,
+        "top_productos":   [{"nombre": n, "qty": q} for n, q in top_productos],
+        "dow_labels":      dow_labels,
+        "dow_ventas":      dow_ventas,
+        "dow_pedidos":     dow_pedidos,
+        "total_hoy":       round(total_hoy, 2),
+        "pedidos_hoy":     pedidos_hoy,
+        "total_semana":    round(total_semana, 2),
+        "pedidos_semana":  pedidos_semana,
+        "total_semana_prev":   round(total_semana_prev, 2),
+        "pedidos_semana_prev": pedidos_semana_prev,
+        "total_mes":       round(total_mes, 2),
+        "pedidos_mes":     pedidos_mes,
+        "total_periodo":   total_periodo,
+        "pedidos_periodo": pedidos_periodo,
+        "ticket_promedio": ticket_promedio,
+        "pago_conteo":     dict(pago_conteo),
     }
 
 

@@ -1,9 +1,42 @@
-[CHANGELOG.md](https://github.com/user-attachments/files/28819797/CHANGELOG.md)
+[CHANGELOG.md](https://github.com/user-attachments/files/28820633/CHANGELOG.md)
 # CHANGELOG — Chilango Bot
 
 Formato: `[vX.Y] YYYY-MM-DD — Descripción`
 - **X** = versión mayor (cambio arquitectural o de flujo)
 - **Y** = versión menor (mejora, fix o nueva función)
+
+---
+
+## [v4.1] 2026-06-10 — Diseño unificado en todo el panel + métricas interactivas
+
+### 🎨 Design system compartido
+- Nuevos helpers `_UI_HEAD`, `_UI_CSS`, `_nav_html()`, `_ui_header()`: tokens de color, tipografía Inter, iconos Tabler y componentes (KPI cards, tablas, segmented controls, búsqueda, toast) compartidos por todas las páginas.
+- **Todas las pestañas** (Conversaciones, Clientes, Métricas, Zonas, Menú) ahora usan el mismo header blanco, nav con iconos y paleta contenida que `/pedidos`.
+- Burbuja de pedidos nuevos en el nav visible desde cualquier pestaña (polling compartido).
+
+### 📊 Métricas — ahora dinámicas e interactivas
+- **Selector de período** (7 / 14 / 30 / 90 días): todos los gráficos y rankings se recalculan al instante vía nuevo endpoint `GET /api/metricas?dias=N`.
+- **Toggle Ventas/Pedidos** en el gráfico principal sin recargar.
+- **Drill-down**: clic en una barra del gráfico principal abre `/pedidos?fecha=` de ese día.
+- **Comparativa semanal**: KPI "Últimos 7 días" muestra % de cambio vs semana previa (verde/rojo con flecha).
+- **Nuevos datos**: ticket promedio del período, ventas por día de semana (Vie/Sáb/Dom), tooltips con desglose (S/ + nº pedidos, % en método de pago).
+- **Auto-refresh** cada 60 s + botón de actualización manual con hora del último refresh.
+- `db.get_metricas(dias)` parametrizable; hora pico, top productos y método de pago ahora se filtran por el período seleccionado (antes usaban todo el historial).
+
+### 💬 Conversaciones
+- Mismo design system; burbujas rediseñadas (cliente blanco, Chili verde suave, equipo ámbar) con iconos de remitente.
+- **Vista móvil tipo WhatsApp**: en pantallas chicas la lista ocupa todo el ancho y el chat se desliza encima con botón ← para volver.
+- Botón directo para abrir el chat del cliente en WhatsApp desde el header de la conversación.
+- Eliminada la triple duplicación del HTML de contactos: helper compartido `_contact_item_html()` usado por la página y el endpoint de polling.
+
+### 🐛 Bugs corregidos
+- **Top productos contaminado por combos**: el regex partía "Combo X (2x Taco, 1x Agua)" en pseudo-productos ("Combo X (2x Taco" / "Agua)"). Ahora el detalle entre paréntesis se ignora y el combo cuenta como un solo producto.
+
+### 📁 Archivos actualizados
+| Archivo | Cambios |
+|---|---|
+| `main.py` | Design system compartido, rediseño de las 5 páginas, `/api/metricas`, helper de contactos |
+| `db.py` | `get_metricas(dias)` con período, comparativa semanal, día de semana, ticket promedio, fechas completas |
 
 ---
 

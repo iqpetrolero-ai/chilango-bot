@@ -691,24 +691,6 @@ async def health():
 
 
 ESTADOS = ["Nuevo 🆕", "En preparación 👨‍🍳", "En camino 🛵", "Entregado ✅"]
-ESTADO_COLORS = {
-    "Nuevo 🆕":             "#e3f2fd",
-    "En preparación 👨‍🍳":  "#fff8e1",
-    "En camino 🛵":         "#fff3e0",
-    "Entregado ✅":         "#e8f5e9",
-    "Cancelado ❌":         "#fce4ec",
-}
-ESTADO_BADGE = {
-    "Nuevo 🆕":             "#1976d2",
-    "En preparación 👨‍🍳":  "#f57f17",
-    "En camino 🛵":         "#e65100",
-    "Entregado ✅":         "#2e7d32",
-    "Cancelado ❌":         "#c62828",
-}
-
-# Paso de "En camino" → notificación WhatsApp al cliente
-STEP_LABELS = ["Nuevo", "Preparación", "En camino", "Entregado"]
-STEP_IDX = {"Nuevo 🆕": 0, "En preparación 👨‍🍳": 1, "En camino 🛵": 2, "Entregado ✅": 3}
 
 
 async def _notify_order_listo(order: dict):
@@ -798,164 +780,25 @@ async def _notify_order_camino(order: dict):
         await _briefing_motorista(order)
 
 
-def _render_card(p: dict) -> str:
-    """Renderiza una tarjeta de pedido como HTML."""
-    estado = p.get("estado") or "Nuevo 🆕"
-    badge_color = ESTADO_BADGE.get(estado, "#666")
-    pid = p["id"]
-
-    # ── Progress steps ──────────────────────────────────────────
-    step_idx = STEP_IDX.get(estado, -1)
-    steps_parts = []
-    for i, label in enumerate(STEP_LABELS):
-        cls = "s-done" if i < step_idx else ("s-active" if i == step_idx else "")
-        line_cls = "done" if i < step_idx else ""
-        steps_parts.append(
-            f'<div class="oc-step {cls}"><div class="oc-dot"></div><span>{label}</span></div>'
-        )
-        if i < len(STEP_LABELS) - 1:
-            steps_parts.append(f'<div class="oc-line {line_cls}"></div>')
-    steps_html = "".join(steps_parts)
-
-    # ── Datos del pedido ────────────────────────────────────────
-    es_cancelado = estado == "Cancelado ❌"
-    activo = estado not in ("Entregado ✅", "Cancelado ❌")
-    idx = ESTADOS.index(estado) if estado in ESTADOS else 0
-    siguiente = ESTADOS[idx + 1] if (idx < len(ESTADOS) - 1 and not es_cancelado) else None
-
-    metodo = p.get("metodo_pago") or "Efectivo"
-    es_digital = metodo in ("Yape/Plin", "Yape", "Plin")
-    metodo_cls = "metodo-yape" if es_digital else "metodo-efectivo"
-    metodo_icon = "💜" if es_digital else "💵"
-    cobro_badge = (
-        '<span class="oc-pbadge pagado">✅ Pagado</span>' if es_digital
-        else '<span class="oc-pbadge cobrar">💳 Cobrar al entregar</span>'
-    )
-
-    direccion = p.get("direccion") or ""
-    es_recojo = direccion.strip().lower() == "recojo"
-    entrega_cls = "recojo" if es_recojo else "delivery"
-    entrega_txt = "🏪 Recojo" if es_recojo else "🏍️ Delivery"
-    dir_label = "📦 Entrega" if es_recojo else "📍 Dirección:"
-    if es_recojo:
-        dir_value = "El cliente retira"
-    elif direccion:
-        from urllib.parse import quote as _quote
-        _maps_url = "https://www.google.com/maps/search/?api=1&query=" + _quote(f"{direccion}, Tacna, Perú")
-        dir_value = f'<a href="{_maps_url}" target="_blank" title="Ver en Google Maps">{html.escape(direccion)} 🗺️</a>'
-    else:
-        dir_value = "Sin especificar"
-    dir_cls = " sin-dir" if (not es_recojo and not direccion) else ""
-
-    # Chip de tiempo transcurrido desde que entró el pedido (solo activos)
-    elapsed_chip = ""
-    if activo and p.get("hora"):
-        try:
-            from datetime import datetime as _dt, timezone as _tz, timedelta as _td
-            _now = _dt.now(_tz(_td(hours=-5)))
-            _h, _m = map(int, str(p["hora"]).split(":"))
-            _mins = (_now.hour * 60 + _now.minute) - (_h * 60 + _m)
-            if _mins < 0:
-                _mins += 1440
-            if 0 <= _mins < 600:
-                _ecls = "late" if _mins >= 45 else ("warn" if _mins >= 25 else "")
-                elapsed_chip = f'<span class="oc-elapsed {_ecls}">⏱️ hace {_mins} min</span>'
-        except Exception:
-            pass
-
-    notas = (p.get("notas") or "").strip()
-    notas_html = (
-        f'<hr class="oc-sep"><div class="oc-section"><div class="oc-sec-title">📝 Notas:</div>'
-        f'<div class="oc-notas-val">{html.escape(notas)}</div></div>'
-    ) if notas else ""
-
-    mod_badge = '<span class="oc-mod">✏️ Mod</span>' if p.get("modificado") else ""
-
-    items_raw = p.get("items") or ""
-    # Separar por comas, pero NO las que están dentro de paréntesis (detalle de combos)
-    import re as _re_items
-    items_list = [i.strip() for i in _re_items.split(r',\s*(?![^()]*\))', items_raw) if i.strip()]
-    items_html = "".join(f'<div class="oc-item-line">• {html.escape(i)}</div>' for i in items_list) if len(items_list) > 1 else html.escape(items_raw)
-
-    # Badge cuando el cliente pagó el delivery incluido en el pedido
-    tiene_delivery_pago = "delivery:" in items_raw.lower()
-    delivery_badge = '<span class="oc-pbadge delivery-inc">🛵 Delivery pagado</span>' if tiene_delivery_pago else ""
-
-    # Protocolo de cobro para el motorizado de Altoke (visible en "En preparación")
-    if estado == "En preparación 👨‍🍳" and not es_recojo:
-        if es_digital and tiene_delivery_pago:
-            cobro_moto = "✅ Ya pagó TODO — dile al moto que NO cobre nada al cliente"
-            cobro_color = "#e8f5e9"; cobro_border = "#a5d6a7"; cobro_txt_color = "#2e7d32"
-        elif es_digital:
-            cobro_moto = "💜 Pagó en digital — el moto cobra SOLO el delivery al cliente"
-            cobro_color = "#f3e5f5"; cobro_border = "#ce93d8"; cobro_txt_color = "#6a1b9a"
-        else:
-            cobro_moto = f"💵 Pago en efectivo — el moto cobra {html.escape(p['total'])} + delivery"
-            cobro_color = "#fff8e1"; cobro_border = "#ffe082"; cobro_txt_color = "#e65100"
-        altoke_banner = (
-            f'<div style="background:{cobro_color};border:1px solid {cobro_border};border-radius:8px;'
-            f'padding:7px 12px;margin:8px 12px 0;font-size:12px;font-weight:700;color:{cobro_txt_color}">'
-            f'⚡ Dile al moto: {cobro_moto}</div>'
-        )
-    else:
-        altoke_banner = ""
-
-    # ── Botones de acción ───────────────────────────────────────
-    if activo:
-        btn_cancel = f'<button class="oa oa-cancel" onclick="cancelarPedido({pid})">❌ Cancelar</button>'
-        btn_delivery = f'<button class="oa oa-delivery" onclick="llamarDelivery({pid})">🛵 Delivery</button>' if not es_recojo else ""
-        btn_cost = ""  # eliminado — la consulta de costo se dispara automáticamente desde el bot
-        btn_listo = (
-            f'<button class="oa oa-listo" onclick="avisarListo({pid})">📦 Avisar listo</button>'
-            if estado == "En preparación 👨‍🍳" and not es_recojo else ""
-        )
-        if es_recojo and siguiente and siguiente == "En camino 🛵":
-            sig_js = siguiente.replace("'", "\\'")
-            btn_next = f'<button class="oa oa-next recojo-next" onclick="cambiarEstado({pid},\'{sig_js}\')">📦 Listo p/retirar</button>'
-        elif siguiente:
-            sig_js = siguiente.replace("'", "\\'")
-            btn_next = f'<button class="oa oa-next" onclick="cambiarEstado({pid},\'{sig_js}\')">→ {html.escape(siguiente)}</button>'
-        else:
-            btn_next = ""
-    else:
-        btn_cancel = btn_delivery = btn_cost = btn_listo = ""
-        btn_next = f'<span class="oa-done">{"❌ Cancelado" if es_cancelado else "✅ Entregado"}</span>'
-
-    btn_del   = f'<button class="oa oa-del" onclick="eliminarPedido({pid},this)" title="Eliminar">🗑️</button>'
-    btn_print = f'<button class="oa oa-print" onclick="window.open(\'/admin/imprimir/{pid}\',\'_blank\')" title="Imprimir recibo">🖨️</button>'
-
-    return f"""<div class="card" id="card-{pid}" data-estado="{html.escape(estado)}" data-recojo="{1 if es_recojo else 0}">
-  <div class="oc-hdr">
-    <div class="oc-hdr-left">
-      <div class="oc-title">Pedido <span class="oc-num">#{pid}</span></div>
-      <div class="oc-meta">🕒 {p['hora']} · <a href="https://wa.me/{html.escape(p['phone'])}" target="_blank" title="Abrir chat de WhatsApp">+{html.escape(p['phone'])}</a> <span class="oc-entrega {entrega_cls}">{entrega_txt}</span>{elapsed_chip}{mod_badge}</div>
-    </div>
-    <span class="oc-status" style="background:{badge_color}">{html.escape(estado)}</span>
-  </div>
-  <div class="oc-progress">{steps_html}</div>
-  <hr class="oc-sep">
-  <div class="oc-section">
-    <div class="oc-sec-title">🌶️ Artículos:</div>
-    <div class="oc-items">{items_html}</div>
-  </div>
-  <hr class="oc-sep">
-  <div class="oc-section">
-    <div class="oc-sec-title">{dir_label}</div>
-    <div class="oc-addr{dir_cls}">{dir_value}</div>
-  </div>
-  {notas_html}
-  <hr class="oc-sep">
-  <div class="oc-payment">
-    <span class="oc-total">{html.escape(p['total'])}</span>
-    <div class="oc-pay-badges">
-      <span class="oc-pbadge {metodo_cls}">{metodo_icon} {html.escape(metodo)}</span>
-      {cobro_badge}
-      {delivery_badge}
-    </div>
-  </div>
-  {altoke_banner}
-  <div class="oc-actions">{btn_cancel}{btn_delivery}{btn_listo}{btn_cost}{btn_next}{btn_print}{btn_del}</div>
-</div>"""
+def _enrich_pedidos(pedidos: list) -> list:
+    """Normaliza estados antiguos (sin emoji) y agrega campos derivados para el frontend."""
+    _norm = {
+        "Nuevo": "Nuevo 🆕",
+        "En preparación": "En preparación 👨‍🍳",
+        "En camino": "En camino 🛵",
+        "Entregado": "Entregado ✅",
+    }
+    for p in pedidos:
+        estado = p.get("estado") or "Nuevo 🆕"
+        estado = _norm.get(estado, estado)
+        p["estado"] = estado
+        es_cancel = estado == "Cancelado ❌"
+        idx = ESTADOS.index(estado) if estado in ESTADOS else -1
+        sig = ESTADOS[idx + 1] if (not es_cancel and 0 <= idx < len(ESTADOS) - 1) else None
+        p["siguiente_estado"] = sig
+        p["siguiente_estado_raw"] = sig
+        p["es_recojo"] = (p.get("direccion") or "").strip().lower() == "recojo"
+    return pedidos
 
 
 @app.post("/admin/test-notify")
@@ -968,6 +811,953 @@ async def test_notify(credentials: HTTPBasicCredentials = Depends(verificar_admi
     return JSONResponse({"status": "ok", "mensaje": "Notificación enviada — revisa los logs de Railway para ver si hubo error"})
 
 
+# Plantilla del panel — SIN f-string: los tokens __X__ se reemplazan en pedidos_panel().
+# Así el CSS/JS no necesita llaves escapadas y es mucho más fácil de mantener.
+_PEDIDOS_TEMPLATE = r"""<!DOCTYPE html>
+<html lang="es">
+<head>
+<title>Pedidos — Chilango</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" href="/static/logo.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.31.0/dist/tabler-icons.min.css">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --brand:#2D5016; --brand-dark:#22400F; --brand-soft:#EAF3DE;
+  --bg:#F6F7F5; --surface:#FFFFFF;
+  --border:#E4E6E2; --border2:#D5D8D2;
+  --text:#1E221B; --text2:#5A5F56; --text3:#8C9186;
+  --blue:#1A5DA8; --blue-bg:#E8F1FB;
+  --amber:#8A5A0B; --amber-mid:#B97A10; --amber-bg:#FBF0DC;
+  --violet:#5B3E9E; --violet-bg:#EFEAFA;
+  --green:#2E6B2E; --green-bg:#E6F2E6;
+  --red:#B3362C; --red-bg:#FBEAE8;
+  --radius:12px;
+}
+body{font-family:'Inter',-apple-system,'Segoe UI',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;font-size:14px}
+
+/* ── Header ── */
+.hdr{background:var(--surface);border-bottom:1px solid var(--border);padding:10px 20px;display:flex;align-items:center;gap:12px;position:sticky;top:0;z-index:60}
+.hdr img{height:36px;width:36px;border-radius:8px;object-fit:cover}
+.hdr-title{margin-right:auto;min-width:0}
+.hdr-title h1{font-size:15px;font-weight:600;letter-spacing:-.2px}
+.hdr-title small{font-size:12px;color:var(--text3)}
+.hdr-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.searchwrap{display:flex;align-items:center;gap:7px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:0 10px;height:34px;min-width:190px}
+.searchwrap i{color:var(--text3);font-size:15px}
+.searchwrap input{border:none;outline:none;background:transparent;font:inherit;font-size:13px;flex:1;color:var(--text);min-width:0}
+select.ctl{height:34px;border:1px solid var(--border);border-radius:8px;background:var(--surface);padding:0 8px;font:inherit;font-size:13px;color:var(--text2);cursor:pointer;outline:none}
+.iconbtn{height:34px;width:34px;display:flex;align-items:center;justify-content:center;border:1px solid var(--border);background:var(--surface);border-radius:8px;cursor:pointer;color:var(--text2);font-size:17px;transition:background .15s}
+.iconbtn:hover{background:var(--bg)}
+.iconbtn.off{color:var(--text3)}
+
+/* ── Nav ── */
+.nav{background:var(--surface);border-bottom:1px solid var(--border);display:flex;overflow-x:auto;-webkit-overflow-scrolling:touch;padding:0 12px}
+.nav a{display:flex;align-items:center;gap:6px;color:var(--text2);text-decoration:none;padding:10px 14px;font-size:13px;white-space:nowrap;border-bottom:2px solid transparent}
+.nav a i{font-size:16px}
+.nav a:hover{color:var(--text)}
+.nav a.active{color:var(--brand);border-bottom-color:var(--brand);font-weight:600}
+.nav-badge{background:var(--red);color:#fff;border-radius:999px;min-width:17px;height:17px;font-size:10px;font-weight:600;display:none;align-items:center;justify-content:center;padding:0 5px}
+
+/* ── Layout ── */
+.wrap{max-width:1100px;margin:0 auto;padding:16px}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;margin-bottom:14px}
+.kpi{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:12px 14px}
+.kpi .lbl{font-size:12px;color:var(--text2)}
+.kpi .val{font-size:20px;font-weight:600;margin-top:2px;font-variant-numeric:tabular-nums}
+.kpi .val small{font-size:12px;font-weight:400;color:var(--text3)}
+
+.controls{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+.seg{display:inline-flex;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:3px;gap:2px;overflow-x:auto;max-width:100%}
+.seg button{border:none;background:transparent;color:var(--text2);padding:6px 12px;border-radius:7px;cursor:pointer;font:inherit;font-size:12.5px;white-space:nowrap;transition:background .15s}
+.seg button:hover{background:var(--bg)}
+.seg button.active{background:var(--brand);color:#fff;font-weight:600}
+.btn-ghost{display:flex;align-items:center;gap:6px;height:34px;padding:0 14px;border:1px solid var(--border);background:var(--surface);border-radius:8px;cursor:pointer;font:inherit;font-size:13px;color:var(--text2);margin-left:auto}
+.btn-ghost:hover{background:var(--bg)}
+.btn-ghost.danger{color:var(--red);border-color:#F0CBC7}
+
+.pausa-banner{background:var(--red-bg);border:1px solid #F0CBC7;color:var(--red);border-radius:var(--radius);padding:9px 14px;font-size:13px;font-weight:600;margin:14px auto 0;max-width:1068px;display:flex;align-items:center;gap:8px}
+
+/* ── Agotados ── */
+.agotados{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:12px;overflow:hidden}
+.ag-head{display:flex;align-items:center;gap:8px;width:100%;border:none;background:transparent;padding:10px 14px;cursor:pointer;font:inherit;font-size:13px;color:var(--text2);font-weight:600}
+.ag-head .warnico{color:var(--amber-mid);font-size:16px}
+.ag-head .cnt{background:var(--amber-bg);color:var(--amber);border-radius:999px;padding:1px 8px;font-size:11.5px;font-weight:600;display:none}
+.ag-head .chev{margin-left:auto;transition:transform .2s;font-size:16px}
+.agotados.open .chev{transform:rotate(180deg)}
+.ag-body{display:none;padding:0 14px 12px;align-items:center;gap:8px;flex-wrap:wrap}
+.agotados.open .ag-body{display:flex}
+.ag-chip{font-size:12px;border:1px solid var(--border2);border-radius:999px;padding:4px 12px;cursor:pointer;background:var(--surface);color:var(--text2);font-family:inherit;transition:all .15s}
+.ag-chip.on{background:var(--amber-bg);border-color:var(--amber-mid);color:var(--amber);font-weight:600}
+.ag-body input{flex:1;min-width:150px;border:1px solid var(--border);border-radius:8px;padding:7px 10px;font:inherit;font-size:13px;outline:none}
+.ag-body input:focus{border-color:var(--brand)}
+.ag-save{border:none;background:var(--brand);color:#fff;border-radius:8px;padding:7px 14px;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer}
+.ag-save:hover{background:var(--brand-dark)}
+
+/* ── Consultas de costo ── */
+.cost-banner{background:var(--blue-bg);border:1px solid #C7DCF2;border-radius:var(--radius);padding:12px 14px;display:none;margin-bottom:12px}
+.cost-banner-title{font-size:13px;font-weight:600;color:var(--blue);margin-bottom:10px;display:flex;align-items:center;gap:6px}
+.cost-badge{background:var(--blue);color:#fff;border-radius:999px;padding:1px 8px;font-size:11px}
+.cost-card{background:var(--surface);border-radius:10px;padding:12px 14px;margin-bottom:8px;border:1px solid #C7DCF2;display:flex;flex-wrap:wrap;align-items:flex-start;gap:10px}
+.cost-card:last-child{margin-bottom:0}
+.cost-info{flex:1;min-width:200px;font-size:13px;color:var(--text);line-height:1.7}
+.cost-info strong{color:var(--blue)}
+.cost-sugg{font-size:11px;background:var(--green-bg);color:var(--green);border-radius:6px;padding:3px 8px;display:inline-block;margin-top:2px;font-weight:600}
+.cost-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.cost-input{border:1px solid #C7DCF2;border-radius:8px;padding:8px 12px;font:inherit;font-size:14px;width:120px;outline:none;font-weight:600;color:var(--blue)}
+.cost-input:focus{border-color:var(--blue)}
+.cost-btn{background:var(--blue);color:#fff;border:none;border-radius:8px;padding:9px 16px;font:inherit;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap}
+.cost-btn:hover{opacity:.92}
+
+/* ── Grid + tarjetas ── */
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:12px;align-items:start}
+@keyframes card-in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+@keyframes pulse-demora{0%,100%{opacity:1}50%{opacity:.55}}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);animation:card-in .25s ease-out;display:flex;flex-direction:column;position:relative}
+.card.hidden{display:none}
+
+.oc-hdr{padding:12px 14px 8px;display:flex;justify-content:space-between;gap:8px;align-items:flex-start}
+.oc-title{font-size:15px;font-weight:600}
+.oc-title .num{color:var(--brand)}
+.oc-meta{font-size:12px;color:var(--text3);margin-top:3px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.oc-meta i{font-size:13px;vertical-align:-1px}
+.oc-meta a{color:var(--brand);text-decoration:none;font-weight:600}
+.oc-meta a:hover{text-decoration:underline}
+.oc-mod{font-size:10.5px;background:var(--amber-bg);color:var(--amber);padding:1px 7px;border-radius:999px;font-weight:600}
+.oc-hdr-right{display:flex;flex-direction:column;align-items:flex-end;gap:5px;flex-shrink:0}
+.st{font-size:11.5px;font-weight:600;padding:3px 10px;border-radius:999px;white-space:nowrap}
+.st-nuevo{background:var(--blue-bg);color:var(--blue)}
+.st-prep{background:var(--amber-bg);color:var(--amber)}
+.st-camino{background:var(--violet-bg);color:var(--violet)}
+.st-done{background:var(--green-bg);color:var(--green)}
+.st-cancel{background:var(--red-bg);color:var(--red)}
+.oc-elapsed{font-size:11.5px;color:var(--text3);display:flex;align-items:center;gap:4px}
+.oc-elapsed i{font-size:12px}
+.oc-elapsed.warn{color:var(--amber-mid);font-weight:600}
+.oc-elapsed.late{color:var(--red);font-weight:600;animation:pulse-demora 1.5s ease-in-out infinite}
+
+.oc-progress{display:flex;align-items:center;padding:6px 14px 8px}
+.oc-step{display:flex;flex-direction:column;align-items:center;gap:3px;min-width:0}
+.oc-step span{font-size:10px;color:var(--text3);white-space:nowrap;max-width:74px;overflow:hidden;text-overflow:ellipsis}
+.oc-dot{width:9px;height:9px;border-radius:50%;background:var(--border2);transition:background .3s}
+.oc-step.s-done .oc-dot{background:var(--green)}
+.oc-step.s-active .oc-dot{background:var(--brand);box-shadow:0 0 0 3px var(--brand-soft)}
+.oc-step.s-done span,.oc-step.s-active span{color:var(--text);font-weight:600}
+.oc-line{flex:1;height:2px;background:var(--border);margin:0 4px 13px}
+.oc-line.done{background:var(--green)}
+
+.oc-body{padding:4px 14px 10px;flex:1}
+.oc-items{font-size:13.5px;line-height:1.65;word-break:break-word}
+.oc-note{display:inline-block;margin-top:6px;font-size:12px;background:var(--amber-bg);color:var(--amber);padding:2px 9px;border-radius:6px}
+.oc-info{border-top:1px solid var(--border);padding:9px 14px;font-size:12.5px;color:var(--text2);display:flex;flex-direction:column;gap:5px}
+.oc-info .row{display:flex;align-items:flex-start;gap:7px}
+.oc-info i{font-size:14px;color:var(--text3);margin-top:1px}
+.oc-info a{color:var(--text2);text-decoration:none;border-bottom:1px dashed var(--border2)}
+.oc-info a:hover{color:var(--blue);border-color:var(--blue)}
+.sin-dir{color:var(--text3);font-style:italic}
+
+.altoke{margin:10px 14px 0;font-size:12px;font-weight:600;border-radius:8px;padding:7px 10px;display:flex;gap:7px;align-items:flex-start;line-height:1.5}
+.altoke i{font-size:14px;margin-top:1px;flex-shrink:0}
+.altoke.a-green{background:var(--green-bg);color:var(--green)}
+.altoke.a-violet{background:var(--violet-bg);color:var(--violet)}
+.altoke.a-amber{background:var(--amber-bg);color:var(--amber)}
+
+.oc-foot{border-top:1px solid var(--border);padding:10px 14px;margin-top:10px;display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
+.oc-pay{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.oc-total{font-size:16px;font-weight:600;font-variant-numeric:tabular-nums}
+.pay{font-size:11px;font-weight:600;padding:2px 9px;border-radius:999px;white-space:nowrap}
+.pay.digital{background:var(--violet-bg);color:var(--violet)}
+.pay.cobrar{background:var(--amber-bg);color:var(--amber)}
+.pay.dinc{background:var(--blue-bg);color:var(--blue)}
+.oc-foot-actions{display:flex;gap:6px;align-items:center}
+.btn-primary{display:flex;align-items:center;gap:6px;background:var(--brand);color:#fff;border:none;border-radius:8px;height:32px;padding:0 13px;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap}
+.btn-primary i{font-size:15px}
+.btn-primary:hover{background:var(--brand-dark)}
+.btn-primary:disabled{background:var(--border2);cursor:default}
+.oc-done-lbl{font-size:12.5px;color:var(--text3);font-weight:600}
+
+.menu-wrap{position:relative}
+.dropdown{position:absolute;right:0;top:calc(100% + 4px);background:var(--surface);border:1px solid var(--border);border-radius:10px;box-shadow:0 8px 24px rgba(20,24,16,.12);min-width:190px;padding:4px;display:none;z-index:80}
+.dropdown.open{display:block}
+.dropdown button{display:flex;align-items:center;gap:8px;width:100%;border:none;background:transparent;padding:8px 10px;border-radius:7px;font:inherit;font-size:12.5px;color:var(--text);cursor:pointer;text-align:left}
+.dropdown button i{font-size:15px;color:var(--text3)}
+.dropdown button:hover{background:var(--bg)}
+.dropdown button.danger,.dropdown button.danger i{color:var(--red)}
+.dropdown hr{border:none;border-top:1px solid var(--border);margin:4px 6px}
+
+/* ── Misc ── */
+.empty{text-align:center;padding:50px 20px 60px;color:var(--text3);font-size:14px;grid-column:1/-1}
+.empty i{display:block;font-size:40px;margin-bottom:10px;color:var(--border2)}
+.footer-note{text-align:center;font-size:11.5px;color:var(--text3);padding:14px}
+.toast{position:fixed;bottom:24px;right:24px;background:#1E221B;color:#fff;padding:11px 20px;border-radius:10px;font-size:13px;font-weight:600;box-shadow:0 8px 24px rgba(0,0,0,.25);z-index:200;transform:translateY(80px);opacity:0;transition:all .35s cubic-bezier(.34,1.56,.64,1);display:flex;align-items:center;gap:8px}
+.toast.show{transform:translateY(0);opacity:1}
+
+/* ── Modal delivery ── */
+.dlv-overlay{display:none;position:fixed;inset:0;background:rgba(20,24,16,.45);z-index:300;align-items:center;justify-content:center}
+.dlv-box{background:var(--surface);border-radius:14px;padding:20px 24px;min-width:280px;border:1px solid var(--border)}
+.dlv-box h3{font-size:14px;font-weight:600;margin-bottom:14px;color:var(--text);display:flex;align-items:center;gap:7px}
+.dlv-option{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;cursor:pointer;border:1px solid var(--border);margin-bottom:8px;transition:border-color .15s,background .15s}
+.dlv-option:hover{background:var(--bg)}
+.dlv-option input[type=radio]{accent-color:var(--brand);width:15px;height:15px;cursor:pointer}
+.dlv-option label{font-size:13.5px;font-weight:600;cursor:pointer;flex:1}
+.dlv-btns{display:flex;gap:8px;margin-top:14px;justify-content:flex-end}
+.dlv-cancel{background:transparent;border:1px solid var(--border2);color:var(--text2);padding:8px 16px;border-radius:8px;cursor:pointer;font:inherit;font-size:13px}
+.dlv-confirm{background:var(--brand);color:#fff;border:none;padding:8px 18px;border-radius:8px;cursor:pointer;font:inherit;font-size:13px;font-weight:600}
+
+@media(max-width:640px){
+  .hdr{padding:8px 12px}
+  .hdr-title small{display:none}
+  .searchwrap{min-width:130px}
+  .wrap{padding:12px 10px}
+  .kpis{grid-template-columns:repeat(2,1fr)}
+}
+</style>
+</head>
+<body>
+
+<header class="hdr">
+  <img src="/static/logo.png" alt="Chilango">
+  <div class="hdr-title"><h1>Chilango</h1><small>Panel de operaciones · __FECHA_LABEL__</small></div>
+  <div class="hdr-actions">
+    <div class="searchwrap"><i class="ti ti-search"></i><input id="searchBox" type="search" placeholder="Buscar #, teléfono, producto…" oninput="setSearch(this.value)"></div>
+    <select id="fechaSelect" class="ctl" onchange="if(this.value)location.href='/pedidos?fecha='+encodeURIComponent(this.value)">__FECHAS_OPTIONS__</select>
+    <button class="iconbtn" id="btnSound" onclick="toggleSound()" title="Sonido y notificaciones de pedidos nuevos"><i class="ti ti-bell"></i></button>
+    <div class="menu-wrap">
+      <button class="iconbtn" onclick="toggleMenu('settingsMenu', event)" title="Más opciones"><i class="ti ti-dots-vertical"></i></button>
+      <div class="dropdown" id="settingsMenu">
+        <button onclick="probarNotif()"><i class="ti ti-bell-ringing"></i> Probar notificación</button>
+      </div>
+    </div>
+  </div>
+</header>
+
+<nav class="nav">
+  <a href="/pedidos" class="active"><i class="ti ti-package"></i> Pedidos <span class="nav-badge" id="navBadge">0</span></a>
+  <a href="/admin"><i class="ti ti-message-circle"></i> Conversaciones</a>
+  <a href="/admin/clientes"><i class="ti ti-users"></i> Clientes</a>
+  <a href="/admin/metricas"><i class="ti ti-chart-bar"></i> Métricas</a>
+  <a href="/admin/zonas-delivery"><i class="ti ti-motorbike"></i> Zonas</a>
+  <a href="/admin/menu"><i class="ti ti-tools-kitchen-2"></i> Menú</a>
+</nav>
+
+__PAUSA_BANNER__
+
+<main class="wrap">
+
+  <div class="kpis">
+    <div class="kpi"><div class="lbl">Ventas de hoy</div><div class="val" id="chipTotal">S/ __TOTAL_DIA__</div></div>
+    <div class="kpi"><div class="lbl">Pedidos</div><div class="val"><span id="totalCount">__N_PEDIDOS__</span> <small>· <span id="activosCount">__N_ACTIVOS__</span> activos</small></div></div>
+    <div class="kpi"><div class="lbl">Yape / Plin</div><div class="val" id="cntYapePlin">__CNT_YP__</div></div>
+    <div class="kpi"><div class="lbl">Efectivo</div><div class="val" id="cntEfec">__CNT_EF__</div></div>
+  </div>
+
+  <div class="controls">
+    <div class="seg" id="filterSeg">
+      <button class="active" data-estado="all" onclick="filterCards('all',this)">Todos</button>
+      <button data-estado="Nuevo 🆕" onclick="filterCards('Nuevo 🆕',this)">Nuevos</button>
+      <button data-estado="En preparación 👨‍🍳" onclick="filterCards('En preparación 👨‍🍳',this)">Preparación</button>
+      <button data-estado="En camino 🛵" onclick="filterCards('En camino 🛵',this)">En camino</button>
+      <button data-estado="Entregado ✅" onclick="filterCards('Entregado ✅',this)">Entregados</button>
+      <button data-estado="Cancelado ❌" onclick="filterCards('Cancelado ❌',this)">Cancelados</button>
+    </div>
+    <button class="btn-ghost __PAUSA_CLS__" id="btnPausa" onclick="togglePausa()" data-pausado="__PAUSA_DATA__">__PAUSA_LABEL__</button>
+  </div>
+
+  <div class="agotados __AGOTADOS_OPEN__" id="agotadosBar">
+    <button class="ag-head" onclick="document.getElementById('agotadosBar').classList.toggle('open')">
+      <i class="ti ti-alert-triangle warnico"></i> Productos agotados
+      <span class="cnt" id="agCount"></span>
+      <i class="ti ti-chevron-down chev"></i>
+    </button>
+    <div class="ag-body">
+      __AGOTADOS_CHIPS__
+      <input id="agotadosInput" type="text" value="__AGOTADOS_VAL__" placeholder="otros… (separados por coma)" onkeydown="if(event.key==='Enter')guardarAgotados()">
+      <button class="ag-save" onclick="guardarAgotados()">Guardar</button>
+      <span id="agotadosStatus" style="font-size:12px;color:var(--green);display:none"><i class="ti ti-check"></i> Guardado</span>
+    </div>
+  </div>
+
+  <div class="cost-banner" id="costBanner">
+    <div class="cost-banner-title"><i class="ti ti-motorbike"></i> Consultas de costo pendientes <span class="cost-badge" id="costBadge">0</span></div>
+    <div id="costList"></div>
+  </div>
+
+  <div class="grid" id="ordersGrid"></div>
+  <div class="footer-note" id="lastRefresh">Actualización automática cada 10 s</div>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<div class="dlv-overlay" id="dlvModal" onclick="if(event.target===this)closeDlvModal()">
+  <div class="dlv-box">
+    <h3><i class="ti ti-motorbike"></i> <span id="dlvTitle">Llamar delivery</span></h3>
+    <input type="hidden" id="dlvOrderId" value="">
+    <div id="dlvOpts"></div>
+    <div id="dlvManual" style="display:none">
+      <p style="font-size:13px;color:var(--text2);margin-bottom:8px">Número WhatsApp del motorizado (sin +):</p>
+      <input id="dlvPhoneInput" type="tel" placeholder="ej: 51987654321"
+             style="width:100%;border:1px solid var(--border);border-radius:8px;padding:9px 12px;font:inherit;font-size:14px;outline:none"
+             onkeydown="if(event.key==='Enter')confirmarDelivery()">
+    </div>
+    <div class="dlv-btns">
+      <button class="dlv-cancel" onclick="closeDlvModal()">Cancelar</button>
+      <button class="dlv-confirm" onclick="confirmarDelivery()">Enviar</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const INIT_PEDIDOS = __PEDIDOS_JSON__;
+const DELIVERIES   = __DELIVERIES_JS__;
+const STEP_IDX = {"Nuevo 🆕":0,"En preparación 👨‍🍳":1,"En camino 🛵":2,"Entregado ✅":3};
+const STEP_LBL = ["Nuevo","Preparación","En camino","Entregado"];
+const ST_META = {
+  "Nuevo 🆕":            {label:"Nuevo",          cls:"st-nuevo",  nextLabel:"Empezar preparación", nextIcon:"ti-chef-hat"},
+  "En preparación 👨‍🍳": {label:"En preparación", cls:"st-prep",   nextLabel:"Marcar en camino",    nextIcon:"ti-motorbike"},
+  "En camino 🛵":        {label:"En camino",      cls:"st-camino", nextLabel:"Marcar entregado",    nextIcon:"ti-check"},
+  "Entregado ✅":        {label:"Entregado",      cls:"st-done"},
+  "Cancelado ❌":        {label:"Cancelado",      cls:"st-cancel"},
+};
+const TAB_LABELS = {"all":"Todos","Nuevo 🆕":"Nuevos","En preparación 👨‍🍳":"Preparación","En camino 🛵":"En camino","Entregado ✅":"Entregados","Cancelado ❌":"Cancelados"};
+
+let knownIds  = new Set();
+let curFilter = 'all';
+let audioCtx  = null;
+let searchQ   = '';
+let lastPayload  = '';
+let lastRenderTs = 0;
+let soundOn = localStorage.getItem('ch_sound') !== '0';
+
+function esc(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+/* ── Sonido ── */
+function playBeep() {
+  try {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    [880, 1100, 1320].forEach((f, i) => {
+      const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.connect(g); g.connect(audioCtx.destination);
+      o.type = 'sine';
+      o.frequency.value = f;
+      g.gain.setValueAtTime(0.25, audioCtx.currentTime + i*0.12);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + i*0.12 + 0.25);
+      o.start(audioCtx.currentTime + i*0.12);
+      o.stop(audioCtx.currentTime + i*0.12 + 0.3);
+    });
+  } catch(e) {}
+}
+
+function initSoundBtn() {
+  const b = document.getElementById('btnSound');
+  if (!b) return;
+  b.classList.toggle('off', !soundOn);
+  b.innerHTML = soundOn ? '<i class="ti ti-bell"></i>' : '<i class="ti ti-bell-off"></i>';
+}
+function toggleSound() {
+  soundOn = !soundOn;
+  localStorage.setItem('ch_sound', soundOn ? '1' : '0');
+  if (soundOn) {
+    playBeep();
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission();
+    }
+  }
+  initSoundBtn();
+}
+initSoundBtn();
+
+function notifyBrowser(msg) {
+  if (!('Notification' in window) || Notification.permission !== 'granted' || !document.hidden) return;
+  try {
+    const n = new Notification('Chilango — Pedidos', { body: msg, tag: 'chilango-new-order' });
+    n.onclick = () => { window.focus(); n.close(); };
+  } catch(e) {}
+}
+
+/* ── Toast ── */
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 3500);
+}
+
+/* ── Menús desplegables ── */
+function toggleMenu(id, ev) {
+  if (ev) ev.stopPropagation();
+  document.querySelectorAll('.dropdown.open').forEach(d => { if (d.id !== id) d.classList.remove('open'); });
+  const el = document.getElementById(id);
+  if (el) el.classList.toggle('open');
+}
+document.addEventListener('click', () => {
+  document.querySelectorAll('.dropdown.open').forEach(d => d.classList.remove('open'));
+});
+
+/* ── Filtro por estado + búsqueda ── */
+function applyFilters() {
+  document.querySelectorAll('.card').forEach(c => {
+    const matchEstado = curFilter === 'all' || c.dataset.estado === curFilter;
+    const matchQ = !searchQ || c.textContent.toLowerCase().includes(searchQ);
+    c.classList.toggle('hidden', !(matchEstado && matchQ));
+  });
+}
+function filterCards(estado, btn) {
+  curFilter = estado;
+  document.querySelectorAll('#filterSeg button').forEach(t => t.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  applyFilters();
+}
+function setSearch(q) {
+  searchQ = (q || '').trim().toLowerCase();
+  applyFilters();
+}
+
+/* ── Acciones AJAX ── */
+async function cambiarEstado(id, nuevoEstado) {
+  const card = document.getElementById('card-' + id);
+  const btn  = card ? card.querySelector('.btn-primary') : null;
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader-2"></i> …'; }
+  try {
+    const r = await fetch('/api/pedidos/estado', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({order_id: id, estado: nuevoEstado})
+    });
+    if (r.status === 401) { location.reload(); return; }
+    if (!r.ok) throw new Error(await r.text());
+    await refreshOrders(true);
+  } catch(e) {
+    alert('Error al actualizar: ' + e.message);
+    await refreshOrders(true);
+  }
+}
+
+async function cancelarPedido(id) {
+  if (!confirm('¿Cancelar el pedido #' + id + '? Esta acción no se puede deshacer.')) return;
+  try {
+    const r = await fetch('/api/pedidos/estado', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({order_id: id, estado: 'Cancelado ❌'})
+    });
+    if (r.status === 401) { location.reload(); return; }
+    if (!r.ok) throw new Error(await r.text());
+    await refreshOrders(true);
+  } catch(e) {
+    alert('Error al cancelar: ' + e.message);
+  }
+}
+
+async function eliminarPedido(id) {
+  if (!confirm('¿Eliminar este pedido? No se puede deshacer.')) return;
+  try {
+    const r = await fetch('/api/pedidos/eliminar', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({order_id: id})
+    });
+    if (r.status === 401) { location.reload(); return; }
+    const card = document.getElementById('card-' + id);
+    if (card) { card.style.opacity='0'; setTimeout(()=>card.remove(),300); }
+    knownIds.delete(id);
+  } catch(e) { alert('Error al eliminar: ' + e.message); }
+}
+
+async function llamarDelivery(orderId) {
+  try {
+    const r = await fetch('/api/pedidos/llamar-delivery', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({order_id: orderId})
+    });
+    if (r.status === 401) { location.reload(); return; }
+    const data = await r.json();
+    if (data.status === 'ok') {
+      showToast('Solicitud de delivery en curso');
+    } else {
+      alert('Error: ' + (data.msg || 'No se pudo enviar'));
+    }
+  } catch(e) {
+    alert('Error: ' + e.message);
+  }
+}
+
+async function avisarListo(orderId) {
+  try {
+    const r = await fetch('/api/pedidos/aviso-listo', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({order_id: orderId})
+    });
+    if (r.status === 401) { location.reload(); return; }
+    const data = await r.json();
+    if (data.status === 'ok') {
+      showToast('Cliente notificado — pedido listo esperando delivery');
+    } else {
+      alert('Error: ' + (data.msg || 'No se pudo enviar'));
+    }
+  } catch(e) {
+    alert('Error: ' + e.message);
+  }
+}
+
+/* ── Modal delivery (consulta de costo manual) ── */
+function _openDlvModal(orderId, mode) {
+  document.getElementById('dlvOrderId').value = orderId;
+  const modal = document.getElementById('dlvModal');
+  modal.dataset.mode = mode;
+  document.getElementById('dlvTitle').textContent = mode === 'cost' ? 'Consultar costo delivery' : 'Llamar delivery';
+  const optsEl = document.getElementById('dlvOpts');
+  optsEl.innerHTML = '';
+  if (DELIVERIES && DELIVERIES.length > 0) {
+    document.getElementById('dlvManual').style.display = 'none';
+    DELIVERIES.forEach((d, i) => {
+      optsEl.innerHTML += `<div class="dlv-option">
+        <input type="radio" name="dlvChoice" id="dlv${i}" value="${d.phone}" ${i===0?'checked':''}>
+        <label for="dlv${i}">${esc(d.name)}</label>
+      </div>`;
+    });
+  } else {
+    document.getElementById('dlvManual').style.display = 'block';
+    document.getElementById('dlvPhoneInput').value = '';
+  }
+  modal.style.display = 'flex';
+  setTimeout(() => {
+    const inp = document.getElementById('dlvPhoneInput');
+    if (inp && inp.offsetParent) inp.focus();
+  }, 100);
+}
+
+function consultarCostoDelivery(orderId) { _openDlvModal(orderId, 'cost'); }
+
+function closeDlvModal() {
+  document.getElementById('dlvModal').style.display = 'none';
+}
+
+async function _enviarDelivery(orderId, phone, name, endpoint, toastPrefix) {
+  try {
+    const r = await fetch(endpoint, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({order_id: orderId, delivery_phone: phone})
+    });
+    if (r.status === 401) { location.reload(); return; }
+    const data = await r.json();
+    if (data.status === 'ok') {
+      showToast(toastPrefix + (data.delivery || name));
+    } else {
+      alert('Error: ' + (data.msg || 'No se pudo enviar'));
+    }
+  } catch(e) {
+    alert('Error: ' + e.message);
+  }
+}
+
+function confirmarDelivery() {
+  const orderId  = +document.getElementById('dlvOrderId').value;
+  const mode     = document.getElementById('dlvModal').dataset.mode || 'delivery';
+  const endpoint = mode === 'cost' ? '/api/pedidos/consultar-delivery' : '/api/pedidos/llamar-delivery';
+  const toastPrefix = mode === 'cost' ? 'Consulta enviada a ' : 'Solicitud enviada a ';
+  let phone, name;
+  const manualDiv = document.getElementById('dlvManual');
+  if (manualDiv && manualDiv.style.display !== 'none') {
+    phone = (document.getElementById('dlvPhoneInput').value || '').trim().replace(/[^0-9]/g,'');
+    if (!phone || phone.length < 8) { alert('Ingresa un número de WhatsApp válido (solo dígitos)'); return; }
+    name = 'Delivery';
+  } else {
+    const sel = document.querySelector('input[name="dlvChoice"]:checked');
+    if (!sel) { alert('Selecciona un servicio de delivery'); return; }
+    const d = DELIVERIES.find(d => d.phone === sel.value);
+    phone = d.phone; name = d.name;
+  }
+  closeDlvModal();
+  _enviarDelivery(orderId, phone, name, endpoint, toastPrefix);
+}
+
+/* ── Construir tarjeta ── */
+function buildCard(p) {
+  const estado = p.estado || 'Nuevo 🆕';
+  const meta   = ST_META[estado] || {label: estado, cls: 'st-nuevo'};
+  const sIdx   = STEP_IDX[estado] !== undefined ? STEP_IDX[estado] : -1;
+
+  const steps = STEP_LBL.map((lbl, i) => {
+    const cls  = i < sIdx ? 'oc-step s-done' : (i === sIdx ? 'oc-step s-active' : 'oc-step');
+    const line = i < STEP_LBL.length - 1
+      ? `<div class="oc-line${i < sIdx ? ' done' : ''}"></div>`
+      : '';
+    return `<div class="${cls}"><div class="oc-dot"></div><span>${lbl}</span></div>${line}`;
+  }).join('');
+
+  const esRecojo  = (p.es_recojo === true || p.es_recojo === 1);
+  const esCancel  = estado === 'Cancelado ❌';
+  const esActivo  = !['Entregado ✅','Cancelado ❌'].includes(estado);
+  const siguiente = p.siguiente_estado_raw || null;
+
+  const entrega = esRecojo
+    ? '<i class="ti ti-building-store"></i> Recojo'
+    : '<i class="ti ti-motorbike"></i> Delivery';
+  const modBadge = p.modificado ? '<span class="oc-mod">Editado</span>' : '';
+
+  let elapsedChip = '';
+  if (esActivo && p.hora) {
+    const [eh, em] = p.hora.split(':').map(Number);
+    const nowE = new Date();
+    let diffE = (nowE.getHours() * 60 + nowE.getMinutes()) - (eh * 60 + em);
+    if (diffE < 0) diffE += 1440;
+    if (diffE >= 0 && diffE < 600) {
+      const eCls = diffE >= 45 ? 'late' : (diffE >= 25 ? 'warn' : '');
+      elapsedChip = `<span class="oc-elapsed ${eCls}"><i class="ti ti-hourglass-high"></i>${diffE} min</span>`;
+    }
+  }
+
+  const itemsList = (p.items || '').split(/,(?![^(]*\))/).map(s => s.trim()).filter(Boolean);
+  const itemsHtml = itemsList.length > 0
+    ? itemsList.map(i => esc(i)).join('<br>')
+    : esc(p.items || '');
+
+  const notaHtml = (p.notas || '').trim()
+    ? `<div><span class="oc-note">Nota: ${esc(p.notas)}</span></div>`
+    : '';
+
+  let infoRows = '';
+  if (esRecojo) {
+    infoRows += `<div class="row"><i class="ti ti-building-store"></i><span>El cliente retira en el local</span></div>`;
+  } else if (p.direccion) {
+    const mapsUrl = 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(p.direccion + ', Tacna, Perú');
+    infoRows += `<div class="row"><i class="ti ti-map-pin"></i><a href="${mapsUrl}" target="_blank" title="Ver en Google Maps">${esc(p.direccion)}</a></div>`;
+  } else {
+    infoRows += `<div class="row"><i class="ti ti-map-pin"></i><span class="sin-dir">Sin dirección</span></div>`;
+  }
+  infoRows += `<div class="row"><i class="ti ti-phone"></i><a href="https://wa.me/${esc(p.phone)}" target="_blank" title="Abrir chat de WhatsApp">+${esc(p.phone)}</a></div>`;
+
+  const metodo    = p.metodo_pago || 'Efectivo';
+  const esDigital = ['Yape/Plin','Yape','Plin'].includes(metodo);
+  const tieneDeliveryPago = (p.items || '').toLowerCase().includes('delivery:');
+  const payBadge = esDigital
+    ? `<span class="pay digital">${esc(metodo)} · pagado</span>`
+    : `<span class="pay cobrar">${esc(metodo)}${esActivo ? ' · cobrar al entregar' : ''}</span>`;
+  const dincBadge = tieneDeliveryPago ? '<span class="pay dinc">Delivery pagado</span>' : '';
+
+  let altoke = '';
+  if (estado === 'En preparación 👨‍🍳' && !esRecojo) {
+    if (esDigital && tieneDeliveryPago) {
+      altoke = `<div class="altoke a-green"><i class="ti ti-circle-check"></i><span>Dile al moto: ya pagó TODO — NO cobrar nada al cliente</span></div>`;
+    } else if (esDigital) {
+      altoke = `<div class="altoke a-violet"><i class="ti ti-device-mobile"></i><span>Dile al moto: pagó en digital — cobrar SOLO el delivery</span></div>`;
+    } else {
+      altoke = `<div class="altoke a-amber"><i class="ti ti-cash"></i><span>Dile al moto: pago en efectivo — cobrar ${esc(p.total)} + delivery</span></div>`;
+    }
+  }
+
+  let primaryBtn = '';
+  if (esActivo && siguiente) {
+    let lbl  = meta.nextLabel || ('Pasar a ' + (ST_META[siguiente] ? ST_META[siguiente].label : siguiente));
+    let icon = meta.nextIcon || 'ti-arrow-right';
+    if (esRecojo && siguiente === 'En camino 🛵') { lbl = 'Listo p/ retirar'; icon = 'ti-package'; }
+    primaryBtn = `<button class="btn-primary" data-next="${esc(siguiente)}" onclick="cambiarEstado(${p.id}, this.dataset.next)"><i class="ti ${icon}"></i>${lbl}</button>`;
+  } else if (!esActivo) {
+    primaryBtn = `<span class="oc-done-lbl">${esCancel ? 'Cancelado' : 'Entregado'}</span>`;
+  }
+
+  let menuItems = '';
+  if (esActivo && !esRecojo) {
+    menuItems += `<button onclick="llamarDelivery(${p.id})"><i class="ti ti-motorbike"></i> Llamar delivery</button>`;
+  }
+  if (estado === 'En preparación 👨‍🍳' && !esRecojo) {
+    menuItems += `<button onclick="avisarListo(${p.id})"><i class="ti ti-package"></i> Avisar pedido listo</button>`;
+  }
+  menuItems += `<button onclick="window.open('/admin/imprimir/${p.id}','_blank')"><i class="ti ti-printer"></i> Imprimir recibo</button>`;
+  if (esActivo) {
+    menuItems += `<hr><button class="danger" onclick="cancelarPedido(${p.id})"><i class="ti ti-x"></i> Cancelar pedido</button>`;
+  } else {
+    menuItems += `<hr>`;
+  }
+  menuItems += `<button class="danger" onclick="eliminarPedido(${p.id})"><i class="ti ti-trash"></i> Eliminar</button>`;
+
+  return `<div class="card" id="card-${p.id}" data-estado="${esc(estado)}">
+  <div class="oc-hdr">
+    <div>
+      <div class="oc-title">Pedido <span class="num">#${p.id}</span></div>
+      <div class="oc-meta"><span><i class="ti ti-clock"></i> ${esc(p.hora)}</span><span>${entrega}</span>${modBadge}</div>
+    </div>
+    <div class="oc-hdr-right">
+      <span class="st ${meta.cls}">${meta.label}</span>
+      ${elapsedChip}
+    </div>
+  </div>
+  <div class="oc-progress">${steps}</div>
+  <div class="oc-body">
+    <div class="oc-items">${itemsHtml}</div>
+    ${notaHtml}
+  </div>
+  <div class="oc-info">${infoRows}</div>
+  ${altoke}
+  <div class="oc-foot">
+    <div class="oc-pay">
+      <span class="oc-total">${esc(p.total)}</span>
+      ${payBadge}
+      ${dincBadge}
+    </div>
+    <div class="oc-foot-actions">
+      ${primaryBtn}
+      <div class="menu-wrap">
+        <button class="iconbtn" onclick="toggleMenu('cardMenu-${p.id}', event)" title="Más acciones"><i class="ti ti-dots"></i></button>
+        <div class="dropdown" id="cardMenu-${p.id}">${menuItems}</div>
+      </div>
+    </div>
+  </div>
+</div>`;
+}
+
+/* ── Render + refresh ── */
+function processPedidos(pedidos, force) {
+  const newOnes = pedidos.filter(p => !knownIds.has(p.id));
+  if (newOnes.length > 0 && knownIds.size > 0) {
+    if (soundOn) playBeep();
+    const msg = newOnes.length === 1
+      ? `Pedido #${newOnes[0].id} — ${(newOnes[0].items || '').slice(0, 60)}`
+      : `${newOnes.length} nuevos pedidos llegaron`;
+    showToast(newOnes.length === 1 ? 'Nuevo pedido llegó' : newOnes.length + ' nuevos pedidos');
+    notifyBrowser(msg);
+    document.title = '(1) Nuevo pedido — Chilango';
+    setTimeout(() => { document.title = 'Pedidos — Chilango'; }, 5000);
+  }
+  knownIds = new Set(pedidos.map(p => p.id));
+
+  const payload = JSON.stringify(pedidos);
+  const changed = payload !== lastPayload;
+  const menuAbierto = !!document.querySelector('.dropdown.open');
+  const mustRender = force || changed || ((Date.now() - lastRenderTs) > 60000 && !menuAbierto);
+  if (mustRender) {
+    lastPayload = payload;
+    lastRenderTs = Date.now();
+    const grid = document.getElementById('ordersGrid');
+    if (pedidos.length === 0) {
+      const fechaSel2 = document.getElementById('fechaSelect')?.value || '';
+      grid.innerHTML = `<div class="empty"><i class="ti ti-clipboard-list"></i>${fechaSel2 ? 'Sin pedidos para ' + esc(fechaSel2) : 'No hay pedidos hoy todavía'}</div>`;
+    } else {
+      grid.innerHTML = pedidos.map(buildCard).join('');
+    }
+  }
+
+  const nNuevos = pedidos.filter(p => (p.estado||'').startsWith('Nuevo')).length;
+  const navBadge = document.getElementById('navBadge');
+  if (navBadge) {
+    navBadge.textContent = nNuevos;
+    navBadge.style.display = nNuevos > 0 ? 'inline-flex' : 'none';
+  }
+
+  const tabCounts = {
+    'all': pedidos.length,
+    'Nuevo 🆕': nNuevos,
+    'En preparación 👨‍🍳': pedidos.filter(p => p.estado === 'En preparación 👨‍🍳').length,
+    'En camino 🛵': pedidos.filter(p => p.estado === 'En camino 🛵').length,
+    'Entregado ✅': pedidos.filter(p => p.estado === 'Entregado ✅').length,
+    'Cancelado ❌': pedidos.filter(p => p.estado === 'Cancelado ❌').length,
+  };
+  document.querySelectorAll('#filterSeg button').forEach(tab => {
+    const e = tab.dataset.estado;
+    if (e in tabCounts) tab.textContent = `${TAB_LABELS[e]} ${tabCounts[e]}`;
+    if (e === curFilter) tab.classList.add('active');
+  });
+
+  applyFilters();
+
+  document.getElementById('totalCount').textContent = pedidos.length;
+  const activos = pedidos.filter(p => !['Entregado ✅','Cancelado ❌'].includes(p.estado)).length;
+  document.getElementById('activosCount').textContent = activos;
+
+  const noCancel = pedidos.filter(p => (p.estado || '') !== 'Cancelado ❌');
+  const totalDia = noCancel.reduce((sum, p) => {
+    const t = parseFloat((p.total || '0').replace('S/', '').replace(',','.').trim()) || 0;
+    return sum + t;
+  }, 0);
+  const chipTotal = document.getElementById('chipTotal');
+  if (chipTotal) chipTotal.textContent = `S/ ${totalDia.toFixed(2)}`;
+
+  const cntYP = noCancel.filter(p => ['Yape/Plin','Yape','Plin'].includes(p.metodo_pago)).length;
+  const cntEf = noCancel.filter(p => !['Yape/Plin','Yape','Plin'].includes(p.metodo_pago)).length;
+  const chipYP = document.getElementById('cntYapePlin');
+  const chipEf = document.getElementById('cntEfec');
+  if (chipYP) chipYP.textContent = cntYP;
+  if (chipEf) chipEf.textContent = cntEf;
+}
+
+async function refreshOrders(force) {
+  try {
+    const fechaSel = document.getElementById('fechaSelect')?.value || '';
+    const url = fechaSel ? `/api/pedidos?fecha=${encodeURIComponent(fechaSel)}` : '/api/pedidos';
+    const r = await fetch(url, {credentials:'same-origin'});
+    if (r.status === 401) { location.reload(); return; }
+    const data = await r.json();
+    processPedidos(data.pedidos, force);
+    const now = new Date().toLocaleTimeString('es-PE',{hour:'2-digit',minute:'2-digit'});
+    document.getElementById('lastRefresh').textContent = `Actualizado ${now}`;
+  } catch(e) {
+    console.warn('Refresh error:', e);
+  }
+}
+
+function probarNotif() {
+  fetch('/admin/test-notify', {method:'POST',credentials:'same-origin'})
+    .then(r=>r.json())
+    .then(()=>showToast('Solicitud enviada — revisa logs de Railway'))
+    .catch(e=>alert('Error: '+e));
+}
+
+/* ── Agotados ── */
+function _agUpdateCount() {
+  const inp = document.getElementById('agotadosInput');
+  const n = inp.value.split(',').map(s => s.trim()).filter(Boolean).length;
+  const c = document.getElementById('agCount');
+  c.textContent = n;
+  c.style.display = n > 0 ? 'inline-block' : 'none';
+}
+_agUpdateCount();
+
+function toggleAgotado(btn, item) {
+  const inp = document.getElementById('agotadosInput');
+  const parts = inp.value.split(',').map(s => s.trim()).filter(Boolean);
+  const idx = parts.findIndex(p => p.toLowerCase() === item.toLowerCase());
+  if (idx === -1) {
+    parts.push(item);
+    btn.classList.add('on');
+  } else {
+    parts.splice(idx, 1);
+    btn.classList.remove('on');
+  }
+  inp.value = parts.join(', ');
+  guardarAgotados();
+}
+
+async function guardarAgotados() {
+  const val = document.getElementById('agotadosInput').value.trim();
+  try {
+    const r = await fetch('/api/config/agotados', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({value: val})
+    });
+    const d = await r.json();
+    if (d.status === 'ok') {
+      const st = document.getElementById('agotadosStatus');
+      st.style.display = 'inline';
+      setTimeout(() => st.style.display = 'none', 2000);
+      _agUpdateCount();
+    }
+  } catch(e) { alert('Error: ' + e.message); }
+}
+
+async function togglePausa() {
+  const btn = document.getElementById('btnPausa');
+  const pausado = btn.dataset.pausado === '1';
+  const nuevo = pausado ? '0' : '1';
+  try {
+    const r = await fetch('/api/config/pausa', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({value: nuevo})
+    });
+    const d = await r.json();
+    if (d.status === 'ok') location.reload();
+  } catch(e) { alert('Error: ' + e.message); }
+}
+
+/* ── Consultas de costo pendientes ── */
+async function checkPendingCostQueries() {
+  try {
+    const r = await fetch('/api/delivery/pendientes', {credentials:'same-origin'});
+    if (!r.ok) return;
+    const data = await r.json();
+    renderPendingCostQueries(data.pendientes || []);
+  } catch(e) { console.warn('CostQueries error:', e); }
+}
+
+function renderPendingCostQueries(queries) {
+  const banner = document.getElementById('costBanner');
+  const list   = document.getElementById('costList');
+  const badge  = document.getElementById('costBadge');
+  if (!banner || !list) return;
+  if (queries.length === 0) {
+    banner.style.display = 'none';
+    return;
+  }
+  banner.style.display = 'block';
+  badge.textContent = queries.length;
+  list.innerHTML = queries.map(q => {
+    const sugg = q.sugerencia
+      ? `<span class="cost-sugg">Zona similar: S/ ${q.sugerencia.costo.toFixed(2)} (${q.sugerencia.count} ${q.sugerencia.count === 1 ? 'vez' : 'veces'})</span>`
+      : '';
+    const inputId = 'costInput_' + q.client_phone;
+    return `<div class="cost-card">
+      <div class="cost-info">
+        <strong>+${esc(q.client_phone)}</strong><br>
+        <i class="ti ti-map-pin"></i> ${esc(q.direccion || 'Sin especificar')}<br>
+        <i class="ti ti-shopping-cart"></i> ${esc(q.items || '—')}<br>
+        Subtotal: <strong>${esc(q.subtotal || '—')}</strong>
+        ${sugg}
+      </div>
+      <div class="cost-actions">
+        <input class="cost-input" id="${inputId}" type="number" min="0" step="0.5"
+          placeholder="S/ costo…"
+          value="${q.sugerencia ? q.sugerencia.costo : ''}"
+          onkeydown="if(event.key==='Enter')enviarCostoCliente('${esc(q.client_phone)}','${esc(q.subtotal)}')">
+        <button class="cost-btn" onclick="enviarCostoCliente('${esc(q.client_phone)}','${esc(q.subtotal)}')">
+          Enviar al cliente
+        </button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function enviarCostoCliente(phone, subtotalStr) {
+  const inputEl = document.getElementById('costInput_' + phone);
+  const monto = parseFloat((inputEl ? inputEl.value : '') || '');
+  if (isNaN(monto) || monto <= 0) {
+    alert('Ingresa un monto de delivery válido (ej: 7)');
+    if (inputEl) inputEl.focus();
+    return;
+  }
+  try {
+    const r = await fetch('/api/delivery/enviar-costo', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({phone, monto, subtotal: subtotalStr})
+    });
+    if (r.status === 401) { location.reload(); return; }
+    const data = await r.json();
+    if (data.status === 'ok') {
+      showToast('Costo enviado al cliente +' + phone);
+      checkPendingCostQueries();
+    } else {
+      alert('Error: ' + (data.msg || 'No se pudo enviar'));
+    }
+  } catch(e) { alert('Error: ' + e.message); }
+}
+
+/* ── Inicio ── */
+processPedidos(INIT_PEDIDOS, true);
+setInterval(refreshOrders, 10000);
+checkPendingCostQueries();
+setInterval(checkPendingCostQueries, 15000);
+</script>
+</body></html>"""
+
+
 @app.get("/pedidos", response_class=HTMLResponse)
 async def pedidos_panel(
     credentials: HTTPBasicCredentials = Depends(verificar_admin),
@@ -977,28 +1767,21 @@ async def pedidos_panel(
     PERU_TZ = timezone(timedelta(hours=-5))
     hoy = datetime.now(PERU_TZ).strftime("%d/%m/%Y")
 
-    # Determinar qué fecha mostrar
     fecha_sel = fecha if fecha else hoy
 
-    # Cargar pedidos según la fecha seleccionada
     if fecha_sel == hoy:
         pedidos = db.get_orders_today()
     else:
         pedidos = db.get_orders_for_date(fecha_sel)
+    pedidos = _enrich_pedidos(pedidos)
 
-    # Fechas disponibles para el selector (siempre incluye hoy aunque no tenga pedidos)
     fechas_raw = db.get_available_dates()
     fechas_disponibles = fechas_raw if hoy in fechas_raw else [hoy] + fechas_raw
 
-    def _cnt(e): return sum(1 for p in pedidos if (p.get("estado") or "Nuevo 🆕") == e)
-    count_nuevos   = _cnt("Nuevo 🆕")
-    count_prep     = _cnt("En preparación 👨‍🍳")
-    count_camino   = _cnt("En camino 🛵")
-    count_entregado = _cnt("Entregado ✅")
-    count_cancel   = _cnt("Cancelado ❌")
-    total_activos  = len(pedidos) - count_entregado - count_cancel
+    count_entregado = sum(1 for p in pedidos if p.get("estado") == "Entregado ✅")
+    count_cancel    = sum(1 for p in pedidos if p.get("estado") == "Cancelado ❌")
+    total_activos   = len(pedidos) - count_entregado - count_cancel
 
-    # Total acumulado del día: todo menos cancelados (incluye entregados)
     import re as _re_total
     def _safe_total(val: str) -> float:
         try:
@@ -1015,995 +1798,51 @@ async def pedidos_panel(
     cnt_yapeplin = sum(1 for p in pedidos if p.get("metodo_pago") in ("Yape/Plin", "Yape", "Plin") and p.get("estado") != "Cancelado ❌")
     cnt_efec = sum(1 for p in pedidos if p.get("metodo_pago") not in ("Yape/Plin", "Yape", "Plin") and p.get("estado") != "Cancelado ❌")
 
-    if pedidos:
-        cards = "".join(_render_card(p) for p in pedidos)
-    elif fecha_sel == hoy:
-        cards = '<div class="empty">No hay pedidos hoy todavía 🌮</div>'
-    else:
-        cards = f'<div class="empty">Sin pedidos para {html.escape(fecha_sel)} 🌮</div>'
-
     agotados_actual = db.get_config("productos_agotados", "")
     bot_pausado = db.get_config("bot_pausado", "0") == "1"
 
-    # Inject Python data as JS constants
-    estados_js    = json.dumps(ESTADOS)
-    badge_js      = json.dumps(ESTADO_BADGE)
-    bg_js         = json.dumps(ESTADO_COLORS)
-    step_idx_js   = json.dumps(STEP_IDX)
-    step_lbl_js   = json.dumps(STEP_LABELS)
-    deliveries_js = json.dumps(DELIVERIES)
-
-    return f"""<!DOCTYPE html>
-<html lang="es">
-<head>
-<title>Pedidos — Chilango</title>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<style>
-*{{box-sizing:border-box;margin:0;padding:0}}
-body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f0f2f5;min-height:100vh}}
-
-/* ── Header ── */
-.hdr{{background:#2D5016;color:white;padding:10px 18px;display:flex;align-items:center;gap:12px;position:sticky;top:0;z-index:50;box-shadow:0 2px 8px rgba(0,0,0,.25)}}
-.hdr img{{height:38px;border-radius:8px}}
-.hdr-title{{flex:1}}
-.hdr-title h1{{font-size:16px;font-weight:700}}
-.hdr-title small{{font-size:11px;opacity:.7}}
-.hdr-right{{display:flex;align-items:center;gap:10px;flex-wrap:wrap}}
-.chip{{background:rgba(255,255,255,.18);border-radius:20px;padding:5px 13px;font-size:13px;font-weight:700;white-space:nowrap}}
-.chip.yape{{background:#6c3d98}}
-.chip.plin{{background:#0066cc}}
-.chip.efec{{background:#2D5016;border:1px solid rgba(255,255,255,.3)}}
-
-/* ── Nav ── */
-.nav{{background:#1b3a0e;display:flex;overflow-x:auto;-webkit-overflow-scrolling:touch}}
-.nav a{{color:rgba(255,255,255,.7);text-decoration:none;padding:9px 18px;font-size:13px;transition:background .15s;white-space:nowrap}}
-.nav a:hover,.nav a.active{{color:#fff;background:rgba(255,255,255,.12)}}
-@media(max-width:600px){{
-  .hdr{{padding:8px 12px;gap:8px}}
-  .hdr img{{height:32px}}
-  .chip{{font-size:11px;padding:4px 10px}}
-  .grid{{padding:10px;gap:10px}}
-}}
-
-/* ── Toolbar ── */
-.toolbar{{background:#fff;padding:10px 16px;display:flex;align-items:center;gap:10px;border-bottom:1px solid #e0e0e0;flex-wrap:wrap}}
-.toolbar-info{{font-size:13px;color:#555;flex:1}}
-.toolbar-info strong{{color:#2D5016}}
-.btn-test{{background:#6c3d98;color:#fff;border:none;padding:7px 16px;border-radius:20px;cursor:pointer;font-size:12px;font-weight:600}}
-.btn-test:hover{{background:#5a3180}}
-
-/* ── Filtros ── */
-.filters{{background:#fff;padding:8px 16px;border-bottom:1px solid #e0e0e0;display:flex;gap:6px;overflow-x:auto;-webkit-overflow-scrolling:touch}}
-.tab{{border:none;background:#f0f2f5;color:#555;padding:6px 14px;border-radius:20px;cursor:pointer;font-size:12px;font-weight:600;white-space:nowrap;transition:all .15s}}
-.tab:hover{{background:#e0e0e0}}
-.tab.active{{background:#2D5016;color:#fff}}
-
-/* ── Búsqueda y sonido ── */
-.search-box{{border:1px solid #ddd;border-radius:20px;padding:6px 14px;font-size:13px;outline:none;min-width:170px;flex:1;max-width:280px;transition:border-color .15s}}
-.search-box:focus{{border-color:#2D5016;box-shadow:0 0 0 2px rgba(45,80,22,.1)}}
-.btn-sound{{background:#fff;border:1px solid #ccc;border-radius:20px;padding:6px 12px;cursor:pointer;font-size:13px;font-weight:600;color:#555;transition:all .15s;white-space:nowrap}}
-.btn-sound.on{{background:#e8f5e9;border-color:#2E7D32;color:#2E7D32}}
-.btn-sound.off{{background:#f5f5f5;color:#aaa;text-decoration:line-through}}
-
-/* ── Grid de tarjetas ── */
-.grid{{padding:14px;display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:12px;max-width:1100px;margin:0 auto}}
-
-/* ══ Variables de marca Chilango ══════════════════════════════ */
-:root{{
-  --ch-red:#D32F2F;       /* rojo vibrante */
-  --ch-red-bg:#FFEBEE;
-  --ch-yellow:#F9A825;    /* amarillo dorado */
-  --ch-yellow-bg:#FFFDE7;
-  --ch-green:#2E7D32;     /* verde menta */
-  --ch-green-bg:#E8F5E9;
-  --ch-purple:#6A1B9A;    /* morado oscuro */
-  --ch-purple-bg:#F3E5F5;
-  --ch-blue:#1565C0;      /* azul vibrante */
-  --ch-blue-bg:#E3F2FD;
-  --ch-orange:#E65100;
-  --ch-orange-bg:#FFF3E0;
-  --ch-text:#333;
-  --ch-text2:#555;
-  --ch-text3:#888;
-  --ch-border:#EEEEEE;
-  --ch-shadow:0 3px 14px rgba(0,0,0,.10);
-}}
-
-/* ── Tarjeta ── */
-@keyframes card-in{{from{{opacity:0;transform:translateY(8px)}}to{{opacity:1;transform:none}}}}
-.card{{border-radius:16px;background:#fff;box-shadow:var(--ch-shadow);transition:box-shadow .2s,opacity .3s;overflow:hidden;font-family:'Segoe UI',system-ui,sans-serif;animation:card-in .25s ease-out}}
-.card:hover{{box-shadow:0 6px 24px rgba(0,0,0,.14)}}
-.card.hidden{{display:none}}
-
-/* Header */
-.oc-hdr{{padding:14px 16px 10px;border-bottom:1px solid var(--ch-border);display:flex;align-items:flex-start;justify-content:space-between;gap:10px}}
-.oc-hdr-left{{min-width:0}}
-.oc-title{{font-size:16px;font-weight:800;color:var(--ch-text);letter-spacing:-.2px;line-height:1.2}}
-.oc-num{{color:var(--ch-red)}}
-.oc-meta{{font-size:11px;color:var(--ch-text3);margin-top:4px;display:flex;align-items:center;gap:5px;flex-wrap:wrap}}
-.oc-meta a{{color:var(--ch-green);text-decoration:none;font-weight:700}}
-.oc-meta a:hover{{text-decoration:underline}}
-.oc-addr a{{color:inherit;text-decoration:none;border-bottom:1px dashed #bbb}}
-.oc-addr a:hover{{color:var(--ch-blue);border-color:var(--ch-blue)}}
-.oc-elapsed{{font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;white-space:nowrap;background:var(--ch-green-bg);color:var(--ch-green)}}
-.oc-elapsed.warn{{background:var(--ch-yellow-bg);color:#F57F17}}
-.oc-elapsed.late{{background:var(--ch-red-bg);color:var(--ch-red);animation:pulse-demora 1.5s ease-in-out infinite}}
-.oc-status{{font-size:11px;font-weight:800;color:#fff;padding:5px 13px;border-radius:20px;white-space:nowrap;letter-spacing:.3px;flex-shrink:0}}
-.oc-entrega{{font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;white-space:nowrap}}
-.oc-entrega.delivery{{background:#E3F2FD;color:var(--ch-blue)}}
-.oc-entrega.recojo{{background:var(--ch-purple-bg);color:var(--ch-purple)}}
-.oc-mod{{font-size:10px;background:var(--ch-orange-bg);color:var(--ch-orange);padding:2px 7px;border-radius:20px;font-weight:700}}
-.nav-badge{{background:#e53935;color:#fff;border-radius:10px;min-width:18px;height:18px;font-size:10px;font-weight:700;display:none;align-items:center;justify-content:center;padding:0 5px;margin-left:5px;vertical-align:middle;line-height:18px}}
-
-/* Progress */
-.oc-progress{{display:flex;align-items:center;padding:10px 16px 8px}}
-.oc-step{{display:flex;flex-direction:column;align-items:center;gap:4px;min-width:0}}
-.oc-step span{{font-size:9px;color:#ccc;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:54px;text-align:center}}
-.oc-dot{{width:12px;height:12px;border-radius:50%;background:#E0E0E0;transition:background .3s}}
-.oc-step.s-done .oc-dot{{background:var(--ch-green)}}
-.oc-step.s-active .oc-dot{{background:var(--ch-red);box-shadow:0 0 0 3px rgba(211,47,47,.2)}}
-.oc-step.s-done span,.oc-step.s-active span{{color:var(--ch-text);font-weight:700}}
-.oc-line{{flex:1;height:2px;background:#E0E0E0;margin:0 3px;margin-bottom:14px}}
-.oc-line.done{{background:var(--ch-green)}}
-
-/* Separador punteado */
-.oc-sep{{border:none;border-top:1px dashed #E8E8E8;margin:0 16px}}
-
-/* Secciones */
-.oc-section{{padding:10px 16px}}
-.oc-sec-title{{font-size:11px;font-weight:700;color:var(--ch-text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px}}
-.oc-items{{font-size:13px;color:var(--ch-text);line-height:1.6;word-break:break-word}}
-.oc-item-line{{padding:1px 0}}
-.oc-addr{{font-size:13px;color:var(--ch-text)}}
-.oc-addr.sin-dir{{color:#ccc;font-style:italic}}
-.oc-notas-val{{font-size:12px;color:var(--ch-text2);font-style:italic}}
-
-/* Resumen pago */
-.oc-payment{{display:flex;align-items:center;justify-content:space-between;padding:10px 16px;gap:8px;flex-wrap:wrap}}
-.oc-total{{font-size:21px;font-weight:900;color:var(--ch-purple);letter-spacing:-.5px}}
-.oc-pay-badges{{display:flex;gap:6px;flex-wrap:wrap;align-items:center}}
-.oc-pbadge{{font-size:11px;font-weight:700;padding:4px 11px;border-radius:20px;display:inline-flex;align-items:center;gap:4px}}
-.oc-pbadge.metodo-efectivo{{background:var(--ch-green-bg);color:var(--ch-green);border:1px solid #C8E6C9}}
-.oc-pbadge.metodo-yape{{background:var(--ch-purple-bg);color:var(--ch-purple);border:1px solid #CE93D8}}
-.oc-pbadge.cobrar{{background:var(--ch-yellow-bg);color:#F57F17;border:1px solid #FFE082}}
-.oc-pbadge.pagado{{background:var(--ch-green-bg);color:var(--ch-green);border:1px solid #C8E6C9}}
-
-/* Barra de acciones */
-.oc-actions{{display:flex;border-top:1px solid var(--ch-border)}}
-.oa{{flex:1;border:none;padding:12px 6px;font-size:12px;font-weight:700;cursor:pointer;background:#fff;color:var(--ch-text);display:flex;align-items:center;justify-content:center;gap:4px;transition:background .15s,opacity .1s}}
-.oa:active{{opacity:.7}}
-.oa+.oa{{border-left:1px solid var(--ch-border)}}
-.oa-cancel{{color:var(--ch-red)}}
-.oa-cancel:hover{{background:var(--ch-red-bg)}}
-.oa-delivery{{color:var(--ch-orange)}}
-.oa-delivery:hover{{background:var(--ch-orange-bg)}}
-.oa-cost{{color:var(--ch-green)}}
-.oa-cost:hover{{background:var(--ch-green-bg)}}
-.oa-next{{background:var(--ch-blue);color:#fff;border-radius:0 0 16px 0}}
-.oa-next:hover{{background:#1976D2}}
-.oa-next:disabled{{background:#bbb;cursor:not-allowed}}
-.oa-next.recojo-next{{background:var(--ch-purple)}}
-.oa-next.recojo-next:hover{{background:#7B1FA2}}
-.oa-print{{color:#555;flex:0 0 44px}}
-.oa-print:hover{{background:#eee}}
-.oa-del{{flex:0 0 44px;color:#ccc}}
-.oa-del:hover{{background:var(--ch-red-bg);color:var(--ch-red)}}
-.oa-listo{{color:var(--ch-purple)}}
-.oa-listo:hover{{background:var(--ch-purple-bg)}}
-.oa-done{{padding:12px 16px;font-size:12px;color:#bbb;font-weight:600}}
-.oc-pbadge.delivery-inc{{background:#E3F2FD;color:var(--ch-blue);border:1px solid #90CAF9}}
-.oc-pbadge.demora{{background:#FFEBEE;color:#C62828;border:1px solid #FFCDD2;animation:pulse-demora 1.5s ease-in-out infinite}}
-@keyframes pulse-demora{{0%,100%{{opacity:1}}50%{{opacity:.6}}}}
-
-/* ── Misc ── */
-.empty{{text-align:center;padding:50px 20px 60px;color:#aaa;font-size:15px;grid-column:1/-1}}
-.empty::before{{content:"🌮";display:block;font-size:46px;margin-bottom:10px;opacity:.55}}
-.footer-note{{text-align:center;font-size:11px;color:#bbb;padding:12px}}
-
-/* ── Banner de consultas de costo pendientes ── */
-.cost-banner{{background:#E3F2FD;border-bottom:2px solid #1565C0;padding:12px 18px;display:none}}
-.cost-banner-title{{font-size:13px;font-weight:800;color:#1565C0;margin-bottom:10px;display:flex;align-items:center;gap:6px}}
-.cost-badge{{background:#1565C0;color:#fff;border-radius:20px;padding:2px 9px;font-size:11px}}
-.cost-card{{background:#fff;border-radius:10px;padding:12px 14px;margin-bottom:8px;border:1px solid #BBDEFB;display:flex;flex-wrap:wrap;align-items:flex-start;gap:10px}}
-.cost-card:last-child{{margin-bottom:0}}
-.cost-info{{flex:1;min-width:200px;font-size:13px;color:#333;line-height:1.7}}
-.cost-info strong{{color:#1565C0}}
-.cost-sugg{{font-size:11px;background:#E8F5E9;color:#2E7D32;border-radius:6px;padding:3px 8px;display:inline-block;margin-top:2px;font-weight:700}}
-.cost-actions{{display:flex;gap:8px;align-items:center;flex-wrap:wrap}}
-.cost-input{{border:1px solid #90CAF9;border-radius:8px;padding:8px 12px;font-size:14px;width:130px;outline:none;font-weight:700;color:#1565C0}}
-.cost-input:focus{{border-color:#1565C0;box-shadow:0 0 0 2px rgba(21,101,192,.15)}}
-.cost-btn{{background:#1565C0;color:#fff;border:none;border-radius:8px;padding:9px 18px;font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap}}
-.cost-btn:hover{{background:#1976D2}}
-.cost-btn:active{{opacity:.8}}
-
-/* ── Toast ── */
-.toast{{position:fixed;bottom:24px;right:24px;background:#2D5016;color:#fff;padding:12px 22px;border-radius:30px;font-size:14px;font-weight:700;box-shadow:0 4px 20px rgba(0,0,0,.3);z-index:200;transform:translateY(80px);opacity:0;transition:all .35s cubic-bezier(.34,1.56,.64,1)}}
-.toast.show{{transform:translateY(0);opacity:1}}
-
-/* ── Modal selección delivery ── */
-.dlv-overlay{{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:300;align-items:center;justify-content:center}}
-.dlv-box{{background:#fff;border-radius:16px;padding:22px 26px;min-width:280px;box-shadow:0 8px 32px rgba(0,0,0,.22)}}
-.dlv-box h3{{font-size:15px;font-weight:700;margin-bottom:14px;color:#2D5016}}
-.dlv-option{{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;cursor:pointer;border:2px solid #e0e0e0;margin-bottom:8px;transition:border-color .15s,background .15s}}
-.dlv-option:hover{{background:#f5f5f5;border-color:#aaa}}
-.dlv-option input[type=radio]{{accent-color:#e65100;width:16px;height:16px;cursor:pointer}}
-.dlv-option label{{font-size:14px;font-weight:600;cursor:pointer;flex:1}}
-.dlv-btns{{display:flex;gap:8px;margin-top:14px;justify-content:flex-end}}
-.dlv-cancel{{background:transparent;border:1px solid #ccc;color:#555;padding:8px 16px;border-radius:20px;cursor:pointer;font-size:13px}}
-.dlv-confirm{{background:#e65100;color:#fff;border:none;padding:8px 18px;border-radius:20px;cursor:pointer;font-size:13px;font-weight:700}}
-</style>
-</head>
-<body>
-
-<div class="hdr">
-  <img src="/static/logo.png" alt="Chilango">
-  <div class="hdr-title"><h1>Chilango</h1><small>Panel de operaciones</small></div>
-  <div class="hdr-right">
-    <span class="chip" id="chipTotal">💰 S/ {total_dia:.2f}</span>
-    <span class="chip yape" id="cntYapePlin">💜 {cnt_yapeplin} Yape/Plin</span>
-    <span class="chip efec" id="cntEfec">💵 {cnt_efec} Efectivo</span>
-  </div>
-</div>
-
-<nav class="nav">
-  <a href="/pedidos" class="active">📦 Pedidos <span class="nav-badge" id="navBadge" style="display:none">0</span></a>
-  <a href="/admin">💬 Conversaciones</a>
-  <a href="/admin/clientes">👥 Clientes</a>
-  <a href="/admin/metricas">📊 Métricas</a>
-  <a href="/admin/zonas-delivery">🛵 Zonas</a>
-  <a href="/admin/menu">🍽️ Menú</a>
-</nav>
-
-<div class="toolbar">
-  <span class="toolbar-info">📅 <strong id="totalCount">{len(pedidos)}</strong> pedidos &nbsp;·&nbsp; <span id="activosCount">{total_activos}</span> activos</span>
-  <input type="search" id="searchBox" class="search-box" placeholder="🔍 Buscar #, teléfono, producto, dirección…" oninput="setSearch(this.value)">
-  <select id="fechaSelect" onchange="if(this.value)location.href='/pedidos?fecha='+encodeURIComponent(this.value)" style="border:1px solid #ccc;border-radius:8px;padding:5px 10px;font-size:13px;cursor:pointer">
-    {"".join(f'<option value="{f}" {"selected" if f == fecha_sel else ""}>{f}{" (hoy)" if f == hoy else ""}</option>' for f in fechas_disponibles)}
-  </select>
-  <button class="btn-sound" id="btnSound" onclick="toggleSound()" title="Sonido y notificaciones de pedidos nuevos">🔔 Sonido</button>
-  <button class="btn-test" onclick="probarNotif()">🔔 Probar notificación</button>
-  <button id="btnPausa" onclick="togglePausa()"
-    style="border:none;padding:7px 18px;border-radius:20px;cursor:pointer;font-size:13px;font-weight:700;
-           background:{'#e53935' if bot_pausado else '#2D5016'};color:#fff"
-    data-pausado="{'1' if bot_pausado else '0'}">
-    {'▶️ Reanudar bot' if bot_pausado else '⏸️ Pausar bot'}
-  </button>
-</div>
-{'<div style="background:#e53935;color:#fff;text-align:center;padding:8px;font-weight:700;font-size:13px;letter-spacing:.3px">⏸️ BOT PAUSADO — Los clientes reciben mensaje de capacidad máxima</div>' if bot_pausado else ''}
-
-<div id="agotadosBar" style="background:#fff8e1;border-bottom:1px solid #ffe082;padding:8px 18px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-  <span style="font-size:13px;font-weight:600;color:#e65100">⚠️ Agotados:</span>
-  {''.join(
-      f'<button onclick="toggleAgotado(this,\'{item}\')" '
-      f'style="font-size:12px;border:1px solid #e65100;border-radius:20px;padding:4px 12px;cursor:pointer;transition:.15s;background:{"#e65100" if item in agotados_actual else "transparent"};color:{"#fff" if item in agotados_actual else "#e65100"}"'
-      f'>{item}</button>'
-      for item in ["Pastor","Suadero","Chorizo","Birria","Chamoyada"]
-  )}
-  <input id="agotadosInput" type="text" value="{html.escape(agotados_actual)}"
-    placeholder="otros… (separados por coma)"
-    style="flex:1;min-width:160px;border:1px solid #ffcc02;border-radius:8px;padding:5px 10px;font-size:13px;outline:none;background:#fffde7"
-    onkeydown="if(event.key==='Enter')guardarAgotados()">
-  <button onclick="guardarAgotados()" style="background:#e65100;color:white;border:none;border-radius:8px;padding:6px 14px;font-size:13px;font-weight:600;cursor:pointer">Guardar</button>
-  <span id="agotadosStatus" style="font-size:12px;color:#4caf50;display:none">✅ Guardado</span>
-</div>
-
-<div class="cost-banner" id="costBanner">
-  <div class="cost-banner-title">
-    🛵 Consultas de costo pendientes <span class="cost-badge" id="costBadge">0</span>
-  </div>
-  <div id="costList"></div>
-</div>
-
-<div class="filters">
-  <button class="tab active" data-estado="all" onclick="filterCards('all',this)">Todos ({len(pedidos)})</button>
-  <button class="tab" data-estado="Nuevo 🆕" onclick="filterCards('Nuevo 🆕',this)" id="tabNuevo">🆕 Nuevos ({count_nuevos})</button>
-  <button class="tab" data-estado="En preparación 👨‍🍳" onclick="filterCards('En preparación 👨‍🍳',this)">👨‍🍳 Preparación ({count_prep})</button>
-  <button class="tab" data-estado="En camino 🛵" onclick="filterCards('En camino 🛵',this)">🛵 En camino ({count_camino})</button>
-  <button class="tab" data-estado="Entregado ✅" onclick="filterCards('Entregado ✅',this)">✅ Entregados ({count_entregado})</button>
-  <button class="tab" data-estado="Cancelado ❌" onclick="filterCards('Cancelado ❌',this)">❌ Cancelados ({count_cancel})</button>
-</div>
-
-<div class="grid" id="ordersGrid">{cards}</div>
-<div class="footer-note" id="lastRefresh">🔄 Actualización automática cada 10 s</div>
-<div class="toast" id="toast">🔔 Nuevo pedido llegó</div>
-
-<!-- Modal selección/envío delivery -->
-<div class="dlv-overlay" id="dlvModal" onclick="if(event.target===this)closeDlvModal()">
-  <div class="dlv-box">
-    <h3>🛵 Llamar delivery</h3>
-    <input type="hidden" id="dlvOrderId" value="">
-    <div id="dlvOpts">
-      {"".join(
-          f'<div class="dlv-option"><input type="radio" name="dlvChoice" id="dlv{i}" value="{d["phone"]}" {"checked" if i==0 else ""}>'
-          f'<label for="dlv{i}">{html.escape(d["name"])}</label></div>'
-          for i, d in enumerate(DELIVERIES)
-      )}
-    </div>
-    <div id="dlvManual" style="{'display:none' if DELIVERIES else ''}">
-      <p style="font-size:13px;color:#777;margin-bottom:8px">Número WhatsApp del motorizado (sin +):</p>
-      <input id="dlvPhoneInput" type="tel" placeholder="ej: 51987654321"
-             style="width:100%;border:1px solid #ccc;border-radius:8px;padding:9px 12px;font-size:14px;outline:none"
-             onkeydown="if(event.key==='Enter')confirmarDelivery()">
-    </div>
-    <div class="dlv-btns">
-      <button class="dlv-cancel" onclick="closeDlvModal()">Cancelar</button>
-      <button class="dlv-confirm" onclick="confirmarDelivery()">📤 Enviar</button>
-    </div>
-  </div>
-</div>
-
-<script>
-const ESTADOS    = {estados_js};
-const BADGE_CLR  = {badge_js};
-const BG_CLR     = {bg_js};
-const DELIVERIES = {deliveries_js};
-const STEP_IDX  = {step_idx_js};
-const STEP_LBL  = {step_lbl_js};
-
-let knownIds  = new Set(Array.from(document.querySelectorAll('.card')).map(c => +c.id.replace('card-','')));
-let curFilter = 'all';
-let audioCtx  = null;
-let searchQ   = '';
-let lastPayload  = '';
-let lastRenderTs = 0;
-let soundOn = localStorage.getItem('ch_sound') !== '0';
-
-/* ── Sonido ── */
-function playBeep() {{
-  try {{
-    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
-    [880, 1100, 1320].forEach((f, i) => {{
-      const o = audioCtx.createOscillator(), g = audioCtx.createGain();
-      o.connect(g); g.connect(audioCtx.destination);
-      o.type = 'sine';
-      o.frequency.value = f;
-      g.gain.setValueAtTime(0.25, audioCtx.currentTime + i*0.12);
-      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + i*0.12 + 0.25);
-      o.start(audioCtx.currentTime + i*0.12);
-      o.stop(audioCtx.currentTime + i*0.12 + 0.3);
-    }});
-  }} catch(e) {{}}
-}}
-
-/* ── Toggle de sonido + permiso de notificaciones ── */
-function initSoundBtn() {{
-  const b = document.getElementById('btnSound');
-  if (!b) return;
-  b.classList.toggle('on', soundOn);
-  b.classList.toggle('off', !soundOn);
-  b.textContent = soundOn ? '🔔 Sonido' : '🔕 Silencio';
-}}
-function toggleSound() {{
-  soundOn = !soundOn;
-  localStorage.setItem('ch_sound', soundOn ? '1' : '0');
-  if (soundOn) {{
-    playBeep();  // gesto del usuario → desbloquea AudioContext para futuros beeps
-    if ('Notification' in window && Notification.permission === 'default') {{
-      Notification.requestPermission();
-    }}
-  }}
-  initSoundBtn();
-}}
-initSoundBtn();
-
-/* ── Notificación del navegador (cuando la pestaña está en segundo plano) ── */
-function notifyBrowser(msg) {{
-  if (!('Notification' in window) || Notification.permission !== 'granted' || !document.hidden) return;
-  try {{
-    const n = new Notification('🌮 Chilango — Pedidos', {{ body: msg, tag: 'chilango-new-order' }});
-    n.onclick = () => {{ window.focus(); n.close(); }};
-  }} catch(e) {{}}
-}}
-
-/* ── Toast ── */
-function showToast(msg) {{
-  const t = document.getElementById('toast');
-  t.textContent = msg; t.classList.add('show');
-  setTimeout(() => t.classList.remove('show'), 3500);
-}}
-
-/* ── Filtro por estado + búsqueda ── */
-function applyFilters() {{
-  document.querySelectorAll('.card').forEach(c => {{
-    const matchEstado = curFilter === 'all' || c.dataset.estado === curFilter;
-    const matchQ = !searchQ || c.textContent.toLowerCase().includes(searchQ);
-    c.classList.toggle('hidden', !(matchEstado && matchQ));
-  }});
-}}
-
-function filterCards(estado, btn) {{
-  curFilter = estado;
-  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-  if (btn) btn.classList.add('active');
-  applyFilters();
-}}
-
-function setSearch(q) {{
-  searchQ = (q || '').trim().toLowerCase();
-  applyFilters();
-}}
-
-/* ── Cambiar estado (AJAX) ── */
-async function cambiarEstado(id, nuevoEstado) {{
-  const card = document.getElementById('card-' + id);
-  const btn  = card ? card.querySelector('.oa-next') : null;
-  if (btn) {{ btn.disabled = true; btn.textContent = '⏳'; }}
-  try {{
-    const r = await fetch('/api/pedidos/estado', {{
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: {{'Content-Type':'application/json'}},
-      body: JSON.stringify({{order_id: id, estado: nuevoEstado}})
-    }});
-    if (r.status === 401) {{ location.reload(); return; }}
-    if (!r.ok) throw new Error(await r.text());
-    await refreshOrders();
-  }} catch(e) {{
-    alert('Error al actualizar: ' + e.message);
-    if (btn) {{ btn.disabled = false; btn.textContent = '→ ' + nuevoEstado; }}
-  }}
-}}
-
-/* ── Cancelar pedido (AJAX) ── */
-async function cancelarPedido(id) {{
-  if (!confirm('¿Cancelar el pedido #' + id + '? Esta acción no se puede deshacer.')) return;
-  try {{
-    const r = await fetch('/api/pedidos/estado', {{
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: {{'Content-Type':'application/json'}},
-      body: JSON.stringify({{order_id: id, estado: 'Cancelado ❌'}})
-    }});
-    if (r.status === 401) {{ location.reload(); return; }}
-    if (!r.ok) throw new Error(await r.text());
-    await refreshOrders();
-  }} catch(e) {{
-    alert('Error al cancelar: ' + e.message);
-  }}
-}}
-
-/* ── Eliminar (AJAX) ── */
-async function eliminarPedido(id, btnEl) {{
-  if (!confirm('¿Eliminar este pedido? No se puede deshacer.')) return;
-  try {{
-    const r = await fetch('/api/pedidos/eliminar', {{
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: {{'Content-Type':'application/json'}},
-      body: JSON.stringify({{order_id: id}})
-    }});
-    if (r.status === 401) {{ location.reload(); return; }}
-    const card = document.getElementById('card-' + id);
-    if (card) {{ card.style.opacity='0'; card.style.transform='scale(.95)'; setTimeout(()=>card.remove(),300); }}
-    knownIds.delete(id);
-  }} catch(e) {{ alert('Error al eliminar: ' + e.message); }}
-}}
-
-/* ── Modal delivery (compartido para llamar y consultar costo) ── */
-function _openDlvModal(orderId, mode) {{
-  document.getElementById('dlvOrderId').value = orderId;
-  const modal = document.getElementById('dlvModal');
-  modal.dataset.mode = mode;
-  modal.querySelector('h3').textContent = mode === 'cost' ? '💰 Consultar costo delivery' : '🛵 Llamar delivery';
-  const optsEl = document.getElementById('dlvOpts');
-  optsEl.innerHTML = '';
-  if (DELIVERIES && DELIVERIES.length > 0) {{
-    document.getElementById('dlvManual').style.display = 'none';
-    DELIVERIES.forEach((d, i) => {{
-      optsEl.innerHTML += `<div class="dlv-option">
-        <input type="radio" name="dlvChoice" id="dlv${{i}}" value="${{d.phone}}" ${{i===0?'checked':''}}>
-        <label for="dlv${{i}}">${{d.name}}</label>
-      </div>`;
-    }});
-  }} else {{
-    document.getElementById('dlvManual').style.display = 'block';
-    document.getElementById('dlvPhoneInput').value = '';
-  }}
-  modal.style.display = 'flex';
-  setTimeout(() => {{
-    const inp = document.getElementById('dlvPhoneInput');
-    if (inp && inp.offsetParent) inp.focus();
-  }}, 100);
-}}
-
-async function llamarDelivery(orderId) {{
-  // Notifica directamente al dueño — él gestionará el motorizado manualmente
-  try {{
-    const r = await fetch('/api/pedidos/llamar-delivery', {{
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: {{'Content-Type':'application/json'}},
-      body: JSON.stringify({{order_id: orderId}})
-    }});
-    if (r.status === 401) {{ location.reload(); return; }}
-    const data = await r.json();
-    if (data.status === 'ok') {{
-      showToast('Solicitud de delivery en curso');
-    }} else {{
-      alert('Error: ' + (data.msg || 'No se pudo enviar'));
-    }}
-  }} catch(e) {{
-    alert('Error: ' + e.message);
-  }}
-}}
-async function avisarListo(orderId) {{
-  try {{
-    const r = await fetch('/api/pedidos/aviso-listo', {{
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: {{'Content-Type':'application/json'}},
-      body: JSON.stringify({{order_id: orderId}})
-    }});
-    if (r.status === 401) {{ location.reload(); return; }}
-    const data = await r.json();
-    if (data.status === 'ok') {{
-      showToast('📦 Cliente notificado — pedido listo esperando delivery');
-    }} else {{
-      alert('Error: ' + (data.msg || 'No se pudo enviar'));
-    }}
-  }} catch(e) {{
-    alert('Error: ' + e.message);
-  }}
-}}
-
-function consultarCostoDelivery(orderId) {{ _openDlvModal(orderId, 'cost'); }}
-
-async function _enviarDelivery(orderId, phone, name, endpoint, toastPrefix) {{
-  try {{
-    const r = await fetch(endpoint, {{
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: {{'Content-Type':'application/json'}},
-      body: JSON.stringify({{order_id: orderId, delivery_phone: phone}})
-    }});
-    if (r.status === 401) {{ location.reload(); return; }}
-    const data = await r.json();
-    if (data.status === 'ok') {{
-      showToast(toastPrefix + (data.delivery || name));
-    }} else {{
-      alert('Error: ' + (data.msg || 'No se pudo enviar'));
-    }}
-  }} catch(e) {{
-    alert('Error: ' + e.message);
-  }}
-}}
-
-function closeDlvModal() {{
-  document.getElementById('dlvModal').style.display = 'none';
-}}
-
-function confirmarDelivery() {{
-  const orderId  = +document.getElementById('dlvOrderId').value;
-  const mode     = document.getElementById('dlvModal').dataset.mode || 'delivery';
-  const endpoint = mode === 'cost' ? '/api/pedidos/consultar-delivery' : '/api/pedidos/llamar-delivery';
-  const toastPrefix = mode === 'cost' ? '💰 Consulta enviada a ' : '🛵 Solicitud enviada a ';
-  let phone, name;
-  const manualDiv = document.getElementById('dlvManual');
-  if (manualDiv && manualDiv.style.display !== 'none') {{
-    phone = (document.getElementById('dlvPhoneInput').value || '').trim().replace(/[^0-9]/g,'');
-    if (!phone || phone.length < 8) {{ alert('Ingresa un número de WhatsApp válido (solo dígitos)'); return; }}
-    name = 'Delivery';
-  }} else {{
-    const sel = document.querySelector('input[name="dlvChoice"]:checked');
-    if (!sel) {{ alert('Selecciona un servicio de delivery'); return; }}
-    const d = DELIVERIES.find(d => d.phone === sel.value);
-    phone = d.phone; name = d.name;
-  }}
-  closeDlvModal();
-  _enviarDelivery(orderId, phone, name, endpoint, toastPrefix);
-}}
-
-/* ── Construir tarjeta desde JSON ── */
-function buildCard(p) {{
-  const estado   = p.estado || 'Nuevo 🆕';
-  const badgeClr = BADGE_CLR[estado] || '#666';
-  const sIdx     = STEP_IDX[estado] !== undefined ? STEP_IDX[estado] : -1;
-
-  // Progress steps
-  const steps = STEP_LBL.map((lbl, i) => {{
-    const cls  = i < sIdx ? 'oc-step s-done' : (i === sIdx ? 'oc-step s-active' : 'oc-step');
-    const line = i < STEP_LBL.length - 1
-      ? `<div class="oc-line${{i < sIdx ? ' done' : ''}}"></div>`
-      : '';
-    return `<div class="${{cls}}"><div class="oc-dot"></div><span>${{lbl}}</span></div>${{line}}`;
-  }}).join('');
-
-  const esRecojo  = (p.es_recojo === true || p.es_recojo === 1);
-  const es_cancel = estado === 'Cancelado ❌';
-  const esActivo  = !['Entregado ✅','Cancelado ❌'].includes(estado);
-  const siguiente = p.siguiente_estado || null;
-
-  // Header badges
-  const entregaCls = esRecojo ? 'recojo' : 'delivery';
-  const entregaTxt = esRecojo ? '🏪 Recojo' : '🏍️ Delivery';
-  const modBadge   = p.modificado ? `<span class="oc-mod">✏️ Mod</span>` : '';
-
-  // Items con bullets — comas dentro de paréntesis (combos) no separan
-  const itemsList = (p.items || '').split(/,(?![^(]*\))/).map(s => s.trim()).filter(Boolean);
-  const itemsHtml = itemsList.length > 1
-    ? itemsList.map(i => `<div class="oc-item-line">• ${{esc(i)}}</div>`).join('')
-    : esc(p.items || '');
-
-  // Dirección (con link a Google Maps si es delivery)
-  let dirValue, dirCls = '';
-  if (esRecojo) {{ dirValue = 'El cliente retira'; }}
-  else if (p.direccion) {{
-    const mapsUrl = 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(p.direccion + ', Tacna, Perú');
-    dirValue = `<a href="${{mapsUrl}}" target="_blank" title="Ver en Google Maps">${{esc(p.direccion)}} 🗺️</a>`;
-  }}
-  else {{ dirValue = 'Sin especificar'; dirCls = ' sin-dir'; }}
-  const dirLabel = esRecojo ? '📦 Entrega' : '📍 Dirección:';
-
-  // Chip de tiempo transcurrido desde que entró el pedido (solo activos)
-  let elapsedChip = '';
-  if (esActivo && p.hora) {{
-    const [eh, em] = p.hora.split(':').map(Number);
-    const nowE = new Date();
-    let diffE = (nowE.getHours() * 60 + nowE.getMinutes()) - (eh * 60 + em);
-    if (diffE < 0) diffE += 1440;
-    if (diffE >= 0 && diffE < 600) {{
-      const eCls = diffE >= 45 ? 'late' : (diffE >= 25 ? 'warn' : '');
-      elapsedChip = `<span class="oc-elapsed ${{eCls}}">⏱️ hace ${{diffE}} min</span>`;
-    }}
-  }}
-
-  // Notas
-  const notasHtml = (p.notas || '').trim()
-    ? `<hr class="oc-sep"><div class="oc-section"><div class="oc-sec-title">📝 Notas:</div><div class="oc-notas-val">${{esc(p.notas)}}</div></div>`
-    : '';
-
-  // Pago
-  const metodo     = p.metodo_pago || 'Efectivo';
-  const esDigital  = ['Yape/Plin','Yape','Plin'].includes(metodo);
-  const metodoCls  = esDigital ? 'metodo-yape' : 'metodo-efectivo';
-  const pagoEmoji  = esDigital ? '💜' : '💵';
-  const cobroBadge = esDigital
-    ? `<span class="oc-pbadge pagado">✅ Pagado</span>`
-    : `<span class="oc-pbadge cobrar">💳 Cobrar al entregar</span>`;
-
-  // Badge de delivery pagado (cuando el cliente pagó el delivery junto con el pedido)
-  const tieneDeliveryPago = (p.items || '').toLowerCase().includes('delivery:');
-  const deliveryBadge = tieneDeliveryPago
-    ? `<span class="oc-pbadge delivery-inc">🛵 Delivery pagado</span>`
-    : '';
-
-  // Badge de demora: pedidos en preparación > 50 min
-  let demoraBadge = '';
-  if (estado === 'En preparación 👨‍🍳' && p.hora) {{
-    const [hh, mm] = p.hora.split(':').map(Number);
-    const now = new Date();
-    const orderMin = hh * 60 + mm;
-    const nowMin   = now.getHours() * 60 + now.getMinutes();
-    const diffMin  = nowMin - orderMin;
-    if (diffMin >= 50 && diffMin < 600) {{
-      demoraBadge = `<span class="oc-pbadge demora">⏰ ${{diffMin}} min en prep.</span>`;
-    }}
-  }}
-
-  // Botones de acción
-  let btnCancelHtml = '', btnDeliveryHtml = '', btnCostHtml = '', btnListoHtml = '', btnSigHtml = '';
-  if (esActivo) {{
-    btnCancelHtml   = `<button class="oa oa-cancel" onclick="cancelarPedido(${{p.id}})">❌ Cancelar</button>`;
-    btnDeliveryHtml = !esRecojo
-      ? `<button class="oa oa-delivery" onclick="llamarDelivery(${{p.id}})">🛵 Delivery</button>`
-      : '';
-    btnCostHtml = ''; // eliminado — la consulta se dispara automáticamente desde el bot
-    // Botón "Avisar listo": solo para pedidos en preparación de delivery (no recojo)
-    btnListoHtml = (estado === 'En preparación 👨‍🍳' && !esRecojo)
-      ? `<button class="oa oa-listo" onclick="avisarListo(${{p.id}})">📦 Avisar listo</button>`
-      : '';
-    if (siguiente) {{
-      const esSiguienteCamino = p.siguiente_estado_raw === 'En camino 🛵';
-      const lblBtn  = (esRecojo && esSiguienteCamino) ? '📦 Listo p/retirar' : `→ ${{esc(siguiente)}}`;
-      const clsNext = (esRecojo && esSiguienteCamino) ? 'oa oa-next recojo-next' : 'oa oa-next';
-      btnSigHtml = `<button class="${{clsNext}}" data-next="${{esc(p.siguiente_estado_raw || siguiente)}}" onclick="cambiarEstado(${{p.id}},this.dataset.next)">${{lblBtn}}</button>`;
-    }}
-  }} else {{
-    btnSigHtml = es_cancel
-      ? `<span class="oa-done">❌ Cancelado</span>`
-      : `<span class="oa-done">✅ Entregado</span>`;
-  }}
-  const btnDelHtml   = `<button class="oa oa-del" onclick="eliminarPedido(${{p.id}},this)" title="Eliminar">🗑️</button>`;
-  const btnPrintHtml = `<button class="oa oa-print" onclick="window.open('/admin/imprimir/${{p.id}}','_blank')" title="Imprimir recibo">🖨️</button>`;
-
-  return `<div class="card" id="card-${{p.id}}" data-estado="${{esc(estado)}}" data-recojo="${{esRecojo?1:0}}">
-  <div class="oc-hdr">
-    <div class="oc-hdr-left">
-      <div class="oc-title">Pedido <span class="oc-num">#${{p.id}}</span></div>
-      <div class="oc-meta">🕒 ${{esc(p.hora)}} · <a href="https://wa.me/${{esc(p.phone)}}" target="_blank" title="Abrir chat de WhatsApp">+${{esc(p.phone)}}</a> <span class="oc-entrega ${{entregaCls}}">${{entregaTxt}}</span>${{elapsedChip}}${{modBadge}}</div>
-    </div>
-    <span class="oc-status" style="background:${{badgeClr}}">${{esc(estado)}}</span>
-  </div>
-  <div class="oc-progress">${{steps}}</div>
-  <hr class="oc-sep">
-  <div class="oc-section">
-    <div class="oc-sec-title">🌶️ Artículos:</div>
-    <div class="oc-items">${{itemsHtml}}</div>
-  </div>
-  <hr class="oc-sep">
-  <div class="oc-section">
-    <div class="oc-sec-title">${{dirLabel}}</div>
-    <div class="oc-addr${{dirCls}}">${{dirValue}}</div>
-  </div>
-  ${{notasHtml}}
-  <hr class="oc-sep">
-  <div class="oc-payment">
-    <span class="oc-total">${{esc(p.total)}}</span>
-    <div class="oc-pay-badges">
-      <span class="oc-pbadge ${{metodoCls}}">${{pagoEmoji}} ${{esc(metodo)}}</span>
-      ${{cobroBadge}}
-      ${{deliveryBadge}}
-      ${{demoraBadge}}
-    </div>
-  </div>
-  ${{(estado === 'En preparación 👨‍🍳' && !esRecojo) ? (() => {{
-    let cobro, bg, border, color;
-    if (esDigital && tieneDeliveryPago) {{
-      cobro  = '✅ Ya pagó TODO — dile al moto que NO cobre nada al cliente';
-      bg='#e8f5e9'; border='#a5d6a7'; color='#2e7d32';
-    }} else if (esDigital) {{
-      cobro  = '💜 Pagó en digital — el moto cobra SOLO el delivery al cliente';
-      bg='#f3e5f5'; border='#ce93d8'; color='#6a1b9a';
-    }} else {{
-      cobro  = `💵 Pago en efectivo — el moto cobra ${{esc(p.total)}} + delivery`;
-      bg='#fff8e1'; border='#ffe082'; color='#e65100';
-    }}
-    return `<div style="background:${{bg}};border:1px solid ${{border}};border-radius:8px;padding:7px 12px;margin:8px 12px 0;font-size:12px;font-weight:700;color:${{color}}">⚡ Dile al moto: ${{cobro}}</div>`;
-  }})() : ''}}
-  <div class="oc-actions">${{btnCancelHtml}}${{btnDeliveryHtml}}${{btnListoHtml}}${{btnCostHtml}}${{btnSigHtml}}${{btnPrintHtml}}${{btnDelHtml}}</div>
-</div>`;
-}}
-
-function esc(s) {{
-  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}}
-
-/* ── Refresh automático ── */
-async function refreshOrders() {{
-  try {{
-    const fechaSel = document.getElementById('fechaSelect')?.value || '';
-    const url = fechaSel ? `/api/pedidos?fecha=${{encodeURIComponent(fechaSel)}}` : '/api/pedidos';
-    const r = await fetch(url, {{credentials:'same-origin'}});
-    if (r.status === 401) {{ location.reload(); return; }}
-    const data = await r.json();
-    const pedidos = data.pedidos;
-
-    // Detectar pedidos nuevos
-    const newOnes = pedidos.filter(p => !knownIds.has(p.id));
-    if (newOnes.length > 0 && knownIds.size > 0) {{
-      if (soundOn) playBeep();
-      const msg = newOnes.length === 1
-        ? `Pedido #${{newOnes[0].id}} — ${{(newOnes[0].items || '').slice(0, 60)}}`
-        : `${{newOnes.length}} nuevos pedidos llegaron`;
-      showToast(`🔔 ${{newOnes.length === 1 ? 'Nuevo pedido llegó' : newOnes.length + ' nuevos pedidos'}}`);
-      notifyBrowser(msg);
-      document.title = '🔔 Nuevo pedido — Chilango';
-      setTimeout(() => {{ document.title = 'Pedidos — Chilango'; }}, 5000);
-    }}
-    knownIds = new Set(pedidos.map(p => p.id));
-
-    // Re-renderizar solo si los datos cambiaron (o cada 60 s para refrescar los chips de tiempo)
-    const payload = JSON.stringify(pedidos);
-    const mustRender = payload !== lastPayload || (Date.now() - lastRenderTs) > 60000;
-    if (mustRender) {{
-      lastPayload = payload;
-      lastRenderTs = Date.now();
-      const grid = document.getElementById('ordersGrid');
-      if (pedidos.length === 0) {{
-        const fechaSel2 = document.getElementById('fechaSelect')?.value || '';
-        grid.innerHTML = `<div class="empty">${{fechaSel2 ? 'Sin pedidos para ' + fechaSel2 : 'No hay pedidos hoy todavía'}} 🌮</div>`;
-      }} else {{
-        grid.innerHTML = pedidos.map(buildCard).join('');
-      }}
-    }}
-
-    // Actualizar burbuja de pedidos nuevos en el nav
-    const nNuevos = pedidos.filter(p => (p.estado||'').startsWith('Nuevo')).length;
-    const navBadge = document.getElementById('navBadge');
-    if (navBadge) {{
-      navBadge.textContent = nNuevos;
-      navBadge.style.display = nNuevos > 0 ? 'inline-flex' : 'none';
-    }}
-
-    // Actualizar conteos en las pestañas de filtro
-    const _tabCounts = {{
-      'all': pedidos.length,
-      'Nuevo 🆕': nNuevos,
-      'En preparación 👨‍🍳': pedidos.filter(p => p.estado === 'En preparación 👨‍🍳').length,
-      'En camino 🛵': pedidos.filter(p => p.estado === 'En camino 🛵').length,
-      'Entregado ✅': pedidos.filter(p => p.estado === 'Entregado ✅').length,
-      'Cancelado ❌': pedidos.filter(p => p.estado === 'Cancelado ❌').length,
-    }};
-    const _tabLabels = {{
-      'all':'Todos', 'Nuevo 🆕':'🆕 Nuevos', 'En preparación 👨‍🍳':'👨‍🍳 Preparación',
-      'En camino 🛵':'🛵 En camino', 'Entregado ✅':'✅ Entregados', 'Cancelado ❌':'❌ Cancelados',
-    }};
-    document.querySelectorAll('.tab[data-estado]').forEach(tab => {{
-      const e = tab.dataset.estado;
-      if (e in _tabCounts) tab.textContent = `${{_tabLabels[e]}} (${{_tabCounts[e]}})`;
-      if (e === curFilter) tab.classList.add('active');
-    }});
-
-    // Re-aplicar filtro activo
-    filterCards(curFilter, document.querySelector('.tab.active'));
-
-    // Actualizar contadores
-    document.getElementById('totalCount').textContent = pedidos.length;
-    const activos = pedidos.filter(p => !['Entregado ✅','Cancelado ❌'].includes(p.estado)).length;
-    document.getElementById('activosCount').textContent = activos;
-
-    // Actualizar total acumulado (todos menos cancelados)
-    const noCancel = pedidos.filter(p => (p.estado || '') !== 'Cancelado ❌');
-    const totalDia = noCancel.reduce((sum, p) => {{
-      const t = parseFloat((p.total || '0').replace('S/', '').replace(',','.').trim()) || 0;
-      return sum + t;
-    }}, 0);
-    const chipTotal = document.getElementById('chipTotal');
-    if (chipTotal) chipTotal.textContent = `💰 S/ ${{totalDia.toFixed(2)}}`;
-
-    // Actualizar chips de método de pago
-    const cntYP = noCancel.filter(p => ['Yape/Plin','Yape','Plin'].includes(p.metodo_pago)).length;
-    const cntEf = noCancel.filter(p => !['Yape/Plin','Yape','Plin'].includes(p.metodo_pago)).length;
-    const chipYP = document.getElementById('cntYapePlin');
-    const chipEf = document.getElementById('cntEfec');
-    if (chipYP) chipYP.textContent = `💜 ${{cntYP}} Yape/Plin`;
-    if (chipEf) chipEf.textContent = `💵 ${{cntEf}} Efectivo`;
-
-    const now = new Date().toLocaleTimeString('es-PE',{{hour:'2-digit',minute:'2-digit'}});
-    document.getElementById('lastRefresh').textContent = `🔄 Actualizado ${{now}}`;
-  }} catch(e) {{
-    console.warn('Refresh error:', e);
-  }}
-}}
-
-function probarNotif() {{
-  fetch('/admin/test-notify', {{method:'POST',credentials:'same-origin'}})
-    .then(r=>r.json())
-    .then(()=>alert('✅ Solicitud enviada — revisa logs de Railway'))
-    .catch(e=>alert('Error: '+e));
-}}
-
-function toggleAgotado(btn, item) {{
-  const inp = document.getElementById('agotadosInput');
-  const parts = inp.value.split(',').map(s => s.trim()).filter(Boolean);
-  const idx = parts.findIndex(p => p.toLowerCase() === item.toLowerCase());
-  if (idx === -1) {{
-    parts.push(item);
-    btn.style.background = '#e65100'; btn.style.color = '#fff';
-  }} else {{
-    parts.splice(idx, 1);
-    btn.style.background = 'transparent'; btn.style.color = '#e65100';
-  }}
-  inp.value = parts.join(', ');
-  guardarAgotados();
-}}
-
-async function guardarAgotados() {{
-  const val = document.getElementById('agotadosInput').value.trim();
-  try {{
-    const r = await fetch('/api/config/agotados', {{
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: {{'Content-Type':'application/json'}},
-      body: JSON.stringify({{value: val}})
-    }});
-    const d = await r.json();
-    if (d.status === 'ok') {{
-      const st = document.getElementById('agotadosStatus');
-      st.style.display = 'inline';
-      setTimeout(() => st.style.display = 'none', 2000);
-    }}
-  }} catch(e) {{ alert('Error: ' + e.message); }}
-}}
-
-async function togglePausa() {{
-  const btn = document.getElementById('btnPausa');
-  const pausado = btn.dataset.pausado === '1';
-  const nuevo = pausado ? '0' : '1';
-  try {{
-    const r = await fetch('/api/config/pausa', {{
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: {{'Content-Type':'application/json'}},
-      body: JSON.stringify({{value: nuevo}})
-    }});
-    const d = await r.json();
-    if (d.status === 'ok') location.reload();
-  }} catch(e) {{ alert('Error: ' + e.message); }}
-}}
-
-// Iniciar polling cada 10 segundos
-setInterval(refreshOrders, 10000);
-
-/* ── Consultas de costo pendientes ── */
-async function checkPendingCostQueries() {{
-  try {{
-    const r = await fetch('/api/delivery/pendientes', {{credentials:'same-origin'}});
-    if (!r.ok) return;
-    const data = await r.json();
-    renderPendingCostQueries(data.pendientes || []);
-  }} catch(e) {{ console.warn('CostQueries error:', e); }}
-}}
-
-function renderPendingCostQueries(queries) {{
-  const banner = document.getElementById('costBanner');
-  const list   = document.getElementById('costList');
-  const badge  = document.getElementById('costBadge');
-  if (!banner || !list) return;
-  if (queries.length === 0) {{
-    banner.style.display = 'none';
-    return;
-  }}
-  banner.style.display = 'block';
-  badge.textContent = queries.length;
-  list.innerHTML = queries.map(q => {{
-    const sugg = q.sugerencia
-      ? `<span class="cost-sugg">💡 Zona similar: S/ ${{q.sugerencia.costo.toFixed(2)}} (${{q.sugerencia.count}} ${{q.sugerencia.count === 1 ? 'vez' : 'veces'}})</span>`
-      : '';
-    const inputId = 'costInput_' + q.client_phone;
-    return `<div class="cost-card">
-      <div class="cost-info">
-        <strong>👤 +${{q.client_phone}}</strong><br>
-        📍 ${{q.direccion || 'Sin especificar'}}<br>
-        🛒 ${{q.items || '—'}}<br>
-        💰 Subtotal: <strong>${{q.subtotal || '—'}}</strong>
-        ${{sugg}}
-      </div>
-      <div class="cost-actions">
-        <input class="cost-input" id="${{inputId}}" type="number" min="0" step="0.5"
-          placeholder="S/ costo..."
-          value="${{q.sugerencia ? q.sugerencia.costo : ''}}"
-          onkeydown="if(event.key==='Enter')enviarCostoCliente('${{q.client_phone}}','${{q.subtotal}}')">
-        <button class="cost-btn" onclick="enviarCostoCliente('${{q.client_phone}}','${{q.subtotal}}')">
-          ✅ Enviar al cliente
-        </button>
-      </div>
-    </div>`;
-  }}).join('');
-}}
-
-async function enviarCostoCliente(phone, subtotalStr) {{
-  const inputEl = document.getElementById('costInput_' + phone);
-  const monto = parseFloat((inputEl ? inputEl.value : '') || '');
-  if (isNaN(monto) || monto <= 0) {{
-    alert('Ingresa un monto de delivery válido (ej: 7)');
-    if (inputEl) inputEl.focus();
-    return;
-  }}
-  try {{
-    const r = await fetch('/api/delivery/enviar-costo', {{
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: {{'Content-Type':'application/json'}},
-      body: JSON.stringify({{phone, monto, subtotal: subtotalStr}})
-    }});
-    if (r.status === 401) {{ location.reload(); return; }}
-    const data = await r.json();
-    if (data.status === 'ok') {{
-      showToast('✅ Costo enviado al cliente +' + phone);
-      checkPendingCostQueries();
-    }} else {{
-      alert('Error: ' + (data.msg || 'No se pudo enviar'));
-    }}
-  }} catch(e) {{ alert('Error: ' + e.message); }}
-}}
-
-// Polling de consultas pendientes cada 15 segundos
-checkPendingCostQueries();
-setInterval(checkPendingCostQueries, 15000);
-
-// Inicializar burbuja nav al cargar la página
-(function initNavBadge() {{
-  const nNuevos = document.querySelectorAll('.card[data-estado^="Nuevo"]').length;
-  const nb = document.getElementById('navBadge');
-  if (nb) {{
-    nb.textContent = nNuevos;
-    nb.style.display = nNuevos > 0 ? 'inline-flex' : 'none';
-  }}
-}})();
-</script>
-</body></html>"""
+    fechas_options = "".join(
+        f'<option value="{f}" {"selected" if f == fecha_sel else ""}>{f}{" (hoy)" if f == hoy else ""}</option>'
+        for f in fechas_disponibles
+    )
+
+    agotados_set = {s.strip().lower() for s in agotados_actual.split(",") if s.strip()}
+    agotados_chips = "".join(
+        f'<button class="ag-chip{" on" if item.lower() in agotados_set else ""}" onclick="toggleAgotado(this,\'{item}\')">{item}</button>'
+        for item in ["Pastor", "Suadero", "Chorizo", "Birria", "Chamoyada"]
+    )
+
+    if bot_pausado:
+        pausa_banner = ('<div class="pausa-banner"><i class="ti ti-player-pause"></i>'
+                        ' Bot pausado — los clientes reciben mensaje de capacidad máxima</div>')
+        pausa_label = '<i class="ti ti-player-play"></i> Reanudar bot'
+        pausa_cls = "danger"
+    else:
+        pausa_banner = ""
+        pausa_label = '<i class="ti ti-player-pause"></i> Pausar bot'
+        pausa_cls = ""
+
+    fecha_label = f"Hoy · {fecha_sel}" if fecha_sel == hoy else fecha_sel
+
+    page = (_PEDIDOS_TEMPLATE
+            .replace("__FECHA_LABEL__", html.escape(fecha_label))
+            .replace("__FECHAS_OPTIONS__", fechas_options)
+            .replace("__PAUSA_BANNER__", pausa_banner)
+            .replace("__PAUSA_LABEL__", pausa_label)
+            .replace("__PAUSA_CLS__", pausa_cls)
+            .replace("__PAUSA_DATA__", "1" if bot_pausado else "0")
+            .replace("__AGOTADOS_OPEN__", "open" if agotados_set else "")
+            .replace("__AGOTADOS_CHIPS__", agotados_chips)
+            .replace("__AGOTADOS_VAL__", html.escape(agotados_actual))
+            .replace("__TOTAL_DIA__", f"{total_dia:.2f}")
+            .replace("__N_PEDIDOS__", str(len(pedidos)))
+            .replace("__N_ACTIVOS__", str(total_activos))
+            .replace("__CNT_YP__", str(cnt_yapeplin))
+            .replace("__CNT_EF__", str(cnt_efec))
+            .replace("__DELIVERIES_JS__", json.dumps(DELIVERIES))
+            .replace("__PEDIDOS_JSON__", json.dumps(pedidos, ensure_ascii=False).replace("</", "<\\/"))
+            )
+    return HTMLResponse(page)
 
 
 @app.get("/api/pedidos")
@@ -2018,24 +1857,7 @@ async def api_pedidos_json(
         pedidos = db.get_orders_for_date(fecha)
     else:
         pedidos = db.get_orders_today()
-    # Normalizar estados sin emoji (DEFAULT antiguo de BD) antes de procesar
-    _norm = {
-        "Nuevo": "Nuevo 🆕",
-        "En preparación": "En preparación 👨‍🍳",
-        "En camino": "En camino 🛵",
-        "Entregado": "Entregado ✅",
-    }
-    for p in pedidos:
-        estado = p.get("estado") or "Nuevo 🆕"
-        estado = _norm.get(estado, estado)
-        p["estado"] = estado
-        es_cancel = estado == "Cancelado ❌"
-        idx = ESTADOS.index(estado) if estado in ESTADOS else -1
-        sig = ESTADOS[idx + 1] if (not es_cancel and 0 <= idx < len(ESTADOS) - 1) else None
-        p["siguiente_estado"] = sig
-        p["siguiente_estado_raw"] = sig  # alias explícito para el JS
-        p["es_recojo"] = (p.get("direccion") or "").strip().lower() == "recojo"
-    return JSONResponse({"pedidos": pedidos})
+    return JSONResponse({"pedidos": _enrich_pedidos(pedidos)})
 
 
 @app.post("/api/pedidos/estado")

@@ -1,10 +1,37 @@
-[CHANGELOG.md](https://github.com/user-attachments/files/28819405/CHANGELOG.md)
-
+[CHANGELOG.md](https://github.com/user-attachments/files/28819797/CHANGELOG.md)
 # CHANGELOG — Chilango Bot
 
 Formato: `[vX.Y] YYYY-MM-DD — Descripción`
 - **X** = versión mayor (cambio arquitectural o de flujo)
 - **Y** = versión menor (mejora, fix o nueva función)
+
+---
+
+## [v4.0] 2026-06-10 — Rediseño profesional del panel de pedidos
+
+### 🎨 Nuevo diseño de `/pedidos`
+- **Iconografía profesional**: emojis reemplazados por Tabler Icons (webfont CDN) en toda la interfaz del panel. Los emojis se mantienen solo en los mensajes de WhatsApp, donde son el lenguaje natural.
+- **Paleta contenida**: header blanco con borde sutil, fondos neutros, y color saturado únicamente donde codifica significado (badge de estado, botón de acción primaria, alertas). Tonos suaves para badges de pago.
+- **Tipografía Inter** (Google Fonts) con solo dos pesos (400/600) y `tabular-nums` en montos y contadores.
+- **KPIs como tarjetas de métrica** (Ventas de hoy, Pedidos, Yape/Plin, Efectivo) en vez de chips de colores sobre el header verde.
+- **Filtros como control segmentado** con contadores en vivo.
+- **Jerarquía de acciones en tarjetas**: un solo botón primario con la siguiente acción lógica ("Empezar preparación" → "Marcar en camino" → "Marcar entregado", "Listo p/ retirar" en recojo) y el resto (llamar delivery, avisar listo, imprimir, cancelar, eliminar) en menú desplegable ⋯. Cancelar/eliminar ya no están a un clic junto a la acción frecuente.
+- **Barra de agotados colapsable** con contador; se abre sola si hay productos marcados.
+- **"Probar notificación" movido** a un menú de ajustes (⋮) en el header.
+- **Bordes 1px y sombras sutiles**, radio uniforme, banner "dile al moto" rediseñado en tonos suaves.
+- **Favicon** con el logo del negocio.
+
+### 🔧 Arquitectura del panel
+- **Render unificado en JS**: se eliminó el doble renderizado (Python `_render_card` + JS `buildCard`). Ahora una sola función JS pinta las tarjetas desde datos embebidos al cargar y en cada refresh — imposible que ambas versiones se desincronicen.
+- **Plantilla sin f-string** (tokens `__X__` reemplazados) — el CSS/JS ya no necesita llaves escapadas `{{}}`.
+- `api_pedidos_json` y el panel comparten el helper `_enrich_pedidos()`.
+- Badge de pago en pedidos finalizados ya no dice "cobrar al entregar".
+- Eliminadas constantes muertas (`ESTADO_COLORS`, `ESTADO_BADGE`, `STEP_LABELS`/`STEP_IDX` de Python).
+
+### 📁 Archivos actualizados
+| Archivo | Cambios |
+|---|---|
+| `main.py` | Rediseño completo de `/pedidos`: plantilla nueva, render JS unificado, menús desplegables, KPIs, filtros segmentados |
 
 ---
 

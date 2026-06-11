@@ -2123,85 +2123,190 @@ async def mark_read(phone: str, credentials: HTTPBasicCredentials = Depends(veri
 
 
 # ══════════════════════════════════════════════════════════════
+# ── DESIGN SYSTEM COMPARTIDO DEL PANEL ────────────────────────
+# ══════════════════════════════════════════════════════════════
+
+_UI_HEAD = """<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" href="/static/logo.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.31.0/dist/tabler-icons.min.css">"""
+
+_UI_CSS = """*{box-sizing:border-box;margin:0;padding:0}
+:root{--brand:#2D5016;--brand-dark:#22400F;--brand-soft:#EAF3DE;--bg:#F6F7F5;--surface:#FFFFFF;--border:#E4E6E2;--border2:#D5D8D2;--text:#1E221B;--text2:#5A5F56;--text3:#8C9186;--blue:#1A5DA8;--blue-bg:#E8F1FB;--amber:#8A5A0B;--amber-mid:#B97A10;--amber-bg:#FBF0DC;--violet:#5B3E9E;--violet-bg:#EFEAFA;--green:#2E6B2E;--green-bg:#E6F2E6;--red:#B3362C;--red-bg:#FBEAE8;--radius:12px}
+body{font-family:'Inter',-apple-system,'Segoe UI',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;font-size:14px}
+.hdr{background:var(--surface);border-bottom:1px solid var(--border);padding:10px 20px;display:flex;align-items:center;gap:12px;position:sticky;top:0;z-index:60}
+.hdr img{height:36px;width:36px;border-radius:8px;object-fit:cover}
+.hdr-title{margin-right:auto;min-width:0}
+.hdr-title h1{font-size:15px;font-weight:600;letter-spacing:-.2px}
+.hdr-title small{font-size:12px;color:var(--text3)}
+.hdr-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.nav{background:var(--surface);border-bottom:1px solid var(--border);display:flex;overflow-x:auto;-webkit-overflow-scrolling:touch;padding:0 12px;flex-shrink:0}
+.nav a{display:flex;align-items:center;gap:6px;color:var(--text2);text-decoration:none;padding:10px 14px;font-size:13px;white-space:nowrap;border-bottom:2px solid transparent}
+.nav a i{font-size:16px}
+.nav a:hover{color:var(--text)}
+.nav a.active{color:var(--brand);border-bottom-color:var(--brand);font-weight:600}
+.nav-badge{background:var(--red);color:#fff;border-radius:999px;min-width:17px;height:17px;font-size:10px;font-weight:600;display:none;align-items:center;justify-content:center;padding:0 5px}
+.wrap{max-width:1100px;margin:0 auto;padding:16px;width:100%}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;margin-bottom:14px}
+.kpi{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:12px 14px}
+.kpi .lbl{font-size:12px;color:var(--text2)}
+.kpi .val{font-size:20px;font-weight:600;margin-top:2px;font-variant-numeric:tabular-nums}
+.kpi .val small{font-size:12px;font-weight:400;color:var(--text3)}
+.kpi .delta{font-size:11.5px;font-weight:600;margin-top:3px;display:inline-flex;align-items:center;gap:3px}
+.kpi .delta i{font-size:13px}
+.kpi .delta.up{color:var(--green)}.kpi .delta.down{color:var(--red)}.kpi .delta.flat{color:var(--text3)}
+.iconbtn{height:34px;width:34px;display:flex;align-items:center;justify-content:center;border:1px solid var(--border);background:var(--surface);border-radius:8px;cursor:pointer;color:var(--text2);font-size:17px;transition:background .15s}
+.iconbtn:hover{background:var(--bg)}
+.seg{display:inline-flex;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:3px;gap:2px;overflow-x:auto;max-width:100%}
+.seg button{border:none;background:transparent;color:var(--text2);padding:6px 12px;border-radius:7px;cursor:pointer;font:inherit;font-size:12.5px;white-space:nowrap;transition:background .15s}
+.seg button:hover{background:var(--bg)}
+.seg button.active{background:var(--brand);color:#fff;font-weight:600}
+.tbl-wrap{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow-x:auto}
+table.tbl{width:100%;border-collapse:collapse}
+.tbl thead th{background:var(--bg);color:var(--text2);padding:10px 14px;text-align:left;font-size:11.5px;font-weight:600;text-transform:uppercase;letter-spacing:.4px;border-bottom:1px solid var(--border);white-space:nowrap}
+.tbl tbody tr{border-bottom:1px solid var(--border)}
+.tbl tbody tr:last-child{border-bottom:none}
+.tbl tbody tr:hover{background:var(--bg)}
+.tbl td{padding:10px 14px;font-size:13px}
+.num{text-align:right;font-variant-numeric:tabular-nums}
+.searchwrap{display:flex;align-items:center;gap:7px;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:0 10px;height:34px;min-width:190px}
+.searchwrap i{color:var(--text3);font-size:15px}
+.searchwrap input{border:none;outline:none;background:transparent;font:inherit;font-size:13px;flex:1;color:var(--text);min-width:0}
+select.ctl{height:34px;border:1px solid var(--border);border-radius:8px;background:var(--surface);padding:0 8px;font:inherit;font-size:13px;color:var(--text2);cursor:pointer;outline:none}
+.toast{position:fixed;bottom:24px;right:24px;background:#1E221B;color:#fff;padding:11px 20px;border-radius:10px;font-size:13px;font-weight:600;box-shadow:0 8px 24px rgba(0,0,0,.25);z-index:200;transform:translateY(80px);opacity:0;transition:all .35s}
+.toast.show{transform:translateY(0);opacity:1}
+.chipbadge{font-size:11px;font-weight:600;padding:2px 9px;border-radius:999px;white-space:nowrap}
+.btn-mini{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--border2);background:var(--surface);color:var(--text2);border-radius:999px;padding:4px 11px;font-size:11.5px;font-weight:600;cursor:pointer;font-family:inherit}
+.btn-mini:hover{background:var(--bg)}
+@media(max-width:640px){.hdr{padding:8px 12px}.hdr-title small{display:none}.wrap{padding:12px 10px}.kpis{grid-template-columns:repeat(2,1fr)}}"""
+
+_NAV_ITEMS = [
+    ("/pedidos",              "ti-package",         "Pedidos",        "pedidos"),
+    ("/admin",                "ti-message-circle",  "Conversaciones", "conversaciones"),
+    ("/admin/clientes",       "ti-users",           "Clientes",       "clientes"),
+    ("/admin/metricas",       "ti-chart-bar",       "Métricas",       "metricas"),
+    ("/admin/zonas-delivery", "ti-motorbike",       "Zonas",          "zonas"),
+    ("/admin/menu",           "ti-tools-kitchen-2", "Menú",           "menu"),
+]
+
+
+def _nav_html(active: str) -> str:
+    parts = []
+    for href, icon, label, key in _NAV_ITEMS:
+        cls = ' class="active"' if key == active else ""
+        badge = ' <span class="nav-badge" id="navBadge">0</span>' if key == "pedidos" else ""
+        parts.append(f'<a href="{href}"{cls}><i class="ti {icon}"></i> {label}{badge}</a>')
+    return '<nav class="nav">' + "".join(parts) + "</nav>"
+
+
+def _ui_header(subtitle: str, actions: str = "") -> str:
+    return (
+        '<header class="hdr"><img src="/static/logo.png" alt="Chilango">'
+        f'<div class="hdr-title"><h1>Chilango</h1><small>{subtitle}</small></div>'
+        f'<div class="hdr-actions">{actions}</div></header>'
+    )
+
+
+# Burbuja de pedidos nuevos en el nav (común a todas las páginas excepto /pedidos)
+_NAV_BADGE_JS = """async function _chkNuevos(){try{const r=await fetch('/api/pedidos',{credentials:'same-origin'});if(!r.ok)return;const d=await r.json();const n=d.pedidos.filter(p=>(p.estado||'').startsWith('Nuevo')).length;const b=document.getElementById('navBadge');if(b){b.textContent=n;b.style.display=n>0?'inline-flex':'none';}}catch(e){}}
+_chkNuevos();setInterval(_chkNuevos,15000);"""
+
+
+# ══════════════════════════════════════════════════════════════
 # ── MENÚ EDITABLE ─────────────────────────────────────────────
 # ══════════════════════════════════════════════════════════════
+
+_MENU_TEMPLATE = """<!DOCTYPE html>
+<html lang="es"><head><title>Menú — Chilango</title>
+__UI_HEAD__
+<style>__UI_CSS__
+.mi-input{border:1px solid var(--border);border-radius:7px;padding:6px 9px;font:inherit;font-size:13px;outline:none;width:100%;background:var(--surface)}
+.mi-input:focus{border-color:var(--brand)}
+.cat-row td{background:var(--brand-soft);color:var(--brand);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.4px;padding:8px 14px}
+.btn-save{display:inline-flex;align-items:center;gap:5px;background:var(--brand);color:#fff;border:none;border-radius:7px;padding:6px 12px;font:inherit;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap}
+.btn-save:hover{background:var(--brand-dark)}
+input.mi-disp{width:16px;height:16px;accent-color:var(--brand);cursor:pointer}
+.hint{font-size:12.5px;color:var(--text3);margin-bottom:14px}
+</style></head><body>
+__HEADER__
+__NAV__
+<main class="wrap">
+  <p class="hint">Edita precios, nombres o desactiva productos sin tocar el código. Los cambios se aplican al bot de inmediato.</p>
+  <div class="tbl-wrap">
+    <table class="tbl">
+      <thead><tr>
+        <th>Producto</th><th>Descripción</th>
+        <th style="width:100px">Precio (S/)</th><th style="width:70px;text-align:center">Activo</th><th style="width:110px"></th>
+      </tr></thead>
+      <tbody>__FILAS__</tbody>
+    </table>
+  </div>
+</main>
+<div class="toast" id="toast">Guardado</div>
+<script>
+async function guardarItem(btn) {
+  const tr = btn.closest('tr');
+  const id = tr.dataset.id;
+  const nombre      = tr.querySelector('.mi-nombre').value.trim();
+  const descripcion = tr.querySelector('.mi-desc').value.trim();
+  const precio      = parseFloat(tr.querySelector('.mi-precio').value);
+  const disponible  = tr.querySelector('.mi-disp').checked ? 1 : 0;
+  btn.disabled = true;
+  const prev = btn.innerHTML;
+  btn.innerHTML = '…';
+  try {
+    const r = await fetch('/api/menu/item', {
+      method:'POST', credentials:'same-origin',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({id, nombre, descripcion, precio, disponible})
+    });
+    const d = await r.json();
+    if (d.status === 'ok') {
+      const t = document.getElementById('toast');
+      t.classList.add('show');
+      setTimeout(()=>t.classList.remove('show'), 2200);
+    } else {
+      alert('Error: ' + (d.msg || 'No se pudo guardar'));
+    }
+  } catch(e) { alert('Error: ' + e.message); }
+  btn.disabled = false;
+  btn.innerHTML = prev;
+}
+__NAV_BADGE_JS__
+</script>
+</body></html>"""
+
 
 @app.get("/admin/menu", response_class=HTMLResponse)
 async def admin_menu(credentials: HTTPBasicCredentials = Depends(verificar_admin)):
     items = db.get_menu_items()
-    from menu import EMPAQUE
-    # Agrupar por categoría
     grupos: dict = {}
     for it in items:
         grupos.setdefault(it["categoria"], []).append(it)
 
     filas = ""
     for cat, cat_items in grupos.items():
-        filas += f'<tr class="cat-row"><td colspan="5"><strong>{cat}</strong></td></tr>'
+        filas += f'<tr class="cat-row"><td colspan="5">{html.escape(cat)}</td></tr>'
         for it in cat_items:
             disp_checked = "checked" if it["disponible"] else ""
             filas += f"""
 <tr data-id="{it['id']}">
-  <td><input class="mi-nombre" value="{html.escape(it['nombre'])}" style="width:100%"></td>
-  <td><input class="mi-desc" value="{html.escape(it['descripcion'] or '')}" style="width:100%"></td>
-  <td style="width:80px"><input class="mi-precio" type="number" step="0.5" value="{it['precio']}" style="width:70px"></td>
-  <td style="width:60px;text-align:center"><input class="mi-disp" type="checkbox" {disp_checked}></td>
-  <td style="width:70px"><button onclick="guardarItem(this)" style="background:#2d6a2d;color:#fff;border:none;padding:4px 10px;border-radius:6px;cursor:pointer">💾 Guardar</button></td>
+  <td><input class="mi-input mi-nombre" value="{html.escape(it['nombre'])}"></td>
+  <td><input class="mi-input mi-desc" value="{html.escape(it['descripcion'] or '')}"></td>
+  <td><input class="mi-input mi-precio" type="number" step="0.5" value="{it['precio']}" style="width:80px"></td>
+  <td style="text-align:center"><input class="mi-disp" type="checkbox" {disp_checked}></td>
+  <td><button class="btn-save" onclick="guardarItem(this)"><i class="ti ti-device-floppy"></i> Guardar</button></td>
 </tr>"""
 
-    page = f"""<!DOCTYPE html>
-<html lang="es"><head><meta charset="UTF-8">
-<title>Menú — Chilango</title>
-<style>
-  body{{font-family:sans-serif;background:#f5f5f5;margin:0;padding:20px}}
-  h1{{color:#2d6a2d;margin-bottom:4px}}
-  p.sub{{color:#666;margin-top:0;margin-bottom:20px}}
-  table{{width:100%;border-collapse:collapse;background:#fff;border-radius:10px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.08)}}
-  th{{background:#2d6a2d;color:#fff;padding:10px 12px;text-align:left}}
-  td{{padding:8px 12px;border-bottom:1px solid #eee;vertical-align:middle}}
-  tr.cat-row td{{background:#e8f5e9;font-weight:700;font-size:.95em;color:#1b5e20}}
-  input[type=text],input.mi-nombre,input.mi-desc{{border:1px solid #ccc;border-radius:4px;padding:4px 6px;font-size:.9em}}
-  input[type=number]{{border:1px solid #ccc;border-radius:4px;padding:4px 6px;font-size:.9em}}
-  .back{{display:inline-block;margin-bottom:16px;color:#2d6a2d;text-decoration:none;font-weight:600}}
-  .back:hover{{text-decoration:underline}}
-  #toast{{position:fixed;bottom:24px;right:24px;background:#2d6a2d;color:#fff;padding:10px 20px;border-radius:8px;display:none;font-size:.95em;box-shadow:0 4px 12px rgba(0,0,0,.2)}}
-</style>
-</head><body>
-<a class="back" href="/admin">← Volver al panel</a>
-<h1>🍽️ Menú editable</h1>
-<p class="sub">Edita precios, nombres o desactiva items sin tocar el código. Los cambios se reflejan en nuevas conversaciones de forma inmediata.</p>
-<table>
-  <thead><tr>
-    <th>Producto</th><th>Descripción</th>
-    <th>Precio (S/)</th><th>Activo</th><th></th>
-  </tr></thead>
-  <tbody>{filas}</tbody>
-</table>
-<div id="toast">✅ Guardado</div>
-<script>
-async function guardarItem(btn) {{
-  const tr = btn.closest('tr');
-  const id = tr.dataset.id;
-  const nombre    = tr.querySelector('.mi-nombre').value.trim();
-  const descripcion = tr.querySelector('.mi-desc').value.trim();
-  const precio    = parseFloat(tr.querySelector('.mi-precio').value);
-  const disponible = tr.querySelector('.mi-disp').checked ? 1 : 0;
-  btn.textContent = '⏳';
-  const r = await fetch('/api/menu/item', {{
-    method:'POST', credentials:'same-origin',
-    headers:{{'Content-Type':'application/json'}},
-    body: JSON.stringify({{id, nombre, descripcion, precio, disponible}})
-  }});
-  const d = await r.json();
-  btn.textContent = '💾 Guardar';
-  if(d.status==='ok') {{
-    const t = document.getElementById('toast');
-    t.style.display='block';
-    setTimeout(()=>t.style.display='none', 2500);
-  }}
-}}
-</script>
-</body></html>"""
+    page = (_MENU_TEMPLATE
+            .replace("__UI_HEAD__", _UI_HEAD)
+            .replace("__UI_CSS__", _UI_CSS)
+            .replace("__HEADER__", _ui_header("Menú editable"))
+            .replace("__NAV__", _nav_html("menu"))
+            .replace("__NAV_BADGE_JS__", _NAV_BADGE_JS)
+            .replace("__FILAS__", filas))
     return HTMLResponse(page)
 
 
@@ -2231,137 +2336,275 @@ async def api_update_menu_item(
 
 
 # ══════════════════════════════════════════════════════════════
-# ── DASHBOARD DE MÉTRICAS ─────────────────────────────────────
+# ── DASHBOARD DE MÉTRICAS (interactivo) ───────────────────────
 # ══════════════════════════════════════════════════════════════
+
+@app.get("/api/metricas")
+async def api_metricas(
+    credentials: HTTPBasicCredentials = Depends(verificar_admin),
+    dias: int = Query(14)
+):
+    """Datos agregados para el dashboard. ?dias=7|14|30|90 controla el rango."""
+    return JSONResponse(db.get_metricas(dias))
+
+
+_METRICAS_TEMPLATE = """<!DOCTYPE html>
+<html lang="es"><head><title>Métricas — Chilango</title>
+__UI_HEAD__
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>__UI_CSS__
+.controls{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+.upd{font-size:11.5px;color:var(--text3);margin-left:auto}
+.charts{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.chart-box{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px;min-width:0}
+.chart-box.full{grid-column:1/-1}
+.chart-box h3{font-size:13px;font-weight:600;color:var(--text);display:flex;align-items:center;gap:6px;margin-bottom:10px}
+.chart-box h3 i{font-size:15px;color:var(--text3)}
+.chart-head{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+.chart-head h3{margin-bottom:0}
+.chart-hint{font-size:11.5px;color:var(--text3);margin-top:8px;display:flex;align-items:center;gap:5px}
+.chart-hint i{font-size:13px}
+@media(max-width:700px){.charts{grid-template-columns:1fr}}
+</style></head><body>
+__HEADER__
+__NAV__
+<main class="wrap">
+
+  <div class="kpis">
+    <div class="kpi"><div class="lbl">Hoy</div><div class="val" id="kHoy">—</div><span class="delta flat" id="kHoyP"></span></div>
+    <div class="kpi"><div class="lbl">Últimos 7 días</div><div class="val" id="kSem">—</div><span class="delta flat" id="kSemD"></span></div>
+    <div class="kpi"><div class="lbl">Este mes</div><div class="val" id="kMes">—</div><span class="delta flat" id="kMesP"></span></div>
+    <div class="kpi"><div class="lbl">Ticket promedio</div><div class="val" id="kTick">—</div><span class="delta flat" id="kTickP"></span></div>
+  </div>
+
+  <div class="controls">
+    <div class="seg" id="segDias">
+      <button data-d="7">7 días</button>
+      <button data-d="14" class="active">14 días</button>
+      <button data-d="30">30 días</button>
+      <button data-d="90">90 días</button>
+    </div>
+    <button class="iconbtn" onclick="loadMetricas()" title="Actualizar ahora"><i class="ti ti-refresh"></i></button>
+    <span class="upd" id="updNote"></span>
+  </div>
+
+  <div class="charts">
+    <div class="chart-box full">
+      <div class="chart-head">
+        <h3><i class="ti ti-chart-bar"></i> <span id="mainTitle">Ventas por día (S/)</span></h3>
+        <div class="seg" id="segMetric">
+          <button data-m="ventas" class="active">Ventas</button>
+          <button data-m="pedidos">Pedidos</button>
+        </div>
+      </div>
+      <div style="position:relative;height:240px"><canvas id="cMain"></canvas></div>
+      <p class="chart-hint"><i class="ti ti-hand-click"></i> Toca una barra para abrir los pedidos de ese día</p>
+    </div>
+    <div class="chart-box"><h3><i class="ti ti-trophy"></i> Top productos</h3><div style="position:relative;height:230px"><canvas id="cTop"></canvas></div></div>
+    <div class="chart-box"><h3><i class="ti ti-calendar-week"></i> Ventas por día de semana</h3><div style="position:relative;height:230px"><canvas id="cDow"></canvas></div></div>
+    <div class="chart-box"><h3><i class="ti ti-clock"></i> Hora pico</h3><div style="position:relative;height:230px"><canvas id="cHora"></canvas></div></div>
+    <div class="chart-box"><h3><i class="ti ti-wallet"></i> Método de pago</h3><div style="position:relative;height:230px"><canvas id="cPago"></canvas></div></div>
+  </div>
+</main>
+
+<script>
+let DIAS = 14, METRIC = 'ventas', M = null;
+let cMain, cTop, cDow, cHora, cPago;
+const BRAND='#2D5016', GREEN='#4C8527', SOFT='#C9E3B2', AMBER='#D99A2B', VIOLET='#5B3E9E', BLUE='#1A5DA8', GRAY='#B4B2A9', GRID='#EEF0EC';
+Chart.defaults.font.family = 'Inter';
+Chart.defaults.font.size = 11.5;
+Chart.defaults.color = '#5A5F56';
+
+function fmtS(n){ return 'S/ ' + (n || 0).toFixed(2); }
+
+function deltaSemana(cur, prev, el){
+  if (!prev) { el.className = 'delta flat'; el.textContent = 'sin semana previa'; return; }
+  const pct = ((cur - prev) / prev) * 100;
+  const up = pct >= 0;
+  el.className = 'delta ' + (Math.abs(pct) < 1 ? 'flat' : (up ? 'up' : 'down'));
+  el.innerHTML = `<i class="ti ${up ? 'ti-trending-up' : 'ti-trending-down'}"></i>${pct >= 0 ? '+' : ''}${pct.toFixed(0)}% vs semana previa`;
+}
+
+async function loadMetricas(){
+  try {
+    const r = await fetch('/api/metricas?dias=' + DIAS, {credentials:'same-origin'});
+    if (!r.ok) return;
+    M = await r.json();
+    renderKpis();
+    renderCharts();
+    document.getElementById('updNote').textContent =
+      'Actualizado ' + new Date().toLocaleTimeString('es-PE', {hour:'2-digit', minute:'2-digit'});
+  } catch(e) { console.warn('metricas:', e); }
+}
+
+function renderKpis(){
+  document.getElementById('kHoy').textContent  = fmtS(M.total_hoy);
+  document.getElementById('kHoyP').textContent = M.pedidos_hoy + (M.pedidos_hoy === 1 ? ' pedido' : ' pedidos');
+  document.getElementById('kSem').textContent  = fmtS(M.total_semana);
+  deltaSemana(M.total_semana, M.total_semana_prev, document.getElementById('kSemD'));
+  document.getElementById('kMes').textContent  = fmtS(M.total_mes);
+  document.getElementById('kMesP').textContent = M.pedidos_mes + ' pedidos';
+  document.getElementById('kTick').textContent = fmtS(M.ticket_promedio);
+  document.getElementById('kTickP').textContent = M.pedidos_periodo + ' pedidos en ' + M.dias + ' días';
+}
+
+function renderCharts(){
+  [cMain, cTop, cDow, cHora, cPago].forEach(c => { if (c) c.destroy(); });
+  const esVentas = METRIC === 'ventas';
+  document.getElementById('mainTitle').textContent = esVentas ? 'Ventas por día (S/)' : 'Pedidos por día';
+
+  cMain = new Chart(document.getElementById('cMain'), {
+    type: 'bar',
+    data: { labels: M.dias_labels, datasets: [{
+      data: esVentas ? M.dias_ventas : M.dias_pedidos,
+      backgroundColor: SOFT, borderColor: GREEN, hoverBackgroundColor: GREEN,
+      borderWidth: 1, borderRadius: 4
+    }]},
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: {display:false},
+        tooltip: { callbacks: { label: c => esVentas ? fmtS(c.parsed.y) : c.parsed.y + ' pedidos' } } },
+      scales: { y: {beginAtZero:true, grid:{color:GRID}}, x: {grid:{display:false}} },
+      onClick: (e, els) => {
+        if (els.length && M.dias_fechas) {
+          const f = M.dias_fechas[els[0].index];
+          window.location = '/pedidos?fecha=' + encodeURIComponent(f);
+        }
+      },
+      onHover: (e, els) => { e.native.target.style.cursor = els.length ? 'pointer' : 'default'; }
+    }
+  });
+
+  cTop = new Chart(document.getElementById('cTop'), {
+    type: 'bar',
+    data: { labels: M.top_productos.map(p => p.nombre), datasets: [{
+      data: M.top_productos.map(p => p.qty),
+      backgroundColor: BRAND, borderRadius: 4
+    }]},
+    options: {
+      indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+      plugins: { legend: {display:false},
+        tooltip: { callbacks: { label: c => c.parsed.x + ' unidades' } } },
+      scales: { x: {beginAtZero:true, grid:{color:GRID}, ticks:{precision:0}}, y: {grid:{display:false}} }
+    }
+  });
+
+  cDow = new Chart(document.getElementById('cDow'), {
+    type: 'bar',
+    data: { labels: M.dow_labels, datasets: [{
+      data: M.dow_ventas,
+      backgroundColor: ['#A4C97E', '#6B9A3F', BRAND, GRAY], borderRadius: 4
+    }]},
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: {display:false},
+        tooltip: { callbacks: {
+          label: c => fmtS(c.parsed.y),
+          afterLabel: c => (M.dow_pedidos[c.dataIndex] || 0) + ' pedidos'
+        } } },
+      scales: { y: {beginAtZero:true, grid:{color:GRID}}, x: {grid:{display:false}} }
+    }
+  });
+
+  cHora = new Chart(document.getElementById('cHora'), {
+    type: 'bar',
+    data: { labels: M.horas_labels, datasets: [{
+      data: M.horas_data, backgroundColor: AMBER, borderRadius: 4
+    }]},
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: {display:false},
+        tooltip: { callbacks: { label: c => c.parsed.y + ' pedidos' } } },
+      scales: { y: {beginAtZero:true, grid:{color:GRID}, ticks:{precision:0}}, x: {grid:{display:false}} }
+    }
+  });
+
+  const pagoLabels = Object.keys(M.pago_conteo);
+  const pagoColors = pagoLabels.map(l =>
+    ['Yape/Plin','Yape','Plin'].includes(l) ? VIOLET :
+    (l === 'Efectivo' ? GREEN : (l === 'Contra entrega' ? AMBER : GRAY)));
+  cPago = new Chart(document.getElementById('cPago'), {
+    type: 'doughnut',
+    data: { labels: pagoLabels, datasets: [{
+      data: Object.values(M.pago_conteo), backgroundColor: pagoColors, borderWidth: 2, borderColor: '#fff'
+    }]},
+    options: {
+      responsive: true, maintainAspectRatio: false, cutout: '62%',
+      plugins: { legend: {position:'bottom', labels:{boxWidth:12, padding:14}},
+        tooltip: { callbacks: { label: c => {
+          const total = c.dataset.data.reduce((a,b)=>a+b,0) || 1;
+          return ` ${c.label}: ${c.parsed} (${Math.round(c.parsed/total*100)}%)`;
+        } } } }
+    }
+  });
+}
+
+document.querySelectorAll('#segDias button').forEach(b => b.onclick = () => {
+  DIAS = +b.dataset.d;
+  document.querySelectorAll('#segDias button').forEach(x => x.classList.remove('active'));
+  b.classList.add('active');
+  loadMetricas();
+});
+document.querySelectorAll('#segMetric button').forEach(b => b.onclick = () => {
+  METRIC = b.dataset.m;
+  document.querySelectorAll('#segMetric button').forEach(x => x.classList.remove('active'));
+  b.classList.add('active');
+  if (M) renderCharts();
+});
+
+loadMetricas();
+setInterval(loadMetricas, 60000);
+__NAV_BADGE_JS__
+</script>
+</body></html>"""
+
 
 @app.get("/admin/metricas", response_class=HTMLResponse)
 async def admin_metricas(credentials: HTTPBasicCredentials = Depends(verificar_admin)):
-    m = db.get_metricas()
-    import json as _json
-    dias_labels   = _json.dumps(m["dias_labels"])
-    dias_ventas   = _json.dumps(m["dias_ventas"])
-    dias_pedidos  = _json.dumps(m["dias_pedidos"])
-    horas_labels  = _json.dumps(m["horas_labels"])
-    horas_data    = _json.dumps(m["horas_data"])
-    top_nombres   = _json.dumps([p["nombre"] for p in m["top_productos"]])
-    top_qtys      = _json.dumps([p["qty"]    for p in m["top_productos"]])
-    pago_labels   = _json.dumps(list(m["pago_conteo"].keys()))
-    pago_data     = _json.dumps(list(m["pago_conteo"].values()))
-
-    page = f"""<!DOCTYPE html>
-<html lang="es"><head><meta charset="UTF-8">
-<title>Métricas — Chilango</title>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-<style>
-  *{{box-sizing:border-box;margin:0;padding:0}}
-  body{{font-family:sans-serif;background:#f0f4f0;padding:20px;color:#222}}
-  h1{{color:#2d6a2d;margin-bottom:4px}}
-  .sub{{color:#666;margin-bottom:20px;font-size:.9em}}
-  .back{{display:inline-block;margin-bottom:16px;color:#2d6a2d;text-decoration:none;font-weight:600}}
-  .back:hover{{text-decoration:underline}}
-  .cards{{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px;margin-bottom:24px}}
-  .card{{background:#fff;border-radius:12px;padding:16px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,.07)}}
-  .card .val{{font-size:1.8em;font-weight:700;color:#2d6a2d}}
-  .card .lbl{{font-size:.8em;color:#666;margin-top:4px}}
-  .charts{{display:grid;grid-template-columns:1fr 1fr;gap:16px}}
-  .chart-box{{background:#fff;border-radius:12px;padding:16px;box-shadow:0 2px 8px rgba(0,0,0,.07)}}
-  .chart-box h3{{font-size:.95em;color:#2d6a2d;margin-bottom:12px}}
-  @media(max-width:700px){{.charts{{grid-template-columns:1fr}}}}
-</style>
-</head><body>
-<a class="back" href="/admin">← Volver al panel</a>
-<h1>📊 Métricas de ventas</h1>
-<p class="sub">Actualizado al abrir esta página</p>
-
-<div class="cards">
-  <div class="card"><div class="val">S/ {m['total_hoy']:.2f}</div><div class="lbl">💰 Ventas hoy</div></div>
-  <div class="card"><div class="val">{m['pedidos_hoy']}</div><div class="lbl">📦 Pedidos hoy</div></div>
-  <div class="card"><div class="val">S/ {m['total_semana']:.2f}</div><div class="lbl">📅 Esta semana</div></div>
-  <div class="card"><div class="val">{m['pedidos_semana']}</div><div class="lbl">📦 Pedidos semana</div></div>
-  <div class="card"><div class="val">S/ {m['total_mes']:.2f}</div><div class="lbl">🗓️ Este mes</div></div>
-  <div class="card"><div class="val">{m['pedidos_mes']}</div><div class="lbl">📦 Pedidos mes</div></div>
-</div>
-
-<div class="charts">
-  <div class="chart-box" style="grid-column:1/-1">
-    <h3>📈 Ventas últimos 14 días (S/)</h3>
-    <canvas id="cVentas" height="90"></canvas>
-  </div>
-  <div class="chart-box">
-    <h3>🌮 Top productos más pedidos</h3>
-    <canvas id="cTop"></canvas>
-  </div>
-  <div class="chart-box">
-    <h3>🕐 Hora pico</h3>
-    <canvas id="cHora"></canvas>
-  </div>
-  <div class="chart-box">
-    <h3>💳 Método de pago</h3>
-    <canvas id="cPago"></canvas>
-  </div>
-  <div class="chart-box">
-    <h3>📦 Pedidos por día</h3>
-    <canvas id="cPedidos" height="90"></canvas>
-  </div>
-</div>
-
-<script>
-const green = '#2d6a2d', lightGreen = '#81c784', lime = '#c8e6c9';
-Chart.defaults.font.family = 'sans-serif';
-Chart.defaults.font.size   = 12;
-
-new Chart(document.getElementById('cVentas'), {{
-  type:'bar',
-  data:{{ labels:{dias_labels}, datasets:[{{
-    label:'S/', data:{dias_ventas},
-    backgroundColor: lightGreen, borderColor: green, borderWidth:1, borderRadius:4
-  }}]}},
-  options:{{ plugins:{{legend:{{display:false}}}}, scales:{{ y:{{beginAtZero:true}} }} }}
-}});
-
-new Chart(document.getElementById('cTop'), {{
-  type:'bar',
-  data:{{ labels:{top_nombres}, datasets:[{{
-    label:'Unidades', data:{top_qtys},
-    backgroundColor: green, borderRadius:4
-  }}]}},
-  options:{{ indexAxis:'y', plugins:{{legend:{{display:false}}}} }}
-}});
-
-new Chart(document.getElementById('cHora'), {{
-  type:'bar',
-  data:{{ labels:{horas_labels}, datasets:[{{
-    label:'Pedidos', data:{horas_data},
-    backgroundColor: '#ff8f00', borderRadius:4
-  }}]}},
-  options:{{ plugins:{{legend:{{display:false}}}}, scales:{{ y:{{beginAtZero:true}} }} }}
-}});
-
-new Chart(document.getElementById('cPago'), {{
-  type:'doughnut',
-  data:{{ labels:{pago_labels}, datasets:[{{
-    data:{pago_data},
-    backgroundColor:[green, '#ff8f00', '#1565c0', '#6a1b9a']
-  }}]}}
-}});
-
-new Chart(document.getElementById('cPedidos'), {{
-  type:'line',
-  data:{{ labels:{dias_labels}, datasets:[{{
-    label:'Pedidos', data:{dias_pedidos},
-    borderColor: green, backgroundColor: lime,
-    fill:true, tension:.3, pointRadius:3
-  }}]}},
-  options:{{ plugins:{{legend:{{display:false}}}}, scales:{{ y:{{beginAtZero:true}} }} }}
-}});
-</script>
-</body></html>"""
+    page = (_METRICAS_TEMPLATE
+            .replace("__UI_HEAD__", _UI_HEAD)
+            .replace("__UI_CSS__", _UI_CSS)
+            .replace("__HEADER__", _ui_header("Métricas de ventas"))
+            .replace("__NAV__", _nav_html("metricas"))
+            .replace("__NAV_BADGE_JS__", _NAV_BADGE_JS))
     return HTMLResponse(page)
 
 
 # ══════════════════════════════════════════════════════════════
 # ── HISTORIAL DE COSTOS POR ZONA ──────────────────────────────
 # ══════════════════════════════════════════════════════════════
+
+_ZONAS_TEMPLATE = """<!DOCTYPE html>
+<html lang="es"><head><title>Zonas delivery — Chilango</title>
+__UI_HEAD__
+<style>__UI_CSS__
+.hint{font-size:12.5px;color:var(--text3);margin-bottom:14px}
+.z-dir{max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text3);font-size:12px}
+.z-prom{font-weight:600;color:var(--brand)}
+.controls{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+.empty{text-align:center;padding:50px 20px;color:var(--text3)}
+.empty i{display:block;font-size:40px;margin-bottom:10px;color:var(--border2)}
+</style></head><body>
+__HEADER__
+__NAV__
+<main class="wrap">
+  <p class="hint">Costos de delivery aprendidos automáticamente de cada pedido. Úsalos como referencia para responder rápido las consultas de costo.</p>
+  <div class="controls">
+    <div class="searchwrap"><i class="ti ti-search"></i><input id="zSearch" type="search" placeholder="Buscar zona o dirección…" oninput="zFiltrar(this.value)"></div>
+  </div>
+  __TABLA__
+</main>
+<script>
+function zFiltrar(q) {
+  q = (q || '').trim().toLowerCase();
+  document.querySelectorAll('#zBody tr').forEach(tr => {
+    tr.style.display = !q || tr.textContent.toLowerCase().includes(q) ? '' : 'none';
+  });
+}
+__NAV_BADGE_JS__
+</script>
+</body></html>"""
+
 
 @app.get("/admin/zonas-delivery", response_class=HTMLResponse)
 async def admin_zonas_delivery(credentials: HTTPBasicCredentials = Depends(verificar_admin)):
@@ -2372,45 +2615,32 @@ async def admin_zonas_delivery(credentials: HTTPBasicCredentials = Depends(verif
         for z in zonas:
             filas += f"""
 <tr>
-  <td>{html.escape(z['zona'])}</td>
-  <td style="text-align:center"><strong>S/ {z['costo_promedio']:.1f}</strong></td>
-  <td style="text-align:center">S/ {z['ultimo_costo']:.1f}</td>
-  <td style="text-align:center">S/ {z['costo_min']:.1f} – S/ {z['costo_max']:.1f}</td>
-  <td style="text-align:center">{z['frecuencia']}x</td>
-  <td style="color:#888;font-size:.85em">{z['ultima_vez']}</td>
-  <td style="font-size:.8em;color:#555;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
-      title="{html.escape(z['ultima_dir'])}">{html.escape(z['ultima_dir'])}</td>
+  <td style="font-weight:600">{html.escape(z['zona'])}</td>
+  <td class="num z-prom">S/ {z['costo_promedio']:.1f}</td>
+  <td class="num">S/ {z['ultimo_costo']:.1f}</td>
+  <td class="num">S/ {z['costo_min']:.1f} – S/ {z['costo_max']:.1f}</td>
+  <td class="num">{z['frecuencia']}×</td>
+  <td style="color:var(--text3);font-size:12px;white-space:nowrap">{html.escape(z['ultima_vez'])}</td>
+  <td class="z-dir" title="{html.escape(z['ultima_dir'])}">{html.escape(z['ultima_dir'])}</td>
 </tr>"""
-        tabla = f"""<table>
+        tabla = f"""<div class="tbl-wrap"><table class="tbl">
 <thead><tr>
-  <th>Zona / Referencia</th><th>Promedio</th><th>Último</th>
-  <th>Rango</th><th>Veces</th><th>Última vez</th><th>Dirección ejemplo</th>
+  <th>Zona / referencia</th><th style="text-align:right">Promedio</th><th style="text-align:right">Último</th>
+  <th style="text-align:right">Rango</th><th style="text-align:right">Veces</th><th>Última vez</th><th>Dirección ejemplo</th>
 </tr></thead>
-<tbody>{filas}</tbody>
-</table>"""
+<tbody id="zBody">{filas}</tbody>
+</table></div>"""
     else:
-        tabla = '<p style="color:#888;margin-top:20px">Aún no hay datos de costos de delivery registrados.</p>'
+        tabla = ('<div class="tbl-wrap"><div class="empty"><i class="ti ti-map-pin-off"></i>'
+                 'Aún no hay costos de delivery registrados</div></div>')
 
-    page = f"""<!DOCTYPE html>
-<html lang="es"><head><meta charset="UTF-8">
-<title>Zonas Delivery — Chilango</title>
-<style>
-  body{{font-family:sans-serif;background:#f5f5f5;margin:0;padding:20px}}
-  h1{{color:#2d6a2d;margin-bottom:4px}}
-  p.sub{{color:#666;margin-bottom:20px;font-size:.9em}}
-  .back{{display:inline-block;margin-bottom:16px;color:#2d6a2d;text-decoration:none;font-weight:600}}
-  .back:hover{{text-decoration:underline}}
-  table{{width:100%;border-collapse:collapse;background:#fff;border-radius:10px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.08)}}
-  th{{background:#2d6a2d;color:#fff;padding:10px 12px;text-align:left;font-size:.9em}}
-  td{{padding:9px 12px;border-bottom:1px solid #eee;font-size:.9em}}
-  tr:hover td{{background:#f1f8f1}}
-</style>
-</head><body>
-<a class="back" href="/admin">← Volver al panel</a>
-<h1>🛵 Historial de costos por zona</h1>
-<p class="sub">Costos aprendidos automáticamente de cada pedido con delivery. Úsalos como referencia para responder rápido.</p>
-{tabla}
-</body></html>"""
+    page = (_ZONAS_TEMPLATE
+            .replace("__UI_HEAD__", _UI_HEAD)
+            .replace("__UI_CSS__", _UI_CSS)
+            .replace("__HEADER__", _ui_header("Costos de delivery por zona"))
+            .replace("__NAV__", _nav_html("zonas"))
+            .replace("__NAV_BADGE_JS__", _NAV_BADGE_JS)
+            .replace("__TABLA__", tabla))
     return HTMLResponse(page)
 
 
@@ -2557,52 +2787,51 @@ async def reactivar_bot_conv(
     return JSONResponse({"status": "ok"})
 
 
-@app.get("/api/conversations")
-async def api_conversations(credentials: HTTPBasicCredentials = Depends(verificar_admin)):
-    """Endpoint JSON para polling del panel admin sin recargar la página."""
-    conversaciones_raw = db.get_conversations_with_status()
-    # Sidebar HTML (reproducir la misma lógica de /admin)
-    contacts_html = ""
-    for phone, data in conversaciones_raw.items():
-        mensajes = data["messages"]
-        leida = data["leida"]
-        if not mensajes:
-            continue
-        ultimo = mensajes[-1]
-        contenido = ultimo["content"]
-        if isinstance(contenido, list):
-            preview = next((b["text"] for b in contenido if b.get("type") == "text"), "[imagen]")
-        else:
-            preview = contenido
-        preview = html.escape(str(preview)[:50])
-        badge = "" if leida else f'<div class="contact-unread">{sum(1 for m in mensajes if m["role"] == "user")}</div>'
-        unread_class = "" if leida else " unread"
-        es_delivery = phone in DELIVERY_NAME_MAP
-        display_name = f"🛵 {DELIVERY_NAME_MAP[phone]}" if es_delivery else f"+{phone}"
-        avatar = "🛵" if es_delivery else "👤"
-        tiempo = _format_contact_time(data.get("last_msg_at", ""))
-        contacts_html += (
-            f'<div class="contact{unread_class}" id="c_{html.escape(phone)}" onclick="contactClick(event,\'{html.escape(phone)}\')" data-phone="{html.escape(phone)}">'
-            f'<input type="checkbox" class="conv-chk" data-phone="{html.escape(phone)}"'
-            f' onclick="event.stopPropagation()" onchange="onChkChange()"'
-            f' style="display:none;width:14px;height:14px;flex-shrink:0;cursor:pointer;accent-color:#25d366;margin-right:4px">'
-            f'<div class="avatar">{avatar}</div>'
-            f'<div class="contact-info">'
-            f'<div class="contact-row1"><div class="contact-name">{html.escape(display_name)}</div>'
-            f'<div class="contact-time">{tiempo}</div></div>'
-            f'<div class="contact-row2"><div class="contact-preview">{preview}</div>{badge}</div>'
-            f'</div></div>'
-        )
-    # Mensajes limpios (sin imágenes) + timestamp si existe
-    conv_clean = {}
-    conv_escalado = {}
+def _contact_item_html(phone: str, data: dict) -> str:
+    """Item de contacto del sidebar de conversaciones (usado por /admin y /api/conversations)."""
+    mensajes = data["messages"]
+    if not mensajes:
+        return ""
+    leida = data["leida"]
+    ultimo = mensajes[-1]
+    contenido = ultimo["content"]
+    if isinstance(contenido, list):
+        preview = next((b["text"] for b in contenido if b.get("type") == "text"), "[imagen]")
+    else:
+        preview = contenido
+    preview = html.escape(str(preview)[:50])
+    badge = "" if leida else f'<div class="contact-unread">{sum(1 for m in mensajes if m["role"] == "user")}</div>'
+    unread_class = "" if leida else " unread"
+    es_delivery = phone in DELIVERY_NAME_MAP
+    display_name = DELIVERY_NAME_MAP[phone] if es_delivery else f"+{phone}"
+    avatar_icon = "ti-motorbike" if es_delivery else "ti-user"
+    tiempo = _format_contact_time(data.get("last_msg_at", ""))
+    p = html.escape(phone)
+    return (
+        f'<div class="contact{unread_class}" id="c_{p}" onclick="contactClick(event,\'{p}\')" data-phone="{p}">'
+        f'<input type="checkbox" class="conv-chk" data-phone="{p}"'
+        f' onclick="event.stopPropagation()" onchange="onChkChange()"'
+        f' style="display:none;width:14px;height:14px;flex-shrink:0;cursor:pointer;accent-color:#2D5016;margin-right:4px">'
+        f'<div class="avatar"><i class="ti {avatar_icon}"></i></div>'
+        f'<div class="contact-info">'
+        f'<div class="contact-row1"><div class="contact-name">{html.escape(display_name)}</div>'
+        f'<div class="contact-time">{tiempo}</div></div>'
+        f'<div class="contact-row2"><div class="contact-preview">{preview}</div>{badge}</div>'
+        f'</div></div>'
+    )
+
+
+def _conv_clean_for_js(conversaciones_raw: dict) -> tuple[dict, dict]:
+    """Serializa conversaciones para el frontend (sin imágenes base64)."""
+    conv_clean: dict = {}
+    conv_escalado: dict = {}
     for phone, data in conversaciones_raw.items():
         conv_clean[phone] = []
         conv_escalado[phone] = data.get("escalado", False)
         for m in data["messages"]:
             c = m["content"]
             if isinstance(c, list):
-                texto = next((b["text"] for b in c if b.get("type") == "text"), "[imagen 📷]")
+                texto = next((b["text"] for b in c if b.get("type") == "text"), "[imagen]")
             else:
                 texto = c
             conv_clean[phone].append({
@@ -2611,7 +2840,97 @@ async def api_conversations(credentials: HTTPBasicCredentials = Depends(verifica
                 "ts": m.get("ts", ""),
                 "manual": m.get("manual", False),
             })
+    return conv_clean, conv_escalado
+
+
+@app.get("/api/conversations")
+async def api_conversations(credentials: HTTPBasicCredentials = Depends(verificar_admin)):
+    """Endpoint JSON para polling del panel admin sin recargar la página."""
+    conversaciones_raw = db.get_conversations_with_status()
+    contacts_html = "".join(
+        _contact_item_html(phone, data) for phone, data in conversaciones_raw.items()
+    )
+    conv_clean, conv_escalado = _conv_clean_for_js(conversaciones_raw)
     return JSONResponse({"contacts_html": contacts_html, "convs": conv_clean, "escalado": conv_escalado})
+
+
+_CLIENTES_TEMPLATE = """<!DOCTYPE html>
+<html lang="es"><head><title>Clientes — Chilango</title>
+__UI_HEAD__
+<style>__UI_CSS__
+.controls{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px}
+.cl-rank{text-align:center;width:44px}
+.rank-chip{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;font-size:11.5px;font-weight:600;background:var(--bg);color:var(--text2)}
+.rank-chip.r1{background:var(--amber-bg);color:var(--amber)}
+.rank-chip.r2{background:var(--bg);color:var(--text2);border:1px solid var(--border2)}
+.rank-chip.r3{background:#F8EDE6;color:#9A5B2E}
+.cl-phone a{color:var(--brand);text-decoration:none;font-weight:600;display:inline-flex;align-items:center;gap:5px}
+.cl-phone a:hover{text-decoration:underline}
+.cl-phone a i{font-size:14px}
+.cl-total{color:var(--brand);font-weight:600}
+.cl-hist{color:var(--text2);background:var(--bg)}
+.cl-date{color:var(--text3);font-size:12px;white-space:nowrap}
+.pts-input{width:70px;border:1px solid var(--border);border-radius:7px;padding:5px 8px;font:inherit;font-size:13px;text-align:center;outline:none;transition:border-color .15s;font-variant-numeric:tabular-nums}
+.pts-input:focus{border-color:var(--brand)}
+.pts-input.saved{border-color:var(--green);background:var(--green-bg)}
+.pts-input.saving{border-color:var(--amber-mid)}
+.rec-badge{font-size:10.5px;background:var(--green-bg);color:var(--green);border-radius:999px;padding:1px 7px;font-weight:600;margin-left:5px}
+.empty{text-align:center;padding:50px 20px;color:var(--text3)}
+.empty i{display:block;font-size:40px;margin-bottom:10px;color:var(--border2)}
+</style></head><body>
+__HEADER__
+__NAV__
+<main class="wrap">
+  <div class="kpis">
+    <div class="kpi"><div class="lbl">Clientes — __LABEL_FECHA__</div><div class="val">__N_CLIENTES__</div></div>
+    <div class="kpi"><div class="lbl">Pedidos ese día</div><div class="val">__N_PEDIDOS__</div></div>
+    <div class="kpi"><div class="lbl">Facturación del día</div><div class="val">S/ __FACTURACION__</div></div>
+    <div class="kpi"><div class="lbl">Ticket promedio</div><div class="val">S/ __TICKET__</div></div>
+  </div>
+  <div class="controls">
+    <select class="ctl" onchange="if(this.value)location.href='/admin/clientes?fecha='+encodeURIComponent(this.value)">__FECHAS_OPTIONS__</select>
+    <div class="searchwrap"><i class="ti ti-search"></i><input id="buscar" type="search" placeholder="Buscar por teléfono o nombre…" oninput="filtrar(this.value)"></div>
+  </div>
+  __TABLA__
+</main>
+<div class="toast" id="toast"></div>
+<script>
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2200);
+}
+
+async function guardarPuntos(phone, input) {
+  input.classList.add('saving');
+  try {
+    const r = await fetch('/api/clientes/puntos', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({phone, puntos: parseInt(input.value) || 0})
+    });
+    const d = await r.json();
+    if (d.status === 'ok') {
+      input.classList.remove('saving');
+      input.classList.add('saved');
+      setTimeout(() => input.classList.remove('saved'), 1500);
+      showToast('Puntos actualizados');
+    } else {
+      alert('Error: ' + (d.msg || 'No se pudo guardar'));
+    }
+  } catch(e) { alert('Error: ' + e.message); }
+}
+
+function filtrar(q) {
+  q = (q || '').toLowerCase();
+  document.querySelectorAll('#tbody tr').forEach(tr => {
+    tr.style.display = tr.textContent.toLowerCase().includes(q) ? '' : 'none';
+  });
+}
+__NAV_BADGE_JS__
+</script>
+</body></html>"""
 
 
 @app.get("/admin/clientes", response_class=HTMLResponse)
@@ -2624,36 +2943,33 @@ async def admin_clientes(
     hoy = datetime.now(PERU_TZ).strftime("%d/%m/%Y")
     fecha_sel = fecha if fecha else hoy
 
-    # Obtener fechas disponibles para el selector
     fechas_raw = db.get_available_dates()
     fechas_disponibles = fechas_raw if hoy in fechas_raw else [hoy] + fechas_raw
 
-    # Clientes del día seleccionado
     clientes = db.get_customers_with_stats_for_date(fecha_sel)
 
     filas = ""
     for i, c in enumerate(clientes, 1):
-        nombre    = html.escape(c.get("nombre") or "—")
-        phone          = html.escape(c.get("phone") or "")
-        ultima_dir     = html.escape(c.get("ultima_dir") or "—")
-        puntos         = int(c.get("puntos") or 0)
-        pedidos_dia    = int(c.get("total_pedidos") or 0)
-        gastado_dia    = float(c.get("total_gastado") or 0)
-        pedidos_hist   = int(c.get("total_pedidos_hist") or pedidos_dia)
-        gastado_hist   = float(c.get("total_gastado_hist") or gastado_dia)
-        es_recurrente  = pedidos_hist > pedidos_dia
-        updated        = (c.get("updated_at") or "—")[:16]
-        medal = "🥇" if i == 1 else ("🥈" if i == 2 else ("🥉" if i == 3 else f"{i}"))
-        badge_rec = ' <span style="font-size:10px;background:#e8f5e9;color:#2e7d32;border-radius:10px;padding:1px 6px;font-weight:600">recurrente</span>' if es_recurrente else ''
+        nombre       = html.escape(c.get("nombre") or "—")
+        phone        = html.escape(c.get("phone") or "")
+        puntos       = int(c.get("puntos") or 0)
+        pedidos_dia  = int(c.get("total_pedidos") or 0)
+        gastado_dia  = float(c.get("total_gastado") or 0)
+        pedidos_hist = int(c.get("total_pedidos_hist") or pedidos_dia)
+        gastado_hist = float(c.get("total_gastado_hist") or gastado_dia)
+        es_recurrente = pedidos_hist > pedidos_dia
+        updated      = (c.get("updated_at") or "—")[:16]
+        rank_cls = "r1" if i == 1 else ("r2" if i == 2 else ("r3" if i == 3 else ""))
+        badge_rec = '<span class="rec-badge">recurrente</span>' if es_recurrente else ''
         filas += f"""<tr>
-          <td class="cl-rank">{medal}</td>
-          <td class="cl-phone"><a href="https://wa.me/{phone}" target="_blank">+{phone}</a></td>
+          <td class="cl-rank"><span class="rank-chip {rank_cls}">{i}</span></td>
+          <td class="cl-phone"><a href="https://wa.me/{phone}" target="_blank" title="Abrir chat de WhatsApp"><i class="ti ti-brand-whatsapp"></i>+{phone}</a></td>
           <td>{nombre}{badge_rec}</td>
-          <td class="cl-num">{pedidos_dia}</td>
-          <td class="cl-num cl-total">S/ {gastado_dia:.2f}</td>
-          <td class="cl-num cl-hist">{pedidos_hist}</td>
-          <td class="cl-num cl-hist">S/ {gastado_hist:.2f}</td>
-          <td class="cl-pts">
+          <td class="num">{pedidos_dia}</td>
+          <td class="num cl-total">S/ {gastado_dia:.2f}</td>
+          <td class="num cl-hist">{pedidos_hist}</td>
+          <td class="num cl-hist">S/ {gastado_hist:.2f}</td>
+          <td style="text-align:center">
             <input class="pts-input" type="number" min="0" value="{puntos}"
               onchange="guardarPuntos('{phone}', this)"
               onkeydown="if(event.key==='Enter')this.blur()">
@@ -2664,147 +2980,49 @@ async def admin_clientes(
     total_clientes = len(clientes)
     total_gastado_global = sum(c.get("total_gastado") or 0 for c in clientes)
     total_pedidos_dia = sum(c.get("total_pedidos") or 0 for c in clientes)
-    label_fecha = f"{'Hoy ' if fecha_sel == hoy else ''}{fecha_sel}"
+    label_fecha = "hoy" if fecha_sel == hoy else fecha_sel
 
-    selector_fechas = "".join(
+    fechas_options = "".join(
         f'<option value="{f}" {"selected" if f == fecha_sel else ""}>{f}{" (hoy)" if f == hoy else ""}</option>'
         for f in fechas_disponibles
     )
 
-    return f"""<!DOCTYPE html>
-<html lang="es">
-<head>
-<title>Clientes — Chilango</title>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<style>
-*{{box-sizing:border-box;margin:0;padding:0}}
-body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f0f2f5;min-height:100vh}}
-.hdr{{background:#2D5016;color:white;padding:10px 18px;display:flex;align-items:center;gap:12px;position:sticky;top:0;z-index:50;box-shadow:0 2px 8px rgba(0,0,0,.25)}}
-.hdr-title h1{{font-size:16px;font-weight:700}}
-.hdr-title small{{font-size:11px;opacity:.7}}
-.nav{{background:#1b3a0e;display:flex}}
-.nav a{{color:rgba(255,255,255,.7);text-decoration:none;padding:9px 18px;font-size:13px;transition:background .15s}}
-.nav a:hover,.nav a.active{{color:#fff;background:rgba(255,255,255,.12)}}
-.wrap{{max-width:1100px;margin:0 auto;padding:20px 16px}}
-.toolbar-cl{{display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap}}
-.toolbar-cl select{{border:1px solid #ccc;border-radius:8px;padding:6px 12px;font-size:13px;cursor:pointer;outline:none}}
-.toolbar-cl input{{border:1px solid #ddd;border-radius:10px;padding:8px 14px;font-size:14px;outline:none;min-width:240px}}
-.toolbar-cl input:focus{{border-color:#2D5016}}
-.stats-bar{{display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap}}
-.stat-chip{{background:white;border-radius:12px;padding:12px 20px;box-shadow:0 1px 4px rgba(0,0,0,.08);text-align:center}}
-.stat-chip .val{{font-size:22px;font-weight:700;color:#2D5016}}
-.stat-chip .lbl{{font-size:11px;color:#888;margin-top:2px}}
-.tbl-wrap{{background:white;border-radius:14px;box-shadow:0 1px 4px rgba(0,0,0,.08);overflow:hidden}}
-table{{width:100%;border-collapse:collapse}}
-thead th{{background:#2D5016;color:white;padding:11px 14px;text-align:left;font-size:12px;font-weight:600;white-space:nowrap}}
-tbody tr{{border-bottom:1px solid #f0f0f0;transition:background .1s}}
-tbody tr:hover{{background:#f8fdf5}}
-tbody tr:last-child{{border-bottom:none}}
-td{{padding:10px 14px;font-size:13px;color:#333}}
-.cl-rank{{font-size:16px;text-align:center;width:40px}}
-.cl-phone a{{color:#2D5016;text-decoration:none;font-weight:600}}
-.cl-phone a:hover{{text-decoration:underline}}
-.cl-num{{text-align:right;font-variant-numeric:tabular-nums}}
-.cl-total{{color:#2D5016;font-weight:700}}
-.cl-hist{{color:#555;background:#f8fdf5}}
-.cl-date{{color:#999;font-size:12px}}
-.pts-input{{width:72px;border:1px solid #ddd;border-radius:8px;padding:5px 8px;font-size:13px;text-align:center;outline:none;transition:border-color .15s}}
-.pts-input:focus{{border-color:#2D5016}}
-.pts-input.saved{{border-color:#4caf50;background:#f0fff4}}
-.pts-input.saving{{border-color:#ff9800}}
-.empty{{text-align:center;padding:48px;color:#aaa;font-size:15px}}
-.toast{{position:fixed;bottom:24px;right:24px;background:#2D5016;color:white;padding:10px 20px;border-radius:10px;font-size:13px;opacity:0;transition:opacity .3s;pointer-events:none;z-index:999}}
-.toast.show{{opacity:1}}
-</style>
-</head>
-<body>
-<div class="hdr">
-  <div class="hdr-title">
-    <h1>🌮 Chilango Bot</h1>
-    <small>Panel de administración</small>
-  </div>
-</div>
-<nav class="nav">
-  <a href="/pedidos">📦 Pedidos</a>
-  <a href="/admin">💬 Conversaciones</a>
-  <a href="/admin/clientes" class="active">👥 Clientes</a>
-  <a href="/admin/metricas">📊 Métricas</a>
-  <a href="/admin/zonas-delivery">🛵 Zonas</a>
-  <a href="/admin/menu">🍽️ Menú</a>
-</nav>
-<div class="wrap">
-  <div class="toolbar-cl">
-    <select onchange="if(this.value)location.href='/admin/clientes?fecha='+encodeURIComponent(this.value)">
-      {selector_fechas}
-    </select>
-    <input type="text" id="buscar" placeholder="🔍 Buscar por teléfono o nombre..." oninput="filtrar(this.value)">
-  </div>
-  <div class="stats-bar">
-    <div class="stat-chip"><div class="val">{total_clientes}</div><div class="lbl">Clientes — {label_fecha}</div></div>
-    <div class="stat-chip"><div class="val">{total_pedidos_dia}</div><div class="lbl">Pedidos ese día</div></div>
-    <div class="stat-chip"><div class="val">S/ {total_gastado_global:.2f}</div><div class="lbl">Facturación del día</div></div>
-    <div class="stat-chip"><div class="val">S/ {(total_gastado_global/total_clientes if total_clientes else 0):.2f}</div><div class="lbl">Ticket promedio</div></div>
-  </div>
-  <div class="tbl-wrap">
-    {"<div class='empty'>Sin pedidos para " + html.escape(fecha_sel) + " 🌮</div>" if not clientes else f"""
-    <table id="tablaClientes">
+    if clientes:
+        tabla = f"""<div class="tbl-wrap">
+    <table class="tbl">
       <thead>
         <tr>
-          <th>#</th>
+          <th style="text-align:center">#</th>
           <th>Teléfono</th>
           <th>Nombre</th>
           <th style="text-align:right">Pedidos día</th>
           <th style="text-align:right">Total día</th>
-          <th style="text-align:right;background:#1b3a0e">Pedidos hist.</th>
-          <th style="text-align:right;background:#1b3a0e">Total hist.</th>
-          <th style="text-align:center">Puntos 🌟</th>
+          <th style="text-align:right">Pedidos hist.</th>
+          <th style="text-align:right">Total hist.</th>
+          <th style="text-align:center">Puntos</th>
           <th>Última actividad</th>
         </tr>
       </thead>
       <tbody id="tbody">{filas}</tbody>
-    </table>"""}
-  </div>
-</div>
-<div class="toast" id="toast"></div>
-<script>
-function showToast(msg) {{
-  const t = document.getElementById('toast');
-  t.textContent = msg; t.classList.add('show');
-  setTimeout(() => t.classList.remove('show'), 2200);
-}}
+    </table></div>"""
+    else:
+        tabla = (f'<div class="tbl-wrap"><div class="empty"><i class="ti ti-users"></i>'
+                 f'Sin pedidos para {html.escape(fecha_sel)}</div></div>')
 
-async function guardarPuntos(phone, input) {{
-  input.classList.add('saving');
-  try {{
-    const r = await fetch('/api/clientes/puntos', {{
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: {{'Content-Type':'application/json'}},
-      body: JSON.stringify({{phone, puntos: parseInt(input.value) || 0}})
-    }});
-    const d = await r.json();
-    if (d.status === 'ok') {{
-      input.classList.remove('saving');
-      input.classList.add('saved');
-      setTimeout(() => input.classList.remove('saved'), 1500);
-      showToast('✅ Puntos actualizados');
-    }} else {{
-      alert('Error: ' + (d.msg || 'No se pudo guardar'));
-    }}
-  }} catch(e) {{ alert('Error: ' + e.message); }}
-}}
-
-function filtrar(q) {{
-  q = q.toLowerCase();
-  document.querySelectorAll('#tbody tr').forEach(tr => {{
-    const txt = tr.textContent.toLowerCase();
-    tr.style.display = txt.includes(q) ? '' : 'none';
-  }});
-}}
-</script>
-</body>
-</html>"""
+    page = (_CLIENTES_TEMPLATE
+            .replace("__UI_HEAD__", _UI_HEAD)
+            .replace("__UI_CSS__", _UI_CSS)
+            .replace("__HEADER__", _ui_header("Clientes y puntos"))
+            .replace("__NAV__", _nav_html("clientes"))
+            .replace("__NAV_BADGE_JS__", _NAV_BADGE_JS)
+            .replace("__LABEL_FECHA__", html.escape(label_fecha))
+            .replace("__N_CLIENTES__", str(total_clientes))
+            .replace("__N_PEDIDOS__", str(total_pedidos_dia))
+            .replace("__FACTURACION__", f"{total_gastado_global:.2f}")
+            .replace("__TICKET__", f"{(total_gastado_global/total_clientes if total_clientes else 0):.2f}")
+            .replace("__FECHAS_OPTIONS__", fechas_options)
+            .replace("__TABLA__", tabla))
+    return HTMLResponse(page)
 
 
 @app.post("/api/config/agotados")
@@ -2846,452 +3064,392 @@ async def api_actualizar_puntos(
     return JSONResponse({"status": "ok"})
 
 
+# ══════════════════════════════════════════════════════════════
+# ── PANEL DE CONVERSACIONES ───────────────────────────────────
+# ══════════════════════════════════════════════════════════════
+
+_ADMIN_TEMPLATE = """<!DOCTYPE html>
+<html lang="es"><head><title>Conversaciones — Chilango</title>
+__UI_HEAD__
+<style>__UI_CSS__
+html,body{height:100%}
+body{display:flex;flex-direction:column;overflow:hidden}
+.hdr{position:static}
+.container{display:flex;flex:1;overflow:hidden;position:relative}
+.sidebar{width:320px;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden;flex-shrink:0}
+.sidebar-title{padding:10px 14px;font-size:11px;color:var(--text3);border-bottom:1px solid var(--border);font-weight:600;letter-spacing:.5px;display:flex;align-items:center;justify-content:space-between;text-transform:uppercase}
+.sidebar-title label{display:flex;align-items:center;gap:5px;cursor:pointer;font-size:11.5px;font-weight:400;color:var(--text3);text-transform:none}
+.sidebar-title input{width:14px;height:14px;cursor:pointer;accent-color:var(--brand)}
+.sidebar-list{overflow-y:auto;flex:1}
+.contact{padding:11px 14px;border-bottom:1px solid var(--border);cursor:pointer;display:flex;align-items:center;gap:11px;transition:background .1s}
+.contact:hover{background:var(--bg)}
+.contact.active{background:var(--brand-soft)}
+.contact.unread{background:#F2F7EC}
+.avatar{width:40px;height:40px;border-radius:50%;background:var(--bg);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:18px;color:var(--text2);flex-shrink:0}
+.contact-info{flex:1;min-width:0}
+.contact-row1{display:flex;align-items:baseline;justify-content:space-between;gap:6px}
+.contact-row2{display:flex;align-items:center;gap:6px;margin-top:2px}
+.contact-name{font-weight:600;font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0}
+.contact-time{font-size:11px;color:var(--text3);flex-shrink:0;white-space:nowrap}
+.contact.unread .contact-time{color:var(--green);font-weight:600}
+.contact-preview{font-size:12.5px;color:var(--text3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0}
+.contact-unread{font-size:11px;background:var(--brand);color:#fff;border-radius:999px;min-width:19px;height:19px;padding:0 5px;display:flex;align-items:center;justify-content:center;font-weight:600;flex-shrink:0}
+.no-convs{padding:24px;color:var(--text3);text-align:center;font-size:13px}
+.bulk-bar{display:none;padding:6px 12px;background:var(--amber-bg);border-bottom:1px solid #EAD9B0;align-items:center;gap:8px;flex-shrink:0}
+.bulk-bar .cnt{font-size:12px;color:var(--amber);flex:1;font-weight:600}
+.bulk-del{display:inline-flex;align-items:center;gap:5px;background:var(--red);color:#fff;border:none;border-radius:999px;padding:4px 13px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit}
+.bulk-cancel{background:none;border:1px solid var(--border2);border-radius:999px;padding:4px 11px;font-size:12px;cursor:pointer;color:var(--text2);font-family:inherit}
+.chat-panel{flex:1;display:flex;flex-direction:column;background:#EFEDE7;overflow:hidden}
+.chat-header{background:var(--surface);padding:9px 14px;display:flex;align-items:center;gap:9px;border-bottom:1px solid var(--border);flex-shrink:0;flex-wrap:wrap}
+.chat-header .avatar{width:34px;height:34px;font-size:15px}
+.chat-header-name{font-weight:600;font-size:14px;flex:1;min-width:0}
+.btn-back{display:none}
+.chat-messages{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:4px}
+.bubble{max-width:68%;padding:7px 12px;border-radius:10px;font-size:13.5px;line-height:1.5;white-space:pre-wrap;word-wrap:break-word}
+.bubble.cliente{background:var(--surface);border:1px solid var(--border);align-self:flex-start;border-top-left-radius:2px}
+.bubble.bot{background:#DDEBCF;align-self:flex-end;border-top-right-radius:2px}
+.bubble.manual{background:var(--amber-bg);align-self:flex-end;border-top-right-radius:2px}
+.sender{font-size:11px;font-weight:600;margin-bottom:2px;color:var(--text2);display:flex;align-items:center;gap:4px}
+.sender i{font-size:12px}
+.bubble.bot .sender{color:var(--green)}
+.bubble.manual .sender{color:var(--amber)}
+.msg-ts{font-size:10px;color:var(--text3);font-weight:400;margin-left:6px}
+.empty-state{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--text3);gap:10px;font-size:13.5px}
+.empty-state i{font-size:46px;color:var(--border2)}
+.tpl-bar{padding:8px 12px;background:var(--surface);border-top:1px solid var(--border);display:flex;gap:6px;flex-wrap:wrap;align-items:center;flex-shrink:0}
+.tpl-bar .tpl-lbl{font-size:11px;font-weight:600;color:var(--amber);display:flex;align-items:center;gap:4px}
+.tpl{font-size:11.5px;border:1px solid var(--border2);border-radius:999px;padding:4px 11px;background:var(--surface);color:var(--text2);cursor:pointer;font-family:inherit;transition:background .15s}
+.tpl:hover{background:var(--bg)}
+.chat-input-area{padding:10px 12px;background:var(--surface);border-top:1px solid var(--border);display:flex;gap:8px;align-items:center;flex-shrink:0}
+.chat-input{flex:1;border:1px solid var(--border);border-radius:999px;padding:9px 14px;font:inherit;font-size:13.5px;outline:none;min-width:0}
+.chat-input:focus{border-color:var(--brand)}
+.chat-send-btn{background:var(--brand);color:#fff;border:none;border-radius:50%;width:38px;height:38px;cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:background .15s}
+.chat-send-btn:hover{background:var(--brand-dark)}
+.chat-send-btn:disabled{background:var(--border2);cursor:default}
+.refresh-note{font-size:11px;color:var(--text3);text-align:center;padding:5px;background:var(--surface);border-top:1px solid var(--border);flex-shrink:0}
+@media(max-width:700px){
+  .sidebar{width:100%;border-right:none}
+  .chat-panel{position:absolute;inset:0;transform:translateX(100%);transition:transform .25s ease;z-index:30}
+  body.chat-open .chat-panel{transform:none}
+  .btn-back{display:flex;height:30px;width:30px;font-size:16px}
+}
+</style></head><body>
+__HEADER__
+__NAV__
+<div class="container">
+  <div class="sidebar">
+    <div class="sidebar-title">
+      <span>Conversaciones</span>
+      <label title="Seleccionar todas"><input type="checkbox" id="chkSelectAll" onchange="toggleSelectAll(this.checked)"> Todas</label>
+    </div>
+    <div id="bulkBar" class="bulk-bar">
+      <span id="bulkCount" class="cnt">0 seleccionadas</span>
+      <button class="bulk-del" onclick="eliminarSeleccionadas()"><i class="ti ti-trash"></i> Eliminar</button>
+      <button class="bulk-cancel" onclick="cancelarSeleccion()">Cancelar</button>
+    </div>
+    <div class="sidebar-list">__CONTACTS__</div>
+  </div>
+  <div class="chat-panel" id="chatPanel">
+    <div class="empty-state"><i class="ti ti-message-circle"></i><span>Selecciona una conversación</span></div>
+  </div>
+</div>
+<div class="refresh-note">Actualización automática cada 5 s</div>
+
+<script>
+const convs = __CONV_JSON__;
+let escaladoMap = __ESC_JSON__;
+const DELIVERY_NAMES = __DELIVERY_NAMES__;
+
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\\n/g,'<br>');
+}
+
+function buildBubble(m) {
+  const isManual = !!m.manual;
+  const lado  = isManual ? 'manual' : (m.role === 'user' ? 'cliente' : 'bot');
+  const label = isManual
+    ? '<i class="ti ti-headset"></i> Equipo'
+    : (m.role === 'user' ? 'Cliente' : '<i class="ti ti-robot"></i> Chili');
+  const tsHtml = m.ts ? `<span class="msg-ts">${m.ts}</span>` : '';
+  return `<div class="bubble ${lado}"><div class="sender">${label}${tsHtml}</div>${esc(m.content)}</div>`;
+}
+
+function closeChat() {
+  document.body.classList.remove('chat-open');
+  document.querySelectorAll('.contact').forEach(c => c.classList.remove('active'));
+  sessionStorage.removeItem('activePhone');
+}
+
+function showChat(phone) {
+  document.querySelectorAll('.contact').forEach(c => c.classList.remove('active'));
+  const el = document.getElementById('c_' + phone);
+  if (el) {
+    el.classList.add('active');
+    el.classList.remove('unread');
+    const badge = el.querySelector('.contact-unread');
+    if (badge) badge.remove();
+  }
+
+  fetch(`/admin/mark-read/${encodeURIComponent(phone)}`, {
+    method: 'POST', credentials: 'same-origin'
+  });
+
+  const msgs = convs[phone] || [];
+  const bubbles = msgs.map(buildBubble).join('');
+
+  const isEscalado = escaladoMap[phone] || false;
+  const escaladoCtl = isEscalado
+    ? `<span class="chipbadge" style="background:var(--red-bg);color:var(--red)">Equipo activo</span>
+       <button class="btn-mini" onclick="reactivarBot('${esc(phone)}')"><i class="ti ti-robot"></i> Reactivar bot</button>`
+    : `<button class="btn-mini" onclick="pausarBot('${esc(phone)}')"><i class="ti ti-player-pause"></i> Pausar bot</button>`;
+  const esDelivery = !!DELIVERY_NAMES[phone];
+  const avatarIcon = esDelivery ? 'ti-motorbike' : 'ti-user';
+  const displayName = esDelivery ? DELIVERY_NAMES[phone] : '+' + esc(phone);
+  const tplBar = isEscalado ? `<div class="tpl-bar">
+      <span class="tpl-lbl"><i class="ti ti-bolt"></i> Respuesta rápida:</span>
+      <button class="tpl" onclick="usarPlantilla(this)" data-txt="Disculpa la demora, Chilanguit@ 🙏 Ya estamos en ello y te avisamos en cuanto tu pedido salga.">Disculpa demora</button>
+      <button class="tpl" onclick="usarPlantilla(this)" data-txt="¡Nos disculpamos! 🙏 Vamos a compensarte con un guacamole gratis en tu próximo pedido. ¿Te parece bien?">Guacamole gratis</button>
+      <button class="tpl" onclick="usarPlantilla(this)" data-txt="Chilanguit@, para compensar el inconveniente te regalamos el delivery gratis en tu próximo pedido. Disculpa las molestias 🙏">Delivery gratis</button>
+      <button class="tpl" onclick="usarPlantilla(this)" data-txt="¡Acá estamos! Cuéntame qué pasó para poder ayudarte mejor 🌮">Pedir detalle</button>
+    </div>` : '';
+
+  document.getElementById('chatPanel').innerHTML = `
+    <div class="chat-header">
+      <button class="iconbtn btn-back" onclick="closeChat()" title="Volver"><i class="ti ti-arrow-left"></i></button>
+      <div class="avatar"><i class="ti ${avatarIcon}"></i></div>
+      <div class="chat-header-name">${displayName}</div>
+      ${escaladoCtl}
+      <a class="iconbtn" style="text-decoration:none" href="https://wa.me/${esc(phone)}" target="_blank" title="Abrir en WhatsApp"><i class="ti ti-brand-whatsapp"></i></a>
+      <button class="iconbtn" onclick="eliminarChat('${esc(phone)}')" title="Eliminar chat"><i class="ti ti-trash"></i></button>
+    </div>
+    <div class="chat-messages" id="msgs">${bubbles}</div>
+    ${tplBar}
+    <div class="chat-input-area">
+      <input type="text" id="manualInput" class="chat-input"
+             placeholder="Escribe un mensaje al cliente…"
+             onkeydown="if(event.key==='Enter' && !event.shiftKey){ event.preventDefault(); sendManual('${esc(phone)}'); }">
+      <button id="sendBtn" class="chat-send-btn" onclick="sendManual('${esc(phone)}')" title="Enviar"><i class="ti ti-send"></i></button>
+    </div>`;
+
+  const msgsEl = document.getElementById('msgs');
+  if (msgsEl) msgsEl.scrollTop = msgsEl.scrollHeight;
+  sessionStorage.setItem('activePhone', phone);
+  document.body.classList.add('chat-open');
+}
+
+async function eliminarChat(phone) {
+  if (!confirm(`¿Eliminar el historial de chat de +${phone}? Esta acción no se puede deshacer.`)) return;
+  const r = await fetch('/api/conversations/delete', {
+    method: 'POST', credentials: 'same-origin',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({phone})
+  });
+  if ((await r.json()).status === 'ok') {
+    document.getElementById('chatPanel').innerHTML = '<div class="empty-state"><i class="ti ti-message-circle"></i><span>Selecciona una conversación</span></div>';
+    closeChat();
+    pollConversaciones();
+  }
+}
+
+async function reactivarBot(phone) {
+  if (!confirm('¿Reactivar el bot para este cliente? Volverá a responder automáticamente.')) return;
+  await fetch('/api/conversations/reactivar', {
+    method: 'POST', credentials: 'same-origin',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({phone})
+  });
+  escaladoMap[phone] = false;
+  showChat(phone);
+}
+
+async function pausarBot(phone) {
+  await fetch('/api/conversations/pausar', {
+    method: 'POST', credentials: 'same-origin',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({phone})
+  });
+  escaladoMap[phone] = true;
+  showChat(phone);
+}
+
+function usarPlantilla(btn) {
+  const inp = document.getElementById('manualInput');
+  if (inp) { inp.value = btn.dataset.txt; inp.focus(); }
+}
+
+async function sendManual(phone) {
+  const input = document.getElementById('manualInput');
+  const btn   = document.getElementById('sendBtn');
+  const msg   = (input.value || '').trim();
+  if (!msg) return;
+  btn.disabled = true;
+  input.value  = '';
+  try {
+    const r = await fetch('/admin/send-message', {
+      method: 'POST', credentials: 'same-origin',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({phone, message: msg})
+    });
+    if (!r.ok) { input.value = msg; alert('Error al enviar'); return; }
+    const msgsEl = document.getElementById('msgs');
+    if (msgsEl) {
+      const now = new Date().toLocaleTimeString('es-PE', {hour:'2-digit', minute:'2-digit'});
+      msgsEl.innerHTML += buildBubble({role:'assistant', content: msg, ts: now, manual: true});
+      msgsEl.scrollTop = msgsEl.scrollHeight;
+    }
+  } catch(e) {
+    input.value = msg;
+    alert('Error: ' + e.message);
+  }
+  btn.disabled = false;
+  input.focus();
+}
+
+// Restaurar conversación activa al cargar
+const saved = sessionStorage.getItem('activePhone');
+if (saved && convs[saved]) showChat(saved);
+
+// ── Polling AJAX: actualizar sidebar sin recargar página ──
+async function pollConversaciones() {
+  try {
+    const r = await fetch('/api/conversations', {credentials:'same-origin'});
+    if (!r.ok) return;
+    const data = await r.json();
+    if (data.escalado) Object.assign(escaladoMap, data.escalado);
+    Object.assign(convs, data.convs);
+    const lista = document.querySelector('.sidebar-list');
+    if (!lista) return;
+    const prevChecked = new Set(
+      [...document.querySelectorAll('.conv-chk:checked')].map(c => c.dataset.phone)
+    );
+    lista.innerHTML = data.contacts_html || '<div class="no-convs">Sin conversaciones aún</div>';
+    if (modoSeleccion) {
+      document.querySelectorAll('.conv-chk').forEach(chk => {
+        chk.style.display = 'block';
+        if (prevChecked.has(chk.dataset.phone)) chk.checked = true;
+      });
+      actualizarBulkBar();
+    }
+    const activePhone = sessionStorage.getItem('activePhone');
+    if (activePhone) {
+      const act = document.getElementById('c_' + activePhone);
+      if (act) act.classList.add('active');
+      if (data.convs[activePhone]) {
+        const msgsEl = document.getElementById('msgs');
+        if (msgsEl) {
+          const atBottom = msgsEl.scrollHeight - msgsEl.scrollTop - msgsEl.clientHeight < 60;
+          const newBubbles = data.convs[activePhone].map(buildBubble).join('');
+          if (msgsEl.innerHTML !== newBubbles) {
+            msgsEl.innerHTML = newBubbles;
+            if (atBottom) msgsEl.scrollTop = msgsEl.scrollHeight;
+          }
+        }
+      }
+    }
+  } catch(e) {}
+}
+setInterval(pollConversaciones, 5000);
+
+/* ── Selección múltiple ── */
+let modoSeleccion = false;
+
+function toggleSelectAll(checked) {
+  modoSeleccion = true;
+  document.querySelectorAll('.conv-chk').forEach(chk => {
+    chk.style.display = 'block';
+    chk.checked = checked;
+  });
+  actualizarBulkBar();
+}
+
+function contactClick(e, phone) {
+  if (modoSeleccion) {
+    const chk = document.querySelector(`.conv-chk[data-phone="${phone}"]`);
+    if (chk) { chk.checked = !chk.checked; onChkChange(); }
+  } else {
+    showChat(phone);
+  }
+}
+
+function onChkChange() {
+  modoSeleccion = true;
+  document.querySelectorAll('.conv-chk').forEach(chk => chk.style.display = 'block');
+  actualizarBulkBar();
+}
+
+function actualizarBulkBar() {
+  const seleccionadas = document.querySelectorAll('.conv-chk:checked');
+  const bar = document.getElementById('bulkBar');
+  const count = document.getElementById('bulkCount');
+  bar.style.display = seleccionadas.length > 0 ? 'flex' : 'none';
+  count.textContent = seleccionadas.length + ' seleccionada' + (seleccionadas.length > 1 ? 's' : '');
+  const total = document.querySelectorAll('.conv-chk').length;
+  document.getElementById('chkSelectAll').checked = seleccionadas.length === total && total > 0;
+  document.getElementById('chkSelectAll').indeterminate = seleccionadas.length > 0 && seleccionadas.length < total;
+}
+
+function cancelarSeleccion() {
+  modoSeleccion = false;
+  document.querySelectorAll('.conv-chk').forEach(chk => {
+    chk.checked = false;
+    chk.style.display = 'none';
+  });
+  document.getElementById('bulkBar').style.display = 'none';
+  document.getElementById('chkSelectAll').checked = false;
+  document.getElementById('chkSelectAll').indeterminate = false;
+}
+
+async function eliminarSeleccionadas() {
+  const seleccionadas = [...document.querySelectorAll('.conv-chk:checked')];
+  if (seleccionadas.length === 0) return;
+  if (!confirm(`¿Eliminar ${seleccionadas.length} conversación${seleccionadas.length > 1 ? 'es' : ''}? Esta acción no se puede deshacer.`)) return;
+  const phones = seleccionadas.map(chk => chk.dataset.phone);
+  const r = await fetch('/api/conversations/delete-bulk', {
+    method: 'POST', credentials: 'same-origin',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({phones})
+  });
+  if ((await r.json()).status === 'ok') {
+    cancelarSeleccion();
+    document.getElementById('chatPanel').innerHTML = '<div class="empty-state"><i class="ti ti-message-circle"></i><span>Selecciona una conversación</span></div>';
+    closeChat();
+    pollConversaciones();
+  }
+}
+__NAV_BADGE_JS__
+</script>
+</body></html>"""
+
+
 @app.get("/admin", response_class=HTMLResponse)
 async def admin(credentials: HTTPBasicCredentials = Depends(verificar_admin)):
     conversaciones_raw = db.get_conversations_with_status()
     num_orders = get_orders_count()
 
-    # Sidebar de contactos
-    contacts_html = ""
-    for phone, data in conversaciones_raw.items():
-        mensajes = data["messages"]
-        leida = data["leida"]
-        if not mensajes:
-            continue
-        ultimo = mensajes[-1]
-        contenido = ultimo["content"]
-        if isinstance(contenido, list):
-            preview = next((b["text"] for b in contenido if b.get("type") == "text"), "[imagen]")
-        else:
-            preview = contenido
-        preview = html.escape(str(preview)[:50])
-        badge = "" if leida else f'<div class="contact-unread">{sum(1 for m in mensajes if m["role"] == "user")}</div>'
-        unread_class = "" if leida else " unread"
-        # Mostrar nombre del motorizado si es delivery, si no mostrar número
-        es_delivery = phone in DELIVERY_NAME_MAP
-        display_name = f"🛵 {DELIVERY_NAME_MAP[phone]}" if es_delivery else f"+{phone}"
-        avatar = "🛵" if es_delivery else "👤"
-        tiempo = _format_contact_time(data.get("last_msg_at", ""))
-        contacts_html += f"""
-        <div class="contact{unread_class}" id="c_{html.escape(phone)}" onclick="contactClick(event, '{html.escape(phone)}')" data-phone="{html.escape(phone)}">
-            <input type="checkbox" class="conv-chk" data-phone="{html.escape(phone)}"
-                onclick="event.stopPropagation()" onchange="onChkChange()"
-                style="display:none;width:14px;height:14px;flex-shrink:0;cursor:pointer;accent-color:#25d366;margin-right:4px">
-            <div class="avatar">{avatar}</div>
-            <div class="contact-info">
-                <div class="contact-row1">
-                    <div class="contact-name">{html.escape(display_name)}</div>
-                    <div class="contact-time">{tiempo}</div>
-                </div>
-                <div class="contact-row2">
-                    <div class="contact-preview">{preview}</div>
-                    {badge}
-                </div>
-            </div>
-        </div>"""
-
+    contacts_html = "".join(
+        _contact_item_html(phone, data) for phone, data in conversaciones_raw.items()
+    )
     if not contacts_html:
         contacts_html = "<div class='no-convs'>Sin conversaciones aún</div>"
 
-    # Serializar conversaciones para JS (imágenes excluidas por tamaño, timestamps incluidos)
-    conv_clean = {}
-    conv_escalado = {}
-    for phone, data in conversaciones_raw.items():
-        conv_clean[phone] = []
-        conv_escalado[phone] = data.get("escalado", False)
-        for m in data["messages"]:
-            c = m["content"]
-            if isinstance(c, list):
-                texto = next((b["text"] for b in c if b.get("type") == "text"), "[imagen 📷]")
-            else:
-                texto = c
-            conv_clean[phone].append({
-                "role": m["role"],
-                "content": texto,
-                "ts": m.get("ts", ""),
-                "manual": m.get("manual", False),
-            })
-    conv_json = json.dumps(conv_clean, ensure_ascii=False)
+    conv_clean, conv_escalado = _conv_clean_for_js(conversaciones_raw)
+    conv_json     = json.dumps(conv_clean, ensure_ascii=False).replace("</", "<\\/")
     escalado_json = json.dumps(conv_escalado, ensure_ascii=False)
+    delivery_names_json = json.dumps(DELIVERY_NAME_MAP, ensure_ascii=False)
 
-    return f"""<!DOCTYPE html>
-<html>
-<head>
-    <title>Admin — Chilango Bot</title>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <style>
-        * {{ box-sizing: border-box; margin: 0; padding: 0; }}
-        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f0f2f5; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }}
-        .header {{ background: #2D5016; color: white; padding: 10px 20px; display: flex; align-items: center; gap: 12px; flex-shrink: 0; }}
-        .header img {{ height: 44px; border-radius: 8px; object-fit: cover; }}
-        .header h1 {{ font-size: 17px; }}
-        .header .sub {{ font-size: 12px; opacity: 0.7; }}
-        .header .stats {{ margin-left: auto; font-size: 13px; opacity: 0.85; text-align: right; }}
-        .container {{ display: flex; flex: 1; overflow: hidden; }}
-        .sidebar {{ width: 320px; background: white; border-right: 1px solid #e0e0e0; display: flex; flex-direction: column; overflow: hidden; flex-shrink: 0; }}
-        .sidebar-title {{ padding: 10px 16px; font-size: 12px; color: #667781; background: #f0f2f5; border-bottom: 1px solid #e9edef; font-weight: 600; letter-spacing: .5px; display:flex; align-items:center; justify-content:space-between; }}
-        .sidebar-list {{ overflow-y: auto; flex: 1; }}
-        .contact {{ padding: 12px 16px; border-bottom: 1px solid #e9edef; cursor: pointer; display: flex; align-items: center; gap: 12px; transition: background .1s; }}
-        .contact:hover {{ background: #f5f5f5; }}
-        .contact.active {{ background: #d9fdd3; }}
-        .avatar {{ width: 46px; height: 46px; border-radius: 50%; background: #25d366; display: flex; align-items: center; justify-content: center; font-size: 20px; flex-shrink: 0; }}
-        .contact-info {{ flex: 1; min-width: 0; }}
-        .contact-row1 {{ display: flex; align-items: baseline; justify-content: space-between; gap: 6px; }}
-        .contact-row2 {{ display: flex; align-items: center; gap: 6px; margin-top: 3px; }}
-        .contact-name {{ font-weight: 600; font-size: 14px; color: #111; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0; }}
-        .contact-time {{ font-size: 11px; color: #667781; flex-shrink: 0; white-space: nowrap; }}
-        .contact-preview {{ font-size: 13px; color: #667781; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0; }}
-        .contact-unread {{ font-size: 11px; background: #25d366; color: white; border-radius: 50%; min-width: 20px; height: 20px; padding: 0 4px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-weight: 700; }}
-        .contact.unread {{ background: #f0fdf4; }}
-        .contact.unread .contact-name {{ color: #111; font-weight: 700; }}
-        .contact.unread .contact-time {{ color: #25d366; font-weight: 700; }}
-        .chat-panel {{ flex: 1; display: flex; flex-direction: column; background: #efeae2; overflow: hidden; }}
-        .chat-header {{ background: #f0f2f5; padding: 10px 16px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid #e0e0e0; flex-shrink: 0; }}
-        .chat-header .avatar {{ width: 38px; height: 38px; font-size: 16px; }}
-        .chat-header-name {{ font-weight: 600; font-size: 15px; }}
-        .chat-messages {{ flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 4px; }}
-        .empty-state {{ flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; color: #667781; gap: 10px; }}
-        .empty-state img {{ height: 80px; opacity: 0.4; border-radius: 8px; }}
-        .bubble {{ max-width: 65%; padding: 7px 12px 7px 12px; border-radius: 8px; font-size: 14px; line-height: 1.5; white-space: pre-wrap; word-wrap: break-word; }}
-        .bubble.cliente {{ background: white; align-self: flex-start; border-radius: 0 8px 8px 8px; box-shadow: 0 1px 1px rgba(0,0,0,.08); }}
-        .bubble.bot {{ background: #d9fdd3; align-self: flex-end; border-radius: 8px 0 8px 8px; box-shadow: 0 1px 1px rgba(0,0,0,.08); }}
-        .sender {{ font-size: 11px; font-weight: 700; margin-bottom: 3px; color: #25d366; }}
-        .bubble.bot .sender {{ color: #128c7e; }}
-        .no-convs {{ padding: 24px; color: #667781; text-align: center; font-size: 14px; }}
-        .refresh-note {{ font-size: 11px; color: #667781; text-align: center; padding: 6px; background: #f0f2f5; flex-shrink: 0; }}
-        .msg-ts {{ font-size: 10px; color: #aaa; font-weight: 400; margin-left: 6px; }}
-        .bubble.manual {{ background: #fff8e1; align-self: flex-end; border-radius: 8px 0 8px 8px; box-shadow: 0 1px 1px rgba(0,0,0,.08); }}
-        .bubble.manual .sender {{ color: #e65100; }}
-        .chat-input-area {{ padding: 10px 12px; background: #f0f2f5; border-top: 1px solid #e0e0e0; display: flex; gap: 8px; align-items: center; flex-shrink: 0; }}
-        .chat-input {{ flex: 1; border: 1px solid #ccc; border-radius: 20px; padding: 8px 14px; font-size: 14px; outline: none; font-family: inherit; }}
-        .chat-input:focus {{ border-color: #2D5016; }}
-        .chat-send-btn {{ background: #2D5016; color: white; border: none; border-radius: 50%; width: 40px; height: 40px; cursor: pointer; font-size: 18px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: background .15s; }}
-        .chat-send-btn:hover {{ background: #3a6b1e; }}
-        .chat-send-btn:disabled {{ background: #aaa; cursor: default; }}
-    </style>
-</head>
-<body>
-    <div class="header">
-        <img src="/static/logo.png" alt="Chilango">
-        <div>
-            <h1>Chilango Bot</h1>
-            <div class="sub">Panel de conversaciones</div>
-        </div>
-        <div class="stats">
-            👥 {len(conversaciones_raw)} conversaciones<br>
-            📦 {num_orders} pedidos registrados
-        </div>
-    </div>
-    <div style="background:#1b3a0e;display:flex;">
-        <a href="/pedidos" style="color:rgba(255,255,255,.7);text-decoration:none;padding:10px 20px;font-size:14px;">📦 Pedidos <span id="adminNavBadge" style="background:#e53935;color:#fff;border-radius:10px;min-width:18px;height:18px;font-size:10px;font-weight:700;display:none;align-items:center;justify-content:center;padding:0 5px;margin-left:4px;vertical-align:middle;line-height:18px">0</span></a>
-        <a href="/admin" style="color:white;text-decoration:none;padding:10px 20px;font-size:14px;background:rgba(255,255,255,.1);">💬 Conversaciones</a>
-        <a href="/admin/clientes" style="color:rgba(255,255,255,.7);text-decoration:none;padding:10px 20px;font-size:14px;">👥 Clientes</a>
-    </div>
-    <div class="container">
-        <div class="sidebar">
-            <div class="sidebar-title">
-                <span>CONVERSACIONES</span>
-                <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:12px;font-weight:400;color:#aaa" title="Seleccionar todas">
-                    <input type="checkbox" id="chkSelectAll" onchange="toggleSelectAll(this.checked)"
-                        style="width:14px;height:14px;cursor:pointer;accent-color:#25d366">
-                    Todas
-                </label>
-            </div>
-            <div id="bulkBar" style="display:none;padding:6px 12px;background:#fff3e0;border-bottom:1px solid #ffe082;align-items:center;gap:8px;flex-shrink:0">
-                <span id="bulkCount" style="font-size:12px;color:#555;flex:1">0 seleccionadas</span>
-                <button onclick="eliminarSeleccionadas()"
-                    style="background:#e53935;color:#fff;border:none;border-radius:16px;padding:4px 14px;font-size:12px;font-weight:700;cursor:pointer">
-                    🗑️ Eliminar
-                </button>
-                <button onclick="cancelarSeleccion()"
-                    style="background:none;border:1px solid #aaa;border-radius:16px;padding:4px 12px;font-size:12px;cursor:pointer;color:#555">
-                    Cancelar
-                </button>
-            </div>
-            <div class="sidebar-list">{contacts_html}</div>
-        </div>
-        <div class="chat-panel" id="chatPanel">
-            <div class="empty-state">
-                <img src="/static/logo.png" alt="">
-                <span>Selecciona una conversación</span>
-            </div>
-        </div>
-    </div>
-    <div class="refresh-note">🔄 Actualización automática cada 20 segundos</div>
+    subtitle = f"Conversaciones · {len(conversaciones_raw)} chats · {num_orders} pedidos históricos"
 
-    <script>
-        const convs = {conv_json};
-        let escaladoMap = {escalado_json};
-
-        function esc(s) {{
-            return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\\n/g,'<br>');
-        }}
-
-        function buildBubble(m) {{
-            const isManual = !!m.manual;
-            const lado  = isManual ? 'manual' : (m.role === 'user' ? 'cliente' : 'bot');
-            const label = isManual ? '👨‍💼 Equipo' : (m.role === 'user' ? 'Cliente' : '🤖 Chili');
-            const tsHtml = m.ts ? `<span class="msg-ts">${{m.ts}}</span>` : '';
-            return `<div class="bubble ${{lado}}"><div class="sender">${{label}}${{tsHtml}}</div>${{esc(m.content)}}</div>`;
-        }}
-
-        function showChat(phone) {{
-            document.querySelectorAll('.contact').forEach(c => c.classList.remove('active'));
-            const el = document.getElementById('c_' + phone);
-            if (el) {{
-                el.classList.add('active');
-                el.classList.remove('unread');
-                const badge = el.querySelector('.contact-unread');
-                if (badge) badge.remove();
-            }}
-
-            fetch(`/admin/mark-read/${{encodeURIComponent(phone)}}`, {{
-                method: 'POST', credentials: 'same-origin'
-            }});
-
-            const msgs = convs[phone] || [];
-            const bubbles = msgs.map(buildBubble).join('');
-
-            const isEscalado = escaladoMap[phone] || false;
-            const escaladoBadge = isEscalado
-                ? `<span style="background:#e53935;color:#fff;font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;margin-left:8px">🤝 Equipo activo</span>
-                   <button onclick="reactivarBot('${{esc(phone)}}')" style="background:#2D5016;color:#fff;border:none;border-radius:20px;padding:4px 12px;font-size:11px;font-weight:700;cursor:pointer;margin-left:6px">🤖 Reactivar bot</button>`
-                : `<button onclick="pausarBot('${{esc(phone)}}')" style="background:#f57c00;color:#fff;border:none;border-radius:20px;padding:4px 12px;font-size:11px;font-weight:700;cursor:pointer;margin-left:6px">⏸️ Pausar bot</button>`;
-            const avatarIcon = (window.deliveryPhones && window.deliveryPhones[phone]) ? '🛵' : '👤';
-            const displayName = (window.deliveryNames && window.deliveryNames[phone]) ? '🛵 ' + window.deliveryNames[phone] : '+' + esc(phone);
-            document.getElementById('chatPanel').innerHTML = `
-                <div class="chat-header" style="flex-wrap:wrap;gap:6px">
-                    <div class="avatar">${{avatarIcon}}</div>
-                    <div class="chat-header-name" style="flex:1">${{displayName}}</div>
-                    ${{escaladoBadge}}
-                    <button onclick="eliminarChat('${{esc(phone)}}')" title="Eliminar chat"
-                        style="background:none;border:none;cursor:pointer;font-size:16px;color:#aaa;padding:4px 8px"
-                        onmouseover="this.style.color='#e53935'" onmouseout="this.style.color='#aaa'">🗑️</button>
-                </div>
-                <div class="chat-messages" id="msgs">${{bubbles}}</div>
-                ${{isEscalado ? `<div style="padding:8px 12px;background:#fff8e1;border-top:1px solid #ffe082;display:flex;gap:6px;flex-wrap:wrap;align-items:center">
-                    <span style="font-size:11px;font-weight:700;color:#e65100">⚡ Respuesta rápida:</span>
-                    <button onclick="usarPlantilla(this)" data-txt="Disculpa la demora, Chilanguit@ 🙏 Ya estamos en ello y te avisamos en cuanto tu pedido salga." style="font-size:11px;border:1px solid #e65100;border-radius:16px;padding:3px 10px;background:transparent;color:#e65100;cursor:pointer">⏰ Disculpa demora</button>
-                    <button onclick="usarPlantilla(this)" data-txt="¡Nos disculpamos! 🙏 Vamos a compensarte con un guacamole gratis en tu próximo pedido. ¿Te parece bien?" style="font-size:11px;border:1px solid #2D5016;border-radius:16px;padding:3px 10px;background:transparent;color:#2D5016;cursor:pointer">🥑 Guacamole gratis</button>
-                    <button onclick="usarPlantilla(this)" data-txt="Chilanguit@, para compensar el inconveniente te regalamos el delivery gratis en tu próximo pedido. Disculpa las molestias 🙏" style="font-size:11px;border:1px solid #2D5016;border-radius:16px;padding:3px 10px;background:transparent;color:#2D5016;cursor:pointer">🛵 Delivery gratis</button>
-                    <button onclick="usarPlantilla(this)" data-txt="¡Acá estamos! Cuéntame qué pasó para poder ayudarte mejor 🌮" style="font-size:11px;border:1px solid #555;border-radius:16px;padding:3px 10px;background:transparent;color:#555;cursor:pointer">💬 Pedir detalle</button>
-                </div>` : ''}}
-                <div class="chat-input-area">
-                    <input type="text" id="manualInput" class="chat-input"
-                           placeholder="Escribe un mensaje al cliente..."
-                           onkeydown="if(event.key==='Enter' && !event.shiftKey){{ event.preventDefault(); sendManual('${{esc(phone)}}'); }}">
-                    <button id="sendBtn" class="chat-send-btn" onclick="sendManual('${{esc(phone)}}')" title="Enviar">➤</button>
-                </div>`;
-
-            const msgsEl = document.getElementById('msgs');
-            if (msgsEl) msgsEl.scrollTop = msgsEl.scrollHeight;
-            sessionStorage.setItem('activePhone', phone);
-        }}
-
-        async function eliminarChat(phone) {{
-            if (!confirm(`¿Eliminar el historial de chat de +${{phone}}? Esta acción no se puede deshacer.`)) return;
-            const r = await fetch('/api/conversations/delete', {{
-                method: 'POST', credentials: 'same-origin',
-                headers: {{'Content-Type':'application/json'}},
-                body: JSON.stringify({{phone}})
-            }});
-            if ((await r.json()).status === 'ok') {{
-                document.getElementById('chatPanel').innerHTML = '<div style="padding:40px;text-align:center;color:#aaa">Selecciona una conversación</div>';
-                sessionStorage.removeItem('activePhone');
-                pollConversaciones();
-            }}
-        }}
-
-        async function reactivarBot(phone) {{
-            if (!confirm('¿Reactivar el bot para este cliente? Volverá a responder automáticamente.')) return;
-            await fetch('/api/conversations/reactivar', {{
-                method: 'POST', credentials: 'same-origin',
-                headers: {{'Content-Type':'application/json'}},
-                body: JSON.stringify({{phone}})
-            }});
-            escaladoMap[phone] = false;
-            showChat(phone);
-        }}
-
-        async function pausarBot(phone) {{
-            await fetch('/api/conversations/pausar', {{
-                method: 'POST', credentials: 'same-origin',
-                headers: {{'Content-Type':'application/json'}},
-                body: JSON.stringify({{phone}})
-            }});
-            escaladoMap[phone] = true;
-            showChat(phone);
-        }}
-
-        function usarPlantilla(btn) {{
-            const inp = document.getElementById('manualInput');
-            if (inp) {{ inp.value = btn.dataset.txt; inp.focus(); }}
-        }}
-
-        async function sendManual(phone) {{
-            const input = document.getElementById('manualInput');
-            const btn   = document.getElementById('sendBtn');
-            const msg   = (input.value || '').trim();
-            if (!msg) return;
-            btn.disabled = true;
-            input.value  = '';
-            try {{
-                const r = await fetch('/admin/send-message', {{
-                    method: 'POST', credentials: 'same-origin',
-                    headers: {{'Content-Type': 'application/json'}},
-                    body: JSON.stringify({{phone, message: msg}})
-                }});
-                if (!r.ok) {{ input.value = msg; alert('Error al enviar'); return; }}
-                // Mostrar inmediatamente en el chat
-                const msgsEl = document.getElementById('msgs');
-                if (msgsEl) {{
-                    const now = new Date().toLocaleTimeString('es-PE', {{hour:'2-digit', minute:'2-digit'}});
-                    msgsEl.innerHTML += buildBubble({{role:'assistant', content: msg, ts: now, manual: true}});
-                    msgsEl.scrollTop = msgsEl.scrollHeight;
-                }}
-            }} catch(e) {{
-                input.value = msg;
-                alert('Error: ' + e.message);
-            }}
-            btn.disabled = false;
-            input.focus();
-        }}
-
-        // Restaurar conversación activa al cargar
-        const saved = sessionStorage.getItem('activePhone');
-        if (saved && convs[saved]) showChat(saved);
-
-        // ── Polling AJAX: actualizar sidebar sin recargar página ──
-        async function pollConversaciones() {{
-            try {{
-                const r = await fetch('/api/conversations', {{credentials:'same-origin'}});
-                if (!r.ok) return;
-                const data = await r.json();
-                // Sincronizar mapa de escalados
-                if (data.escalado) Object.assign(escaladoMap, data.escalado);
-                // Actualizar sidebar
-                const lista = document.querySelector('.sidebar-list');
-                if (!lista) return;
-                // Guardar selección actual antes de reemplazar HTML
-                const prevChecked = new Set(
-                    [...document.querySelectorAll('.conv-chk:checked')].map(c => c.dataset.phone)
-                );
-                lista.innerHTML = data.contacts_html || '';
-                // Restaurar checkboxes si estamos en modo selección
-                if (modoSeleccion) {{
-                    document.querySelectorAll('.conv-chk').forEach(chk => {{
-                        chk.style.display = 'block';
-                        if (prevChecked.has(chk.dataset.phone)) chk.checked = true;
-                    }});
-                    actualizarBulkBar();
-                }}
-                // Actualizar mensajes del chat abierto (si hay uno)
-                const activePhone = sessionStorage.getItem('activePhone');
-                if (activePhone && data.convs[activePhone]) {{
-                    const msgsEl = document.getElementById('msgs');
-                    if (msgsEl) {{
-                        const atBottom = msgsEl.scrollHeight - msgsEl.scrollTop - msgsEl.clientHeight < 60;
-                        const newBubbles = data.convs[activePhone].map(buildBubble).join('');
-                        if (msgsEl.innerHTML !== newBubbles) {{
-                            msgsEl.innerHTML = newBubbles;
-                            if (atBottom) msgsEl.scrollTop = msgsEl.scrollHeight;
-                        }}
-                    }}
-                }}
-            }} catch(e) {{}}
-        }}
-        setInterval(pollConversaciones, 5000);
-
-        // Burbuja de nuevos pedidos en el nav (sin depender de localStorage)
-        async function checkPedidosNuevos() {{
-            try {{
-                const r = await fetch('/api/pedidos', {{credentials:'same-origin'}});
-                if (!r.ok) return;
-                const data = await r.json();
-                const n = data.pedidos.filter(p => (p.estado||'').startsWith('Nuevo')).length;
-                const badge = document.getElementById('adminNavBadge');
-                if (badge) {{
-                    badge.textContent = n;
-                    badge.style.display = n > 0 ? 'inline-flex' : 'none';
-                }}
-            }} catch(e) {{}}
-        }}
-        checkPedidosNuevos();
-        setInterval(checkPedidosNuevos, 10000);
-
-        /* ── Selección múltiple ── */
-        let modoSeleccion = false;
-
-        function toggleSelectAll(checked) {{
-            modoSeleccion = true;
-            document.querySelectorAll('.conv-chk').forEach(chk => {{
-                chk.style.display = 'block';
-                chk.checked = checked;
-            }});
-            actualizarBulkBar();
-        }}
-
-        function contactClick(e, phone) {{
-            if (modoSeleccion) {{
-                const chk = document.querySelector(`.conv-chk[data-phone="${{phone}}"]`);
-                if (chk) {{ chk.checked = !chk.checked; onChkChange(); }}
-            }} else {{
-                showChat(phone);
-            }}
-        }}
-
-        function onChkChange() {{
-            modoSeleccion = true;
-            document.querySelectorAll('.conv-chk').forEach(chk => chk.style.display = 'block');
-            actualizarBulkBar();
-        }}
-
-        function actualizarBulkBar() {{
-            const seleccionadas = document.querySelectorAll('.conv-chk:checked');
-            const bar = document.getElementById('bulkBar');
-            const count = document.getElementById('bulkCount');
-            bar.style.cssText = seleccionadas.length > 0
-                ? 'display:flex;padding:6px 12px;background:#fff3e0;border-bottom:1px solid #ffe082;align-items:center;gap:8px;flex-shrink:0'
-                : 'display:none';
-            count.textContent = seleccionadas.length + ' seleccionada' + (seleccionadas.length > 1 ? 's' : '');
-            // Sync checkbox "Todas"
-            const total = document.querySelectorAll('.conv-chk').length;
-            document.getElementById('chkSelectAll').checked = seleccionadas.length === total && total > 0;
-            document.getElementById('chkSelectAll').indeterminate = seleccionadas.length > 0 && seleccionadas.length < total;
-        }}
-
-        function cancelarSeleccion() {{
-            modoSeleccion = false;
-            document.querySelectorAll('.conv-chk').forEach(chk => {{
-                chk.checked = false;
-                chk.style.display = 'none';
-            }});
-            document.getElementById('bulkBar').style.display = 'none';
-            document.getElementById('chkSelectAll').checked = false;
-            document.getElementById('chkSelectAll').indeterminate = false;
-        }}
-
-        async function eliminarSeleccionadas() {{
-            const seleccionadas = [...document.querySelectorAll('.conv-chk:checked')];
-            if (seleccionadas.length === 0) return;
-            if (!confirm(`¿Eliminar ${{seleccionadas.length}} conversación${{seleccionadas.length > 1 ? 'es' : ''}}? Esta acción no se puede deshacer.`)) return;
-            const phones = seleccionadas.map(chk => chk.dataset.phone);
-            const r = await fetch('/api/conversations/delete-bulk', {{
-                method: 'POST', credentials: 'same-origin',
-                headers: {{'Content-Type': 'application/json'}},
-                body: JSON.stringify({{phones}})
-            }});
-            if ((await r.json()).status === 'ok') {{
-                cancelarSeleccion();
-                document.getElementById('chatPanel').innerHTML = '<div class="empty-state"><img src="/static/logo.png" alt=""><span>Selecciona una conversación</span></div>';
-                sessionStorage.removeItem('activePhone');
-                pollConversaciones();
-            }}
-        }}
-    </script>
-</body>
-</html>"""
+    page = (_ADMIN_TEMPLATE
+            .replace("__UI_HEAD__", _UI_HEAD)
+            .replace("__UI_CSS__", _UI_CSS)
+            .replace("__HEADER__", _ui_header(subtitle))
+            .replace("__NAV__", _nav_html("conversaciones"))
+            .replace("__NAV_BADGE_JS__", _NAV_BADGE_JS)
+            .replace("__CONTACTS__", contacts_html)
+            .replace("__CONV_JSON__", conv_json)
+            .replace("__ESC_JSON__", escalado_json)
+            .replace("__DELIVERY_NAMES__", delivery_names_json))
+    return HTMLResponse(page)
 
 
 if __name__ == "__main__":

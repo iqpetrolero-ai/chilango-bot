@@ -3171,7 +3171,11 @@ function buildBubble(m) {
     ? '<i class="ti ti-headset"></i> Equipo'
     : (m.role === 'user' ? 'Cliente' : '<i class="ti ti-robot"></i> Chili');
   const tsHtml = m.ts ? `<span class="msg-ts">${m.ts}</span>` : '';
-  return `<div class="bubble ${lado}"><div class="sender">${label}${tsHtml}</div>${esc(m.content)}</div>`;
+  const imgMatch = typeof m.content === 'string' && m.content.match(/^\[IMG:([^;]+);(.+)\]$/s);
+  const bodyHtml = imgMatch
+    ? `<img src="data:${imgMatch[1]};base64,${imgMatch[2]}" style="max-width:220px;max-height:300px;border-radius:6px;display:block;margin-top:4px;" />`
+    : esc(m.content);
+  return `<div class="bubble ${lado}"><div class="sender">${label}${tsHtml}</div>${bodyHtml}</div>`;
 }
 
 function closeChat() {

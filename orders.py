@@ -10,7 +10,7 @@ import db
 
 EXCEL_FILE = "pedidos_chilango.xlsx"
 PERU_TZ = timezone(timedelta(hours=-5))
-OWNER_PHONE = "51954713696"
+OWNER_PHONE = "51953038816"
 
 
 async def _send_whatsapp(to: str, body: str):
@@ -66,7 +66,7 @@ async def _notify_delivery(delivery_phone: str, delivery_name: str,
 
 
 DELIVERY_SERVICE_PHONE = os.environ.get("DELIVERY_SERVICE_PHONE", "525513781963").strip()
-OWNER_PHONE = os.environ.get("OWNER_PHONE", "51954713696").strip()
+OWNER_PHONE = os.environ.get("OWNER_PHONE", "51953038816").strip()
 
 
 async def notify_delivery_cost_query(phone_client: str, direccion: str,

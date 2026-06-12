@@ -1161,15 +1161,21 @@ async def process_message_with_image(phone: str, image_bytes: bytes, mime_type: 
 
     messages.append({"role": "assistant", "content": reply, "ts": now_ts})
 
-    # Guardar historial reemplazando el contenido de imagen con placeholder
-    # para no almacenar datos base64 grandes en SQLite en sesiones futuras
+    # Guardar historial: imágenes se almacenan como [IMG:<mime>;<base64>] para mostrarlas en el panel
     messages_to_save = []
     for msg in messages:
         if isinstance(msg.get("content"), list):
-            text_parts = [b["text"] for b in msg["content"] if b.get("type") == "text"]
+            img_part = next((b for b in msg["content"] if b.get("type") == "image"), None)
+            if img_part and img_part.get("source", {}).get("data"):
+                img_data = img_part["source"]["data"]
+                img_mime = img_part["source"].get("media_type", "image/jpeg")
+                content = f"[IMG:{img_mime};{img_data}]"
+            else:
+                text_parts = [b["text"] for b in msg["content"] if b.get("type") == "text"]
+                content = text_parts[0] if text_parts else "[📷 Captura de pago enviada]"
             messages_to_save.append({
                 "role": msg["role"],
-                "content": text_parts[0] if text_parts else "[📷 Captura de pago enviada]",
+                "content": content,
                 "ts": msg.get("ts", ""),
             })
         else:

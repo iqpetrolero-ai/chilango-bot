@@ -183,10 +183,14 @@ Si es de las incluidas → no la cobres por separado. Si es adicional → agrég
 
 4. CONFIRMAR PEDIDO — flujo según método de pago:
 
-   YAPE/PLIN:
-   Paso 1 — Una vez que tienes dirección y el cliente eligió Yape o Plin: indica
+   YAPE/PLIN (pago solo de comida — flujo normal):
+   Cuando el cliente elige Yape o Plin como pago y tienes su dirección de delivery:
+   Paso 1 — Indica el monto de comida + empaque y pide la captura:
              "📲 Yapea o Plinea al *{YAPE_PLIN_NUMBER}* a nombre de *David Morales* por *S/ XX.XX*" y pide la captura.
+             El monto es SOLO comida + empaque (S/2.00) — NO incluye delivery.
+             El costo de delivery lo paga el cliente al motorizado en efectivo al momento de la entrega.
              NO incluyas ningún tag aún.
+             ⛔ NUNCA uses [CONSULTAR_COSTO] en este flujo — eso es solo para "delivery incluido" (ver sección 11).
    Paso 2 — Cliente envía la captura: verifica el monto en la imagen.
              * Monto correcto → confirma con mensaje breve y agrega [PEDIDO_OK|...]
              * Monto menor    → indica la diferencia y pide que complete
@@ -354,7 +358,14 @@ Si es de las incluidas → no la cobres por separado. Si es adicional → agrég
 
    IDIOMA: Español cálido y directo. Sin exagerar la jerga mexicana. Respuestas cortas al punto.
 
-11. DELIVERY INCLUIDO EN EL PAGO:
+11. DELIVERY INCLUIDO EN EL PAGO (flujo especial — solo cuando el cliente lo pide explícitamente):
+    ⛔ SOLO activa esta sección si el cliente dice EXPLÍCITAMENTE que quiere pagar el delivery
+    junto con la comida en un solo pago. Frases que activan esta sección:
+    "quiero pagar el delivery incluido", "todo junto", "un solo pago", "incluye el delivery",
+    "pago todo con Yape", "delivery incluido en el pago", o similares.
+    Si el cliente SOLO dio su dirección o eligió Yape/Plin sin mencionar el delivery → usa sección 4 (flujo normal).
+    ⛔ NUNCA actives esta sección solo porque el cliente eligió delivery + Yape/Plin.
+
     Si el cliente quiere pagar el delivery junto con el pedido en un solo pago,
     sigue este flujo OBLIGATORIO — NO lo saltes bajo ninguna circunstancia:
 
@@ -1103,6 +1114,18 @@ async def process_message(phone: str, message: str) -> tuple[str, bool]:
         return "", False  # Silencio total — el bot no responde nada al cliente
 
     now_ts = datetime.now(PERU_TZ).strftime("%H:%M")
+
+    # Si hay una consulta de costo de delivery pendiente, no llamar a Claude —
+    # responder automáticamente para evitar que invente el costo.
+    phone_clean_del = phone.replace("whatsapp:", "").replace("+", "")
+    if db.has_pending_cost_query_for_client(phone_clean_del):
+        espera_msg = "¡En un momento te confirmamos el costo de delivery! ⏳"
+        messages = db.get_messages(phone)
+        messages.append({"role": "user", "content": message, "ts": now_ts})
+        messages.append({"role": "assistant", "content": espera_msg, "ts": now_ts})
+        db.save_messages(phone, messages)
+        return espera_msg, False
+
     messages = db.get_messages(phone)
     messages.append({"role": "user", "content": message, "ts": now_ts})
 

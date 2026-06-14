@@ -477,6 +477,16 @@ def save_pending_cost_query(client_phone: str, subtotal: str, items: str,
         )
 
 
+def has_pending_cost_query_for_client(client_phone: str) -> bool:
+    """Retorna True si hay una consulta de costo de delivery pendiente para este cliente."""
+    with _conn() as c:
+        row = c.execute(
+            "SELECT id FROM delivery_queries WHERE client_phone=? AND delivery_phone='owner' LIMIT 1",
+            (client_phone,)
+        ).fetchone()
+        return row is not None
+
+
 def get_all_pending_cost_queries() -> list[dict]:
     """Retorna todas las consultas de costo pendientes para el dueño."""
     with _conn() as c:

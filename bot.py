@@ -1118,7 +1118,8 @@ async def process_message(phone: str, message: str) -> tuple[str, bool]:
     # Si hay una consulta de costo de delivery pendiente, no llamar a Claude —
     # responder automáticamente para evitar que invente el costo.
     phone_clean_del = phone.replace("whatsapp:", "").replace("+", "")
-    if db.has_pending_cost_query_for_client(phone_clean_del):
+    _has_pending = getattr(db, "has_pending_cost_query_for_client", lambda _: False)
+    if _has_pending(phone_clean_del):
         espera_msg = "¡En un momento te confirmamos el costo de delivery! ⏳"
         messages = db.get_messages(phone)
         messages.append({"role": "user", "content": message, "ts": now_ts})

@@ -1,0 +1,14 @@
+.env
+*.db
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+pedidos_chilango.xlsx
+static/carta.pdf

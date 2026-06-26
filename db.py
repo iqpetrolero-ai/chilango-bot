@@ -898,7 +898,7 @@ _MENU_INICIAL = [
     ("PA' COMPARTIR", "Nachos Chilangos", "Birria, salsa de queso cheddar sobre cama de mozzarella", 28.00),
     ("PA' COMPARTIR", "Orden Guacamole c/ Totopos", "", 4.00),
     ("BURRITOS", "Chilangazo", "Pastor, salchicha huachana, suadero, queso gouda, frijoles, guacamole, cebolla y cilantro", 26.00),
-    ("COMBOS", "Plato Chingón", "2 Quesabirrias + 1 Gringa + 2 Tacos + ½ Nachos + Guacamole (para 2-3 personas)", 69.50),
+    ("COMBOS", "Plato Chingón", "2 Quesabirrias + 1 Gringa + 3 Tacos + ½ Nachos + Guacamole (para 2-3 personas)", 69.50),
     ("COMBOS", "De Compas", "2 Tacos + 2 Quesabirrias + 1 Gringa + 1 Guacamole + 2 Aguas (para 2)", 57.50),
     ("COMBOS", "Combo Pa' Ti Solito", "3 Quesabirrias + 1 Agua + 1 Guacamole c/totopos (personal)", 29.90),
     ("AGUAS DEL CHAVO", "Agua de Horchata", "½ litro", 8.00),

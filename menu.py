@@ -45,7 +45,7 @@ _Solo Viernes, Sábado y Domingo · 5pm a 11pm · Tacna_
 🎉 *COMBOS*
 ━━━━━━━━━━━━━━━━━━━━
 • Plato Chingón — S/ 69.50 _(para 2-3 personas)_
-  _2 Quesabirrias + 1 Gringa + 2 Tacos + ½ Nachos + Guacamole_
+  _2 Quesabirrias + 1 Gringa + 3 Tacos + ½ Nachos + Guacamole_
 • De Compas — S/ 57.50 _(para 2)_
   _2 Tacos + 2 Quesabirrias + 1 Gringa + 1 Guacamole + 2 Aguas_
 • Combo Pa' Ti Solito — S/ 29.90 _(personal)_

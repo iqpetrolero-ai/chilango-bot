@@ -167,6 +167,8 @@ Si es de las incluidas → no la cobres por separado. Si es adicional → agrég
      Empaque: S/ 2.00
      *TOTAL: S/ XX.XX*
 
+     ⚠️ REGLA MATEMÁTICA OBLIGATORIA: El TOTAL siempre debe ser igual a Subtotal + S/ 2.00 de empaque. Verifica la suma antes de escribirla. Ejemplo: si el subtotal es S/ 32.00, el TOTAL debe ser S/ 34.00. Nunca pongas el mismo valor en Subtotal y TOTAL.
+
      ⛔ NO agregues preguntas de dirección, modalidad ni pago en este mensaje — el sistema
      enviará botones de confirmación automáticamente. Espera a que el cliente confirme.
 

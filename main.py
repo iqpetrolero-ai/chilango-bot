@@ -352,16 +352,29 @@ def _deberia_mostrar_botones_confirmacion(reply: str) -> bool:
 
     Condiciones:
     - Contiene TOTAL con monto → hay resumen de pedido
-    - No contiene [PEDIDO_OK → aún no confirmado
+    - No contiene [PEDIDO_OK] → aún no confirmado
     - No contiene instrucción de Yape/Plin → no es paso de captura de pago
     - No contiene [ESCALATE] → no es flujo de escalación
+    - No contiene pregunta pendiente sobre componentes del combo (agua, tipo de taco)
+      → si el bot aún pregunta algo, el pedido no está completo
     """
     r = reply.lower()
     tiene_total = "total: s/" in r or "*total:" in r or "total:s/" in r
     ya_confirmado = "[pedido_ok" in r
     es_yape_plin = "yapea" in r or "plinea" in r
     es_escalacion = "[escalate]" in r
-    return tiene_total and not ya_confirmado and not es_yape_plin and not es_escalacion
+    tiene_pregunta_pendiente = (
+        ("horchata" in r and "jamaica" in r)  # pregunta de sabor de agua sin confirmar
+        or "tipo de agua" in r
+        or "qué agua" in r
+        or "que agua" in r
+        or "qué tipo de taco" in r
+        or "que tipo de taco" in r
+        or "qué taco" in r
+        or "que taco" in r
+    )
+    return (tiene_total and not ya_confirmado and not es_yape_plin
+            and not es_escalacion and not tiene_pregunta_pendiente)
 
 
 async def send_confirm_order_buttons(phone: str, sending_id: str = None):

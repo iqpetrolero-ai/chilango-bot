@@ -2987,7 +2987,7 @@ __UI_HEAD__
 .rec-badge{display:inline-flex;align-items:center;gap:3px;font-size:10.5px;background:var(--green-bg);color:var(--green);border-radius:999px;padding:2px 8px;font-weight:600;white-space:nowrap}
 .rec-badge i{font-size:12px}
 .rec-cell{white-space:nowrap}
-.btn-rec-filter{display:flex;align-items:center;gap:6px;height:34px;padding:0 13px;border:1px solid var(--border);background:var(--surface);border-radius:8px;cursor:pointer;font:inherit;font-size:13px;color:var(--text2);transition:all .15s;outline:none}
+.btn-rec-filter{display:flex;align-items:center;gap:6px;height:34px;padding:0 13px;border:1px solid var(--border);background:var(--surface);border-radius:8px;cursor:pointer;font:inherit;font-size:13px;color:var(--text2);transition:all .15s}
 .btn-rec-filter:hover{background:var(--bg)}
 .btn-rec-filter.active{background:var(--green-bg);border-color:var(--green);color:var(--green);font-weight:600}
 .btn-rec-filter i{font-size:15px}

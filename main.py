@@ -377,6 +377,36 @@ def _deberia_mostrar_botones_confirmacion(reply: str) -> bool:
             and not es_escalacion and not tiene_pregunta_pendiente)
 
 
+def _strip_entrega_question(reply: str) -> str:
+    """Elimina la pregunta de entrega/pago del reply cuando se van a mostrar botones.
+
+    El bot tiende a añadir '¿Te lo llevamos a domicilio...?' al final del resumen
+    aunque se le indique no hacerlo. Los botones reemplazan esa pregunta, así que
+    la truncamos antes de enviar el mensaje al cliente.
+    """
+    triggers = [
+        "¿te lo llevamos a domicilio",
+        "¿lo llevamos a domicilio",
+        "¿lo enviamos a domicilio",
+        "te lo llevamos a domicilio",
+        "dime tu dirección",
+        "dime tu direccion",
+        "¿y cómo pagas",
+        "¿cómo pagas",
+        "yape, plin o contra entrega",
+        "yape o plin",
+        "¿recoges en el local",
+        "recoges en nuestro local",
+    ]
+    r_lower = reply.lower()
+    cut = len(reply)
+    for t in triggers:
+        idx = r_lower.find(t)
+        if idx != -1 and idx < cut:
+            cut = idx
+    return reply[:cut].strip()
+
+
 async def send_confirm_order_buttons(phone: str, sending_id: str = None):
     """Envía los botones de confirmación de pedido al cliente."""
     await send_whatsapp_buttons(
@@ -598,11 +628,13 @@ async def handle_message(phone: str, message: str, phone_number_id: str = None):
     await db.arun(db.mark_unread, phone)
     try:
         reply, escalate, order_confirmed = await process_message(phone, message)
+        mostrar_botones = reply and not order_confirmed and _deberia_mostrar_botones_confirmacion(reply)
         if reply:
-            await _send_reply(phone, reply, sending_id)
+            reply_a_enviar = _strip_entrega_question(reply) if mostrar_botones else reply
+            await _send_reply(phone, reply_a_enviar, sending_id)
         if escalate:
             await send_escalate_button(phone, sending_id)
-        elif reply and not order_confirmed and _deberia_mostrar_botones_confirmacion(reply):
+        elif mostrar_botones:
             await send_confirm_order_buttons(phone, sending_id)
     except Exception as e:
         import traceback

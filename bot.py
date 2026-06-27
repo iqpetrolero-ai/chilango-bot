@@ -1124,14 +1124,14 @@ def mensaje_saturado() -> str:
     )
 
 
-async def process_message(phone: str, message: str) -> tuple[str, bool]:
-    """Retorna (reply_text, needs_escalate)."""
+async def process_message(phone: str, message: str) -> tuple[str, bool, bool]:
+    """Retorna (reply_text, needs_escalate, order_confirmed)."""
     if not esta_en_horario():
-        return mensaje_fuera_horario(), False
+        return mensaje_fuera_horario(), False, False
 
     # Verificar si el bot está pausado (pausa manual)
     if db.get_config("bot_pausado", "0") == "1":
-        return mensaje_pausado(), False
+        return mensaje_pausado(), False, False
 
     # Auto-pausa por saturación dinámica: carga ≥ 9 según complejidad de pedidos activos
     try:
@@ -1151,7 +1151,7 @@ async def process_message(phone: str, message: str) -> tuple[str, bool]:
         if sin_respuesta >= 1 and db.check_reescalation_cooldown(phone_clean_esc, minutes=30):
             await _notify_reescalacion(phone_clean_esc, sin_respuesta)
             db.mark_reescalation_sent(phone_clean_esc)
-        return "", False  # Silencio total — el bot no responde nada al cliente
+        return "", False, False  # Silencio total — el bot no responde nada al cliente
 
     now_ts = datetime.now(PERU_TZ).strftime("%H:%M")
 
@@ -1165,7 +1165,7 @@ async def process_message(phone: str, message: str) -> tuple[str, bool]:
         messages.append({"role": "user", "content": message, "ts": now_ts})
         messages.append({"role": "assistant", "content": espera_msg, "ts": now_ts})
         db.save_messages(phone, messages)
-        return espera_msg, False
+        return espera_msg, False, False
 
     messages = db.get_messages(phone)
     messages.append({"role": "user", "content": message, "ts": now_ts})
@@ -1251,3 +1251,4 @@ async def process_message_with_image(phone: str, image_bytes: bytes, mime_type: 
 
 def reset_conversation(phone: str):
     db.reset_conv(phone)
+

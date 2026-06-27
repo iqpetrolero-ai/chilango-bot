@@ -347,6 +347,37 @@ async def send_escalate_button(phone: str, sending_id: str = None):
     )
 
 
+def _deberia_mostrar_botones_confirmacion(reply: str) -> bool:
+    """Detecta si la respuesta del bot es un resumen listo para confirmar (contra entrega).
+
+    Condiciones:
+    - Contiene TOTAL con monto → hay resumen de pedido
+    - No contiene [PEDIDO_OK → aún no confirmado
+    - No contiene instrucción de Yape/Plin → no es paso de captura de pago
+    - No contiene [ESCALATE] → no es flujo de escalación
+    """
+    r = reply.lower()
+    tiene_total = "total: s/" in r or "*total:" in r or "total:s/" in r
+    ya_confirmado = "[pedido_ok" in r
+    es_yape_plin = "yapea" in r or "plinea" in r
+    es_escalacion = "[escalate]" in r
+    return tiene_total and not ya_confirmado and not es_yape_plin and not es_escalacion
+
+
+async def send_confirm_order_buttons(phone: str, sending_id: str = None):
+    """Envía los botones de confirmación de pedido al cliente."""
+    await send_whatsapp_buttons(
+        phone,
+        "Elige una opción para continuar 👇",
+        [
+            {"id": "confirmar_pedido", "title": "Confirmar pedido"},
+            {"id": "cambiar_pedido",   "title": "Cambiar algo"},
+            {"id": "cancelar_pedido",  "title": "Cancelar"},
+        ],
+        sending_id,
+    )
+
+
 def _parse_delivery_cost(text: str):
     """Extrae el monto numérico de la respuesta del motorizado.
     Maneja: '7', 'S/7', '7 soles', 'el costo es 8 soles', 'son 10 para esa zona', etc.
@@ -558,6 +589,8 @@ async def handle_message(phone: str, message: str, phone_number_id: str = None):
             await _send_reply(phone, reply, sending_id)
         if escalate:
             await send_escalate_button(phone, sending_id)
+        elif reply and _deberia_mostrar_botones_confirmacion(reply):
+            await send_confirm_order_buttons(phone, sending_id)
     except Exception as e:
         import traceback
         print(f"[ERROR PROCESO] {phone}: {e}")
@@ -654,6 +687,15 @@ async def receive_message(request: Request):
                 await db.arun(db.append_message, phone, "user", "No, gracias", ts=now_ts)
                 await db.arun(db.append_message, phone, "assistant", respuesta, ts=now_ts)
                 await send_whatsapp_message(phone, respuesta, phone_number_id)
+            elif btn_id == "confirmar_pedido":
+                await db.arun(db.append_message, phone, "user", "Sí, confirmo el pedido", ts=now_ts)
+                await handle_message(phone, "Sí, confirmo el pedido", phone_number_id)
+            elif btn_id == "cambiar_pedido":
+                await db.arun(db.append_message, phone, "user", "Quiero cambiar algo en mi pedido", ts=now_ts)
+                await handle_message(phone, "Quiero cambiar algo en mi pedido", phone_number_id)
+            elif btn_id == "cancelar_pedido":
+                await db.arun(db.append_message, phone, "user", "Quiero cancelar mi pedido", ts=now_ts)
+                await handle_message(phone, "Quiero cancelar mi pedido", phone_number_id)
             else:
                 # Botón desconocido: tratar como texto normal
                 await handle_message(phone, btn_title or btn_id, phone_number_id)

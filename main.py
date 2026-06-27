@@ -50,6 +50,10 @@ async def lifespan(app: FastAPI):
                 pendientes = await db.arun(db.get_pending_reminders, minutos=5, cooldown_min=30)
                 for p in pendientes:
                     phone = p["phone"]
+                    phone_clean = phone.replace("whatsapp:", "").replace("+", "")
+                    if db.is_escalated(phone_clean):
+                        print(f"[RECORDATORIO] Omitido {phone} — equipo activo")
+                        continue
                     recordatorio = (
                         "¡Hola! 😊 Solo para recordarte que quedamos en confirmar tu pedido.\n\n"
                         "¿Lo confirmamos o quieres hacer algún cambio? 🌮"
@@ -92,6 +96,10 @@ async def lifespan(app: FastAPI):
                 if esta_en_horario():
                     pendientes = await db.arun(db.get_pending_carta_followups, minutos=15)
                     for p in pendientes:
+                        phone_clean = p["phone"].replace("whatsapp:", "").replace("+", "")
+                        if db.is_escalated(phone_clean):
+                            print(f"[CARTA FOLLOWUP] Omitido {p['phone']} — equipo activo")
+                            continue
                         followup = (
                             "¡Hola! 😊 ¿Pudiste ver nuestra carta? 🌮\n\n"
                             "Si te animaste con algo o tienes alguna duda, aquí estamos. "
@@ -2820,7 +2828,11 @@ async def send_manual_message(
     now_ts = datetime.now(PERU_TZ).strftime("%H:%M")
     await db.arun(db.append_message, phone, "assistant", message, ts=now_ts, manual=True)
     await db.arun(db.mark_unread, phone)
-    print(f"[MANUAL] Mensaje enviado a {phone}: {message[:60]}")
+    # Pausar el bot mientras el equipo maneja la conversación manualmente.
+    # El panel muestra el botón "Reactivar bot" para devolverle el control al bot.
+    phone_clean = phone.replace("whatsapp:", "").replace("+", "")
+    await db.arun(db.mark_escalated, phone_clean)
+    print(f"[MANUAL] Mensaje enviado a {phone}: {message[:60]} — bot pausado para esta conv")
     return JSONResponse({"status": "ok"})
 
 

@@ -584,7 +584,7 @@ async def handle_message(phone: str, message: str, phone_number_id: str = None):
             sending_id,
         )
         if msg_lower not in SALUDOS_GENERICOS and message.strip():
-            reply, escalate = await process_message(phone, message)
+            reply, escalate, order_confirmed = await process_message(phone, message)
             if reply:
                 await _send_reply(phone, reply, sending_id)
             if escalate:
@@ -597,12 +597,12 @@ async def handle_message(phone: str, message: str, phone_number_id: str = None):
 
     await db.arun(db.mark_unread, phone)
     try:
-        reply, escalate = await process_message(phone, message)
+        reply, escalate, order_confirmed = await process_message(phone, message)
         if reply:
             await _send_reply(phone, reply, sending_id)
         if escalate:
             await send_escalate_button(phone, sending_id)
-        elif reply and _deberia_mostrar_botones_confirmacion(reply):
+        elif reply and not order_confirmed and _deberia_mostrar_botones_confirmacion(reply):
             await send_confirm_order_buttons(phone, sending_id)
     except Exception as e:
         import traceback

@@ -655,10 +655,11 @@ def _extract_tag(reply: str, tag_name: str) -> tuple[dict | None, str]:
         return None, reply
 
 
-async def _parse_and_save_order(phone: str, reply: str) -> tuple[str, bool]:
-    """Retorna (reply_limpio, needs_escalate)."""
+async def _parse_and_save_order(phone: str, reply: str) -> tuple[str, bool, bool]:
+    """Retorna (reply_limpio, needs_escalate, order_confirmed)."""
     phone_clean = phone.replace("whatsapp:", "").replace("+", "")
     needs_escalate = False
+    order_confirmed = False
 
     # Capturar nombre si el bot lo detectó
     nombre, reply = _extract_save_name(reply)
@@ -671,6 +672,7 @@ async def _parse_and_save_order(phone: str, reply: str) -> tuple[str, bool]:
     # Pedido nuevo
     fields, reply = _extract_tag(reply, "PEDIDO_OK")
     if fields:
+        order_confirmed = True
         await save_order(phone, fields["items"], fields["total"], fields["pago"], fields["dir"], fields.get("notas", ""))
         try:
             db.save_customer_profile(phone_clean,
@@ -744,7 +746,7 @@ async def _parse_and_save_order(phone: str, reply: str) -> tuple[str, bool]:
         reply = reply.replace("[ESCALATE]", "").strip()
         needs_escalate = True
 
-    return reply, needs_escalate
+    return reply, needs_escalate, order_confirmed
 
 
 def _contar_tacos(items_str: str) -> int:
@@ -1162,12 +1164,12 @@ async def process_message(phone: str, message: str) -> tuple[str, bool]:
     messages.append({"role": "user", "content": message, "ts": now_ts})
 
     reply = await _call_claude(phone, messages)
-    reply, escalate = await _parse_and_save_order(phone, reply)
+    reply, escalate, order_confirmed = await _parse_and_save_order(phone, reply)
 
     messages.append({"role": "assistant", "content": reply, "ts": now_ts})
     db.save_messages(phone, messages)
 
-    return reply, escalate
+    return reply, escalate, order_confirmed
 
 
 async def process_message_with_image(phone: str, image_bytes: bytes, mime_type: str = "image/jpeg") -> tuple[str, bool]:
@@ -1212,7 +1214,7 @@ async def process_message_with_image(phone: str, image_bytes: bytes, mime_type: 
     })
 
     reply = await _call_claude(phone, messages)
-    reply, escalate = await _parse_and_save_order(phone, reply)
+    reply, escalate, order_confirmed = await _parse_and_save_order(phone, reply)
 
     messages.append({"role": "assistant", "content": reply, "ts": now_ts})
 
@@ -1237,7 +1239,7 @@ async def process_message_with_image(phone: str, image_bytes: bytes, mime_type: 
             messages_to_save.append(msg)
     db.save_messages(phone, messages_to_save)
 
-    return reply, escalate
+    return reply, escalate, order_confirmed
 
 
 def reset_conversation(phone: str):

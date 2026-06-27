@@ -2984,7 +2984,13 @@ __UI_HEAD__
 .pts-input:focus{border-color:var(--brand)}
 .pts-input.saved{border-color:var(--green);background:var(--green-bg)}
 .pts-input.saving{border-color:var(--amber-mid)}
-.rec-badge{font-size:10.5px;background:var(--green-bg);color:var(--green);border-radius:999px;padding:1px 7px;font-weight:600;margin-left:5px}
+.rec-badge{display:inline-flex;align-items:center;gap:3px;font-size:10.5px;background:var(--green-bg);color:var(--green);border-radius:999px;padding:2px 8px;font-weight:600;white-space:nowrap}
+.rec-badge i{font-size:12px}
+.rec-cell{white-space:nowrap}
+.btn-rec-filter{display:flex;align-items:center;gap:6px;height:34px;padding:0 13px;border:1px solid var(--border);background:var(--surface);border-radius:8px;cursor:pointer;font:inherit;font-size:13px;color:var(--text2);transition:all .15s}
+.btn-rec-filter:hover{background:var(--bg)}
+.btn-rec-filter.active{background:var(--green-bg);border-color:var(--green);color:var(--green);font-weight:600}
+.btn-rec-filter i{font-size:15px}
 .empty{text-align:center;padding:50px 20px;color:var(--text3)}
 .empty i{display:block;font-size:40px;margin-bottom:10px;color:var(--border2)}
 </style></head><body>
@@ -2992,19 +2998,23 @@ __HEADER__
 __NAV__
 <main class="wrap">
   <div class="kpis">
-    <div class="kpi"><div class="lbl">Clientes — __LABEL_FECHA__</div><div class="val">__N_CLIENTES__</div></div>
-    <div class="kpi"><div class="lbl">Pedidos ese día</div><div class="val">__N_PEDIDOS__</div></div>
-    <div class="kpi"><div class="lbl">Facturación del día</div><div class="val">S/ __FACTURACION__</div></div>
+    <div class="kpi"><div class="lbl">__KPI_LABEL__</div><div class="val">__N_CLIENTES__</div></div>
+    <div class="kpi"><div class="lbl">__KPI2_LABEL__</div><div class="val">__N_PEDIDOS__</div></div>
+    <div class="kpi"><div class="lbl">__KPI3_LABEL__</div><div class="val">S/ __FACTURACION__</div></div>
     <div class="kpi"><div class="lbl">Ticket promedio</div><div class="val">S/ __TICKET__</div></div>
   </div>
   <div class="controls">
-    <select class="ctl" onchange="if(this.value)location.href='/admin/clientes?fecha='+encodeURIComponent(this.value)">__FECHAS_OPTIONS__</select>
+    <select class="ctl" onchange="location.href='/admin/clientes?fecha='+encodeURIComponent(this.value)">__FECHAS_OPTIONS__</select>
+    <button class="btn-rec-filter" id="btnRec" onclick="toggleRec()"><i class="ti ti-repeat"></i> Solo recurrentes</button>
     <div class="searchwrap"><i class="ti ti-search"></i><input id="buscar" type="search" placeholder="Buscar por teléfono o nombre…" oninput="filtrar(this.value)"></div>
   </div>
   __TABLA__
 </main>
 <div class="toast" id="toast"></div>
 <script>
+let recMode = false;
+let searchQ = '';
+
 function showToast(msg) {
   const t = document.getElementById('toast');
   t.textContent = msg; t.classList.add('show');
@@ -3032,11 +3042,23 @@ async function guardarPuntos(phone, input) {
   } catch(e) { alert('Error: ' + e.message); }
 }
 
-function filtrar(q) {
-  q = (q || '').toLowerCase();
+function applyFilters() {
   document.querySelectorAll('#tbody tr').forEach(tr => {
-    tr.style.display = tr.textContent.toLowerCase().includes(q) ? '' : 'none';
+    const matchQ = !searchQ || tr.textContent.toLowerCase().includes(searchQ);
+    const isRec = tr.dataset.rec === '1';
+    tr.style.display = (matchQ && (!recMode || isRec)) ? '' : 'none';
   });
+}
+
+function filtrar(q) {
+  searchQ = (q || '').toLowerCase();
+  applyFilters();
+}
+
+function toggleRec() {
+  recMode = !recMode;
+  document.getElementById('btnRec').classList.toggle('active', recMode);
+  applyFilters();
 }
 __NAV_BADGE_JS__
 </script>
@@ -3052,72 +3074,116 @@ async def admin_clientes(
     PERU_TZ = timezone(timedelta(hours=-5))
     hoy = datetime.now(PERU_TZ).strftime("%d/%m/%Y")
     fecha_sel = fecha if fecha else hoy
+    ver_todos = (fecha_sel == "todos")
 
     fechas_raw = await db.arun(db.get_available_dates)
     fechas_disponibles = fechas_raw if hoy in fechas_raw else [hoy] + fechas_raw
 
-    clientes = await db.arun(db.get_customers_with_stats_for_date, fecha_sel)
+    if ver_todos:
+        clientes = await db.arun(db.get_customers_with_stats)
+    else:
+        clientes = await db.arun(db.get_customers_with_stats_for_date, fecha_sel)
 
     filas = ""
     for i, c in enumerate(clientes, 1):
         nombre       = html.escape(c.get("nombre") or "—")
         phone        = html.escape(c.get("phone") or "")
         puntos       = int(c.get("puntos") or 0)
-        pedidos_dia  = int(c.get("total_pedidos") or 0)
-        gastado_dia  = float(c.get("total_gastado") or 0)
-        pedidos_hist = int(c.get("total_pedidos_hist") or pedidos_dia)
-        gastado_hist = float(c.get("total_gastado_hist") or gastado_dia)
-        es_recurrente = pedidos_hist > pedidos_dia
         updated      = (c.get("updated_at") or "—")[:16]
         rank_cls = "r1" if i == 1 else ("r2" if i == 2 else ("r3" if i == 3 else ""))
-        badge_rec = '<span class="rec-badge">recurrente</span>' if es_recurrente else ''
-        filas += f"""<tr>
-          <td class="cl-rank"><span class="rank-chip {rank_cls}">{i}</span></td>
-          <td class="cl-phone"><a href="https://wa.me/{phone}" target="_blank" title="Abrir chat de WhatsApp"><i class="ti ti-brand-whatsapp"></i>+{phone}</a></td>
-          <td>{nombre}{badge_rec}</td>
-          <td class="num">{pedidos_dia}</td>
-          <td class="num cl-total">S/ {gastado_dia:.2f}</td>
-          <td class="num cl-hist">{pedidos_hist}</td>
-          <td class="num cl-hist">S/ {gastado_hist:.2f}</td>
-          <td style="text-align:center">
-            <input class="pts-input" type="number" min="0" value="{puntos}"
-              onchange="guardarPuntos('{phone}', this)"
-              onkeydown="if(event.key==='Enter')this.blur()">
-          </td>
-          <td class="cl-date">{updated}</td>
-        </tr>"""
+
+        if ver_todos:
+            pedidos_hist = int(c.get("total_pedidos") or 0)
+            gastado_hist = float(c.get("total_gastado") or 0)
+            es_recurrente = pedidos_hist >= 2
+            data_rec = "1" if es_recurrente else "0"
+            badge_rec = (f'<span class="rec-badge"><i class="ti ti-repeat"></i>{pedidos_hist} visitas</span>'
+                         if es_recurrente else "")
+            filas += f"""<tr data-rec="{data_rec}">
+              <td class="cl-rank"><span class="rank-chip {rank_cls}">{i}</span></td>
+              <td class="cl-phone"><a href="https://wa.me/{phone}" target="_blank" title="Abrir WhatsApp"><i class="ti ti-brand-whatsapp"></i>+{phone}</a></td>
+              <td>{nombre}</td>
+              <td class="rec-cell">{badge_rec}</td>
+              <td class="num cl-total">{pedidos_hist}</td>
+              <td class="num cl-total">S/ {gastado_hist:.2f}</td>
+              <td style="text-align:center">
+                <input class="pts-input" type="number" min="0" value="{puntos}"
+                  onchange="guardarPuntos('{phone}', this)"
+                  onkeydown="if(event.key==='Enter')this.blur()">
+              </td>
+              <td class="cl-date">{updated}</td>
+            </tr>"""
+        else:
+            pedidos_dia  = int(c.get("total_pedidos") or 0)
+            gastado_dia  = float(c.get("total_gastado") or 0)
+            pedidos_hist = int(c.get("total_pedidos_hist") or pedidos_dia)
+            gastado_hist = float(c.get("total_gastado_hist") or gastado_dia)
+            es_recurrente = pedidos_hist > pedidos_dia
+            data_rec = "1" if es_recurrente else "0"
+            badge_rec = (f'<span class="rec-badge"><i class="ti ti-repeat"></i>{pedidos_hist} visitas</span>'
+                         if es_recurrente else "")
+            filas += f"""<tr data-rec="{data_rec}">
+              <td class="cl-rank"><span class="rank-chip {rank_cls}">{i}</span></td>
+              <td class="cl-phone"><a href="https://wa.me/{phone}" target="_blank" title="Abrir WhatsApp"><i class="ti ti-brand-whatsapp"></i>+{phone}</a></td>
+              <td>{nombre}</td>
+              <td class="rec-cell">{badge_rec}</td>
+              <td class="num">{pedidos_dia}</td>
+              <td class="num cl-total">S/ {gastado_dia:.2f}</td>
+              <td class="num cl-hist">{pedidos_hist}</td>
+              <td class="num cl-hist">S/ {gastado_hist:.2f}</td>
+              <td style="text-align:center">
+                <input class="pts-input" type="number" min="0" value="{puntos}"
+                  onchange="guardarPuntos('{phone}', this)"
+                  onkeydown="if(event.key==='Enter')this.blur()">
+              </td>
+              <td class="cl-date">{updated}</td>
+            </tr>"""
 
     total_clientes = len(clientes)
+    total_pedidos_sum = sum(c.get("total_pedidos") or 0 for c in clientes)
     total_gastado_global = sum(c.get("total_gastado") or 0 for c in clientes)
-    total_pedidos_dia = sum(c.get("total_pedidos") or 0 for c in clientes)
-    label_fecha = "hoy" if fecha_sel == hoy else fecha_sel
+    label_fecha = "todos" if ver_todos else ("hoy" if fecha_sel == hoy else fecha_sel)
+    n_recurrentes = sum(1 for c in clientes if (c.get("total_pedidos") or 0) >= (2 if ver_todos else 1)
+                        and (ver_todos or (c.get("total_pedidos_hist") or 0) > (c.get("total_pedidos") or 0)))
 
-    fechas_options = "".join(
-        f'<option value="{f}" {"selected" if f == fecha_sel else ""}>{f}{" (hoy)" if f == hoy else ""}</option>'
-        for f in fechas_disponibles
+    fechas_options = (
+        f'<option value="todos" {"selected" if ver_todos else ""}>📋 Todos los clientes</option>'
+        + "".join(
+            f'<option value="{f}" {"selected" if f == fecha_sel else ""}>{f}{" (hoy)" if f == hoy else ""}</option>'
+            for f in fechas_disponibles
+        )
     )
 
-    if clientes:
-        tabla = f"""<div class="tbl-wrap">
-    <table class="tbl">
-      <thead>
-        <tr>
-          <th style="text-align:center">#</th>
-          <th>Teléfono</th>
-          <th>Nombre</th>
+    if ver_todos:
+        encabezados = """<th style="text-align:center">#</th>
+          <th>Teléfono</th><th>Nombre</th><th>Recurrencia</th>
+          <th style="text-align:right">Pedidos</th>
+          <th style="text-align:right">Total acum.</th>
+          <th style="text-align:center">Puntos</th><th>Última actividad</th>"""
+        kpi_label = "Total clientes"
+        kpi2_label = "Total pedidos"
+        kpi3_label = "Ventas acumuladas"
+    else:
+        encabezados = """<th style="text-align:center">#</th>
+          <th>Teléfono</th><th>Nombre</th><th>Recurrencia</th>
           <th style="text-align:right">Pedidos día</th>
           <th style="text-align:right">Total día</th>
           <th style="text-align:right">Pedidos hist.</th>
           <th style="text-align:right">Total hist.</th>
-          <th style="text-align:center">Puntos</th>
-          <th>Última actividad</th>
-        </tr>
-      </thead>
+          <th style="text-align:center">Puntos</th><th>Última actividad</th>"""
+        kpi_label = f"Clientes — {label_fecha}"
+        kpi2_label = "Pedidos ese día"
+        kpi3_label = "Facturación del día"
+
+    if clientes:
+        tabla = f"""<div class="tbl-wrap">
+    <table class="tbl">
+      <thead><tr>{encabezados}</tr></thead>
       <tbody id="tbody">{filas}</tbody>
     </table></div>"""
     else:
-        tabla = (f'<div class="tbl-wrap"><div class="empty"><i class="ti ti-users"></i>'
-                 f'Sin pedidos para {html.escape(fecha_sel)}</div></div>')
+        msg = "Sin clientes registrados" if ver_todos else f"Sin pedidos para {html.escape(fecha_sel)}"
+        tabla = f'<div class="tbl-wrap"><div class="empty"><i class="ti ti-users"></i>{msg}</div></div>'
 
     page = (_CLIENTES_TEMPLATE
             .replace("__UI_HEAD__", _UI_HEAD)
@@ -3125,9 +3191,11 @@ async def admin_clientes(
             .replace("__HEADER__", _ui_header("Clientes y puntos"))
             .replace("__NAV__", _nav_html("clientes"))
             .replace("__NAV_BADGE_JS__", _NAV_BADGE_JS)
-            .replace("__LABEL_FECHA__", html.escape(label_fecha))
+            .replace("__KPI_LABEL__", html.escape(kpi_label))
+            .replace("__KPI2_LABEL__", html.escape(kpi2_label))
+            .replace("__KPI3_LABEL__", html.escape(kpi3_label))
             .replace("__N_CLIENTES__", str(total_clientes))
-            .replace("__N_PEDIDOS__", str(total_pedidos_dia))
+            .replace("__N_PEDIDOS__", str(total_pedidos_sum))
             .replace("__FACTURACION__", f"{total_gastado_global:.2f}")
             .replace("__TICKET__", f"{(total_gastado_global/total_clientes if total_clientes else 0):.2f}")
             .replace("__FECHAS_OPTIONS__", fechas_options)

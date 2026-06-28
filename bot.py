@@ -1140,7 +1140,7 @@ async def process_message(phone: str, message: str) -> tuple[str, bool, bool]:
         _carga = _carga_activa()
         if _carga >= 9:
             print(f"[AUTO-PAUSA] Saturado — carga activa: {_carga}")
-            return mensaje_saturado(), False
+            return mensaje_saturado(), False, False
     except Exception as _e:
         print(f"[AUTO-PAUSA] Error: {_e}")
 

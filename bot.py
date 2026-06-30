@@ -582,6 +582,14 @@ repetirlo. Una vez que el cliente responde (acepta, rechaza o modifica), ⛔ NO 
 el pedido anterior ni uses frases como "la última vez fue...", "igual que antes", "como la vez pasada"
 dentro del mismo flujo de pedido. El cliente ya tomó su decisión — seguir mencionando el historial
 es ruido innecesario que hace el flujo más largo y robótico.
+
+━━━ PROGRAMA DE FIDELIDAD — AVISO AL SALUDAR ━━━
+Si el PERFIL DEL CLIENTE incluye "PREMIO PENDIENTE", menciona su premio DE FORMA EMOCIONANTE al
+inicio de la conversación, antes de cualquier otra cosa. Ejemplo:
+"¡Hola [nombre]! 🎉 ¡Tienes una *[premio]* gratis esperándote! Solo dímelo al pedir y te la aplico."
+Si el perfil incluye progreso de sellos (sin premio aún), menciónalo brevemente de forma motivadora
+UNA SOLA VEZ al inicio: "¡Ya llevas X/Y para tu [próximo premio]! 🌮"
+NO repitas esta información durante el flujo del pedido — solo al saludar.
 """
 
 
@@ -1008,6 +1016,19 @@ async def _call_claude(phone: str, messages: list) -> str:
                 parts.append(f"Último pedido: {profile['ultimo_pedido']}")
             if profile.get("ultimo_pago"):
                 parts.append(f"Método de pago habitual: {profile['ultimo_pago']}")
+            # Premio de fidelidad pendiente
+            loyalty = db.get_loyalty_info(phone_clean)
+            sellos = int(loyalty.get("sellos") or 0)
+            reward_pending = loyalty.get("reward_pending") or ""
+            if reward_pending and reward_pending in db.REWARD_LABELS:
+                reward_label = db.REWARD_LABELS[reward_pending]
+                parts.append(f"PREMIO PENDIENTE: {reward_label} (ganado por {sellos} pedidos anteriores)")
+            elif sellos > 0:
+                next_t = next((t for t in (3, 6, 9) if t > sellos), None)
+                if next_t:
+                    next_label = db.REWARD_LABELS[db._REWARD_THRESHOLDS[next_t]]
+                    parts.append(f"Programa de fidelidad: lleva {sellos}/{next_t} sellos para ganar {next_label}")
+
             if parts:
                 profile_ctx = (
                     "\n\n━━━ PERFIL DEL CLIENTE (memoria de sesiones anteriores) ━━━\n"

@@ -85,6 +85,11 @@ def mensaje_bienvenida() -> str:
         "Somos un restaurante mexicano de delivery en Tacna. "
         "Tenemos tacos, quesabirrias, burritos y todo lo que necesitas para taquear rico. 🌯\n\n"
         "🕒 *Horario:* Viernes, Sábado y Domingo · 5:30 pm a 11:00 pm · Último pedido: 10:45 pm.\n\n"
+        "Puedes decirme cosas como:\n"
+        "📋 *'Ver carta'* — para ver el menú\n"
+        "🛒 *'Quiero pedir'* — para hacer un pedido\n"
+        "❓ *'¿Hacen delivery a X zona?'* — para consultar cobertura\n"
+        "✅ Cuando tengas tu pedido listo, dime *'sí, confirmo'*\n\n"
         "¿Qué te apetece hoy?"
     )
 
@@ -132,10 +137,19 @@ Si es de las incluidas → no la cobres por separado. Si es adicional → agrég
    Si escribe "2", inicia el flujo de pedido.
 
 2. PREGUNTAS: Responde con detalle y entusiasmo sobre ingredientes, tamaños, sabores.
+   ⚠️ REGLA CRÍTICA — PREGUNTAS INFORMATIVAS: Las siguientes preguntas se responden SIEMPRE,
+   sin importar si el cliente tiene un pedido en curso, no ha pedido nada, o acaba de llegar.
+   NUNCA digas "primero dime qué quieres pedir" antes de responder estas preguntas:
+   - Zona de cobertura / si hacen delivery a X lugar
+   - Costo de delivery
+   - Horario
+   - Formas de pago
+   - Dirección para recojo
+   Son preguntas informativas válidas en cualquier momento del flujo.
    - "¿Qué es la birria?" → Carne de res guisada en adobo especiado, jugosa y sabrosa
    - "¿Tienen opciones sin picante?" → Sí, puedes pedir tus tacos o birria sin salsa picante
    - "¿Cuánto demora el delivery?" → El motorizado llega a nuestro local en unos 10-15 min y de ahí sale a tu dirección; el tiempo total depende de tu zona
-   - "¿Tienen cobertura en mi zona?" → Sí, llegamos a todo Tacna
+   - "¿Tienen cobertura en mi zona?" / "¿Hacen delivery a X zona?" → Sí, llegamos a todo Tacna
    - "¿Cuánto cuesta el delivery?" → El costo varía según tu zona; una vez que confirmes tu pedido te lo comunicamos. ⛔ NUNCA menciones cifras ni rangos de precio de delivery.
    - "¿Puedo pagar el delivery incluido en el pedido?" → ver punto 11
    - "¿Aceptan contra entrega?" → Sí, manejamos contra entrega. Trátalo exactamente igual que Efectivo en el flujo de pedido (mismo tag, mismo proceso).
@@ -169,11 +183,13 @@ Si es de las incluidas → no la cobres por separado. Si es adicional → agrég
 
      ⚠️ REGLA MATEMÁTICA OBLIGATORIA: El TOTAL siempre debe ser igual a Subtotal + S/ 2.00 de empaque. Verifica la suma antes de escribirla. Ejemplo: si el subtotal es S/ 32.00, el TOTAL debe ser S/ 34.00. Nunca pongas el mismo valor en Subtotal y TOTAL.
 
+     ✅ ¿Confirmamos tu pedido? Responde *'sí, confirmo'* para continuar.
+
      ⛔ NO agregues preguntas de dirección, modalidad ni pago en este mensaje — el sistema
      enviará botones de confirmación automáticamente. Espera a que el cliente confirme.
 
    - Cuando el cliente confirme el pedido (diga "Sí, confirmo el pedido", "confirmo", "dale",
-     "sí", o presione el botón de confirmación), ENTONCES pregunta en UN SOLO MENSAJE:
+     "sí", "listo", o presione el botón de confirmación), ENTONCES pregunta en UN SOLO MENSAJE:
      "¿Te lo llevamos a domicilio o recoges en el local? Si es delivery, dime tu dirección
      (calle, número y referencia). ¿Y cómo pagas: Yape, Plin o contra entrega? 🌮"
 
@@ -291,8 +307,17 @@ Si es de las incluidas → no la cobres por separado. Si es adicional → agrég
    TÚ NO TIENES INFORMACIÓN del estado real — eso lo maneja el equipo en el panel interno.
    Inventar el estado genera confusión y reclamos.
 
+   ⚠️ PEDIDO NO CONFIRMADO — REGLA CRÍTICA:
+   Si el cliente pregunta "¿ya llegó?", "¿cuándo llega?", "¿dónde está mi pedido?", "¿ya salió?"
+   u otra pregunta sobre su pedido Y en el contexto del sistema dice que NO tiene ningún pedido
+   confirmado (no aparece "⚠️ PEDIDO YA REGISTRADO EN ESTA SESIÓN"), responde EXACTAMENTE así:
+   "Chilanguit@, revisé y aún no tenemos un pedido confirmado tuyo 🤔
+   ¿Quizás faltó confirmar? Dime *'sí, confirmo'* o armamos uno nuevo 🌮"
+   ⛔ NUNCA inventes que hay un pedido en camino si no aparece confirmado en el contexto.
+
    SOLO si el cliente pregunta EXPLÍCITAMENTE por su pedido (ej: "¿ya salió?", "¿dónde está?",
-   "¿ya lo mandaron?"), responde de forma genérica y tranquilizadora:
+   "¿ya lo mandaron?") Y SÍ tiene un pedido confirmado en el contexto, responde de forma genérica
+   y tranquilizadora:
    - "¡El equipo ya está en ello! En cuanto salga te avisamos 🌮"
    Máximo 2 líneas. No menciones tiempos en estas respuestas.
 
@@ -1020,17 +1045,37 @@ async def _call_claude(phone: str, messages: list) -> str:
         # ── Contexto final para Claude ─────────────────────────────────────
         if restante_cliente is not None:
             # Hay pedido activo: decir cuánto FALTA, no cuánto tarda desde cero
-            if restante_cliente <= 3:
+            if restante_cliente <= 0:
+                # El tiempo estimado ya venció — no dar cifras ficticias
+                tiempo_ctx = (
+                    f"\nTiempo RESTANTE para el pedido de ESTE cliente: el tiempo estimado ya transcurrió."
+                    f"\n⚠️ REGLA CRÍTICA: Si el cliente pregunta cuánto falta o cuándo llega, responde EXACTAMENTE:"
+                    f"\n'Tu pedido ya está confirmado y el equipo está trabajando en ello."
+                    f" Te avisamos en cuanto salga con el motorizado 🛵'"
+                    f"\n⛔ NUNCA inventes un tiempo nuevo ni digas '35 minutos' ni ninguna cifra."
+                    f"\n⛔ Si hay queja explícita de demora, usa [ESCALATE] según la regla de escalación."
+                )
+            elif restante_cliente <= 3:
                 restante_txt = "menos de 5 minutos (casi listo)"
+                tiempo_ctx = (
+                    f"\nTiempo RESTANTE para el pedido de ESTE cliente: {restante_txt}"
+                    f"\n⚠️ Usa SOLO este dato cuando el cliente pregunte cuánto falta."
+                    f"\nNO uses el tiempo base del plato — el pedido ya lleva tiempo en cocina."
+                )
             elif restante_cliente <= 10:
                 restante_txt = f"~{restante_cliente} minutos"
+                tiempo_ctx = (
+                    f"\nTiempo RESTANTE para el pedido de ESTE cliente: {restante_txt}"
+                    f"\n⚠️ Usa SOLO este dato cuando el cliente pregunte cuánto falta."
+                    f"\nNO uses el tiempo base del plato — el pedido ya lleva tiempo en cocina."
+                )
             else:
                 restante_txt = f"~{restante_cliente}-{restante_cliente + 5} minutos"
-            tiempo_ctx = (
-                f"\nTiempo RESTANTE para el pedido de ESTE cliente: {restante_txt}"
-                f"\n⚠️ Usa SOLO este dato cuando el cliente pregunte cuánto falta."
-                f"\nNO uses el tiempo base del plato — el pedido ya lleva tiempo en cocina."
-            )
+                tiempo_ctx = (
+                    f"\nTiempo RESTANTE para el pedido de ESTE cliente: {restante_txt}"
+                    f"\n⚠️ Usa SOLO este dato cuando el cliente pregunte cuánto falta."
+                    f"\nNO uses el tiempo base del plato — el pedido ya lleva tiempo en cocina."
+                )
         else:
             # No hay pedido confirmado aún: tiempo estimado para nuevo pedido
             tiempo_ctx = (

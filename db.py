@@ -73,6 +73,16 @@ def init_db():
             c.execute("ALTER TABLE customer_profiles ADD COLUMN puntos INTEGER NOT NULL DEFAULT 0")
         except Exception:
             pass
+        # Migraciones: programa de fidelidad (sellos)
+        for _loy in [
+            "ALTER TABLE customer_profiles ADD COLUMN sellos INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE customer_profiles ADD COLUMN sellos_updated_at TEXT DEFAULT ''",
+            "ALTER TABLE customer_profiles ADD COLUMN reward_pending TEXT DEFAULT ''",
+        ]:
+            try:
+                c.execute(_loy)
+            except Exception:
+                pass
         # Migración: timestamp del último recordatorio enviado (evita spam)
         try:
             c.execute("ALTER TABLE conversations ADD COLUMN reminder_sent_at TEXT DEFAULT ''")
@@ -157,6 +167,8 @@ def init_db():
 
     # Inicializar menú editable (fuera del with para evitar conflictos de lock)
     init_menu_items()
+    # Migración retroactiva: asignar sellos a clientes existentes (idempotente)
+    migrate_stamps_retroactive()
 
 
 def health_check() -> None:
@@ -566,7 +578,7 @@ def get_customers_with_stats() -> list:
     import re as _re
     with _conn() as conn:
         customers = conn.execute(
-            "SELECT phone, nombre, ultima_dir, ultimo_pedido, ultimo_pago, puntos, updated_at "
+            "SELECT phone, nombre, ultima_dir, ultimo_pedido, ultimo_pago, puntos, sellos, reward_pending, updated_at "
             "FROM customer_profiles ORDER BY updated_at DESC"
         ).fetchall()
         orders = conn.execute(
@@ -650,12 +662,12 @@ def get_customers_with_stats_for_date(fecha: str) -> list:
         result = []
         for ph in phones:
             row = conn.execute(
-                "SELECT phone, nombre, ultima_dir, ultimo_pedido, ultimo_pago, puntos, updated_at "
+                "SELECT phone, nombre, ultima_dir, ultimo_pedido, ultimo_pago, puntos, sellos, reward_pending, updated_at "
                 "FROM customer_profiles WHERE phone=?", (ph,)
             ).fetchone()
             c = dict(row) if row else {"phone": ph, "nombre": None, "ultima_dir": None,
                                        "ultimo_pedido": None, "ultimo_pago": None,
-                                       "puntos": 0, "updated_at": None}
+                                       "puntos": 0, "sellos": 0, "reward_pending": "", "updated_at": None}
             d = stats_day.get(ph, {"count": 0, "total": 0.0})
             a = stats_all.get(ph, {"count": 0, "total": 0.0})
             # Stats del día
@@ -674,6 +686,154 @@ def update_customer_points(phone: str, puntos: int):
     """Actualiza los puntos de un cliente."""
     with _conn() as c:
         c.execute("UPDATE customer_profiles SET puntos=? WHERE phone=?", (puntos, phone))
+
+
+# ── Programa de fidelidad (sellos) ────────────────────────────
+
+SELLO_MIN_TOTAL = 29.90
+SELLO_EXPIRY_DAYS = 60
+_REWARD_THRESHOLDS = {3: "nivel_1", 6: "nivel_2", 9: "nivel_3"}
+REWARD_LABELS: dict[str, str] = {
+    "nivel_1": "1 Quesabirria gratis 🌮",
+    "nivel_2": "1 Gringa de pastor gratis 🌯",
+    "nivel_3": "Combo Pa' Ti Solito gratis 🏆",
+}
+_REWARD_EMOJIS = {"nivel_1": "🎉", "nivel_2": "🔥", "nivel_3": "🏆"}
+_REWARD_NIVEL_NUM = {"nivel_1": 1, "nivel_2": 2, "nivel_3": 3}
+
+
+def _parse_total_loyalty(val: str) -> float:
+    import re as _re
+    try:
+        m = _re.search(r"(\d+(?:[.,]\d{1,2})?)", (val or ""))
+        return float(m.group(1).replace(",", ".")) if m else 0.0
+    except Exception:
+        return 0.0
+
+
+def get_loyalty_info(phone: str) -> dict:
+    with _conn() as c:
+        row = c.execute(
+            "SELECT sellos, sellos_updated_at, reward_pending FROM customer_profiles WHERE phone=?",
+            (phone,)
+        ).fetchone()
+    if not row:
+        return {"sellos": 0, "sellos_updated_at": "", "reward_pending": ""}
+    return dict(row)
+
+
+def add_sello(phone: str) -> dict:
+    """Agrega un sello. Verifica expiración de 60 días antes.
+    Retorna {sellos, reward_unlocked, reward_key, reward_label}."""
+    now = datetime.now(PERU_TZ)
+    now_str = now.isoformat()
+
+    with _conn() as c:
+        row = c.execute(
+            "SELECT sellos, sellos_updated_at, reward_pending FROM customer_profiles WHERE phone=?",
+            (phone,)
+        ).fetchone()
+
+        if not row:
+            c.execute(
+                "INSERT OR IGNORE INTO customer_profiles (phone, sellos, sellos_updated_at, reward_pending)"
+                " VALUES (?,1,?,'')",
+                (phone, now_str)
+            )
+            return {"sellos": 1, "reward_unlocked": False, "reward_key": "", "reward_label": ""}
+
+        sellos = int(row["sellos"] or 0)
+        updated_at = row["sellos_updated_at"] or ""
+        reward_pending = row["reward_pending"] or ""
+
+        # Verificar expiración
+        if updated_at and sellos > 0:
+            try:
+                last_dt = datetime.fromisoformat(updated_at)
+                if last_dt.tzinfo is None:
+                    last_dt = last_dt.replace(tzinfo=PERU_TZ)
+                if (now - last_dt).days >= SELLO_EXPIRY_DAYS:
+                    sellos = 0
+                    reward_pending = ""
+            except Exception:
+                pass
+
+        if sellos >= 9:
+            c.execute("UPDATE customer_profiles SET sellos_updated_at=? WHERE phone=?", (now_str, phone))
+            return {"sellos": 9, "reward_unlocked": False, "reward_key": "", "reward_label": ""}
+
+        new_sellos = sellos + 1
+        reward_unlocked = False
+        reward_key = ""
+        reward_label = ""
+        new_reward = reward_pending
+
+        if new_sellos in _REWARD_THRESHOLDS:
+            candidate = _REWARD_THRESHOLDS[new_sellos]
+            if reward_pending != candidate:
+                reward_unlocked = True
+                reward_key = candidate
+                reward_label = REWARD_LABELS[candidate]
+                new_reward = candidate
+
+        c.execute(
+            "UPDATE customer_profiles SET sellos=?, sellos_updated_at=?, reward_pending=? WHERE phone=?",
+            (new_sellos, now_str, new_reward, phone)
+        )
+        return {"sellos": new_sellos, "reward_unlocked": reward_unlocked,
+                "reward_key": reward_key, "reward_label": reward_label}
+
+
+def mark_reward_redeemed(phone: str):
+    """Limpia el premio pendiente una vez canjeado."""
+    with _conn() as c:
+        c.execute("UPDATE customer_profiles SET reward_pending='' WHERE phone=?", (phone,))
+
+
+def migrate_stamps_retroactive():
+    """Asigna sellos históricos a clientes existentes con sellos=0.
+    Idempotente: solo actúa si sellos=0 Y hay pedidos calificados."""
+    import re as _re
+
+    with _conn() as c:
+        customers = c.execute(
+            "SELECT phone FROM customer_profiles WHERE sellos=0"
+        ).fetchall()
+
+        for cust in customers:
+            phone = cust["phone"]
+            orders = c.execute(
+                "SELECT total, fecha FROM orders"
+                " WHERE phone=? AND estado NOT IN ('Cancelado ❌') ORDER BY id DESC",
+                (phone,)
+            ).fetchall()
+
+            qualifying_fechas = []
+            for o in orders:
+                if _parse_total_loyalty(o["total"]) >= SELLO_MIN_TOTAL:
+                    qualifying_fechas.append(o["fecha"])
+
+            if not qualifying_fechas:
+                continue
+
+            sellos = min(len(qualifying_fechas), 9)
+
+            try:
+                last_dt = datetime.strptime(qualifying_fechas[0], "%d/%m/%Y").replace(tzinfo=PERU_TZ)
+                updated_at = last_dt.isoformat()
+            except Exception:
+                updated_at = datetime.now(PERU_TZ).isoformat()
+
+            reward_pending = ""
+            for threshold in sorted(_REWARD_THRESHOLDS):
+                if sellos >= threshold:
+                    reward_pending = _REWARD_THRESHOLDS[threshold]
+
+            c.execute(
+                "UPDATE customer_profiles SET sellos=?, sellos_updated_at=?, reward_pending=? WHERE phone=?",
+                (sellos, updated_at, reward_pending, phone)
+            )
+            print(f"[LOYALTY] {phone}: {sellos} sellos, reward={reward_pending}")
 
 
 # ── Configuración general ─────────────────────────────────────

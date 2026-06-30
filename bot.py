@@ -717,6 +717,49 @@ async def _parse_and_save_order(phone: str, reply: str) -> tuple[str, bool, bool
                                      ultimo_pago=fields["pago"])
         except Exception as e:
             print(f"[PERFIL] Error al guardar perfil tras PEDIDO_OK: {e}")
+        # Programa de fidelidad: sello si el total califica
+        try:
+            total_val = db._parse_total_loyalty(fields.get("total", ""))
+            if total_val >= db.SELLO_MIN_TOTAL:
+                loyalty = db.add_sello(phone_clean)
+                sellos = loyalty["sellos"]
+                if loyalty["reward_unlocked"]:
+                    nivel_num = db._REWARD_NIVEL_NUM.get(loyalty["reward_key"], "")
+                    emoji = db._REWARD_EMOJIS.get(loyalty["reward_key"], "🎉")
+                    if loyalty["reward_key"] == "nivel_3":
+                        reply += (
+                            f"\n\n{emoji} *¡NIVEL {nivel_num} DESBLOQUEADO!*\n\n"
+                            f"¡*Eres Chilanguísimo/a!* 🌮🔥\n\n"
+                            f"Completaste *9 pedidos* y ganaste:\n"
+                            f"👉 *{loyalty['reward_label']}*\n\n"
+                            f"Dile al momento de ordenar: _\"tengo premio Chilango\"_\n"
+                            f"📍 Un premio por pedido · No acumulable con otras promos."
+                        )
+                    else:
+                        reply += (
+                            f"\n\n{emoji} *¡NIVEL {nivel_num} DESBLOQUEADO!*\n\n"
+                            f"Completaste *{sellos} pedidos* y ganaste:\n"
+                            f"👉 *{loyalty['reward_label']}*\n\n"
+                            f"Dile al momento de ordenar: _\"tengo premio Chilango\"_\n"
+                            f"📍 Un premio por pedido · No acumulable con otras promos."
+                        )
+                else:
+                    next_threshold = next((t for t in (3, 6, 9) if t > sellos), None)
+                    if next_threshold:
+                        next_reward = db.REWARD_LABELS[db._REWARD_THRESHOLDS[next_threshold]]
+                        reply += (
+                            f"\n\n⭐ *¡Sello ganado!*\n\n"
+                            f"Llevas *{sellos} / {next_threshold}* para tu *{next_reward}* 🤤\n\n"
+                            f"📍 Registro personal, no transferible."
+                        )
+            else:
+                reply += (
+                    f"\n\nℹ️ Este pedido no suma sello.\n"
+                    f"El mínimo para ganar sello es *S/{db.SELLO_MIN_TOTAL:.2f}*.\n\n"
+                    f"¡Vuelve pronto y aprovecha tu programa! 😊"
+                )
+        except Exception as e:
+            print(f"[LOYALTY] Error al procesar sello: {e}")
 
     # Modificación de pedido existente
     fields, reply = _extract_tag(reply, "PEDIDO_MOD")

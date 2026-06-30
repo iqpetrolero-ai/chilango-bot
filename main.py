@@ -2986,6 +2986,14 @@ __UI_HEAD__
 .rec-badge{display:inline-flex;align-items:center;gap:3px;font-size:10.5px;background:var(--green-bg);color:var(--green);border-radius:999px;padding:2px 8px;font-weight:600;white-space:nowrap}
 .rec-badge i{font-size:12px}
 .rec-cell{white-space:nowrap}
+.sello-wrap{display:flex;align-items:center;gap:2px;flex-wrap:nowrap}
+.sello{width:13px;height:13px;border-radius:50%;border:1.5px solid #ccc;display:inline-block;flex-shrink:0}
+.sello.done{background:#25D366;border-color:#1da851}
+.sello.prize{background:#f59e0b;border-color:#d97706}
+.lvl-badge{display:inline-block;font-size:10px;padding:2px 7px;border-radius:10px;font-weight:600;margin-left:5px;white-space:nowrap}
+.lvl-1{background:#dcf8c6;color:#166534}
+.lvl-2{background:#fef9c3;color:#854d0e}
+.lvl-3{background:#fed7aa;color:#9a3412}
 .btn-rec-filter{display:flex;align-items:center;gap:6px;height:34px;padding:0 13px;border:1px solid var(--border);background:var(--surface);border-radius:8px;cursor:pointer;font:inherit;font-size:13px;color:var(--text2);transition:all .15s}
 .btn-rec-filter:hover{background:var(--bg)}
 .btn-rec-filter.active{background:var(--green-bg);border-color:var(--green);color:var(--green);font-weight:600}
@@ -3083,11 +3091,32 @@ async def admin_clientes(
     else:
         clientes = await db.arun(db.get_customers_with_stats_for_date, fecha_sel)
 
+    def _sello_html(sellos: int, reward_pending: str) -> str:
+        prize_at = {"nivel_1": 3, "nivel_2": 6, "nivel_3": 9}
+        prize_pos = prize_at.get(reward_pending, 0)
+        circles = ""
+        for pos in range(1, 10):
+            if pos == prize_pos:
+                cls = "sello prize"
+            elif pos <= sellos:
+                cls = "sello done"
+            else:
+                cls = "sello"
+            circles += f'<span class="{cls}"></span>'
+        lvl_map = {"nivel_1": ("lvl-1", "Nv.1"), "nivel_2": ("lvl-2", "Nv.2"), "nivel_3": ("lvl-3", "Nv.3")}
+        badge = ""
+        if reward_pending in lvl_map:
+            cls_b, label_b = lvl_map[reward_pending]
+            badge = f'<span class="lvl-badge {cls_b}">{label_b} 🎁</span>'
+        return f'<div class="sello-wrap">{circles}{badge}</div>'
+
     filas = ""
     for i, c in enumerate(clientes, 1):
         nombre       = html.escape(c.get("nombre") or "—")
         phone        = html.escape(c.get("phone") or "")
         puntos       = int(c.get("puntos") or 0)
+        sellos       = int(c.get("sellos") or 0)
+        reward_p     = c.get("reward_pending") or ""
         updated      = (c.get("updated_at") or "—")[:16]
         rank_cls = "r1" if i == 1 else ("r2" if i == 2 else ("r3" if i == 3 else ""))
 
@@ -3105,6 +3134,7 @@ async def admin_clientes(
               <td class="rec-cell">{badge_rec}</td>
               <td class="num cl-total">{pedidos_hist}</td>
               <td class="num cl-total">S/ {gastado_hist:.2f}</td>
+              <td>{_sello_html(sellos, reward_p)}</td>
               <td style="text-align:center">
                 <input class="pts-input" type="number" min="0" value="{puntos}"
                   onchange="guardarPuntos('{phone}', this)"
@@ -3130,6 +3160,7 @@ async def admin_clientes(
               <td class="num cl-total">S/ {gastado_dia:.2f}</td>
               <td class="num cl-hist">{pedidos_hist}</td>
               <td class="num cl-hist">S/ {gastado_hist:.2f}</td>
+              <td>{_sello_html(sellos, reward_p)}</td>
               <td style="text-align:center">
                 <input class="pts-input" type="number" min="0" value="{puntos}"
                   onchange="guardarPuntos('{phone}', this)"
@@ -3158,6 +3189,7 @@ async def admin_clientes(
           <th>Teléfono</th><th>Nombre</th><th>Recurrencia</th>
           <th style="text-align:right">Pedidos</th>
           <th style="text-align:right">Total acum.</th>
+          <th>Sellos</th>
           <th style="text-align:center">Puntos</th><th>Última actividad</th>"""
         kpi_label = "Total clientes"
         kpi2_label = "Total pedidos"
@@ -3169,6 +3201,7 @@ async def admin_clientes(
           <th style="text-align:right">Total día</th>
           <th style="text-align:right">Pedidos hist.</th>
           <th style="text-align:right">Total hist.</th>
+          <th>Sellos</th>
           <th style="text-align:center">Puntos</th><th>Última actividad</th>"""
         kpi_label = f"Clientes — {label_fecha}"
         kpi2_label = "Pedidos ese día"

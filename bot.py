@@ -85,11 +85,11 @@ def mensaje_bienvenida() -> str:
         "Somos un restaurante mexicano de delivery en Tacna. "
         "Tenemos tacos, quesabirrias, burritos y todo lo que necesitas para taquear rico. 🌯\n\n"
         "🕒 *Horario:* Viernes, Sábado y Domingo · 5:30 pm a 11:00 pm · Último pedido: 10:45 pm.\n\n"
-        "Puedes decirme cosas como:\n"
-        "📋 *'Ver carta'* — para ver el menú\n"
-        "🛒 *'Quiero pedir'* — para hacer un pedido\n"
-        "❓ *'¿Hacen delivery a X zona?'* — para consultar cobertura\n"
-        "✅ Cuando tengas tu pedido listo, dime *'sí, confirmo'*\n\n"
+        "📖 *¿Cómo hacer tu pedido?*\n"
+        "1️⃣ Escribe *'Ver carta'* para ver el menú\n"
+        "2️⃣ Dime qué quieres pedir (tacos, combos, quesabirrias...)\n"
+        "3️⃣ Confirma con *'sí, confirmo'* cuando estés listo\n"
+        "4️⃣ Dime tu dirección y cómo pagas ¡y listo! 🌮\n\n"
         "¿Qué te apetece hoy?"
     )
 
@@ -149,7 +149,7 @@ Si es de las incluidas → no la cobres por separado. Si es adicional → agrég
    - "¿Qué es la birria?" → Carne de res guisada en adobo especiado, jugosa y sabrosa
    - "¿Tienen opciones sin picante?" → Sí, puedes pedir tus tacos o birria sin salsa picante
    - "¿Cuánto demora el delivery?" → El motorizado llega a nuestro local en unos 10-15 min y de ahí sale a tu dirección; el tiempo total depende de tu zona
-   - "¿Tienen cobertura en mi zona?" / "¿Hacen delivery a X zona?" → Sí, llegamos a todo Tacna
+   - "¿Tienen cobertura en mi zona?" / "¿Hacen delivery a X zona?" → Responde SIEMPRE así: "¡Depende de tu zona! 📍 El delivery lo maneja una empresa externa y no llegamos a todos los lugares. Dime tu dirección exacta y te confirmo si llegamos 🛵" ⛔ NUNCA digas "llegamos a todo Tacna" — eso no es cierto.
    - "¿Cuánto cuesta el delivery?" → El costo varía según tu zona; una vez que confirmes tu pedido te lo comunicamos. ⛔ NUNCA menciones cifras ni rangos de precio de delivery.
    - "¿Puedo pagar el delivery incluido en el pedido?" → ver punto 11
    - "¿Aceptan contra entrega?" → Sí, manejamos contra entrega. Trátalo exactamente igual que Efectivo en el flujo de pedido (mismo tag, mismo proceso).
@@ -1049,11 +1049,12 @@ async def _call_claude(phone: str, messages: list) -> str:
                 # El tiempo estimado ya venció — no dar cifras ficticias
                 tiempo_ctx = (
                     f"\nTiempo RESTANTE para el pedido de ESTE cliente: el tiempo estimado ya transcurrió."
-                    f"\n⚠️ REGLA CRÍTICA: Si el cliente pregunta cuánto falta o cuándo llega, responde EXACTAMENTE:"
-                    f"\n'Tu pedido ya está confirmado y el equipo está trabajando en ello."
-                    f" Te avisamos en cuanto salga con el motorizado 🛵'"
+                    f"\n⚠️ REGLA CRÍTICA: Si el cliente pregunta cuánto falta o cuándo llega, responde así:"
+                    f"\n'¡Ya casi, Chilanguit@! 🙏 El tiempo estimado ya pasó pero tu pedido sigue en proceso."
+                    f" Si hay algún inconveniente el equipo te escribe de inmediato."
+                    f" ¿Tienes algún problema con tu pedido o todo bien por ahora? 😊'"
                     f"\n⛔ NUNCA inventes un tiempo nuevo ni digas '35 minutos' ni ninguna cifra."
-                    f"\n⛔ Si hay queja explícita de demora, usa [ESCALATE] según la regla de escalación."
+                    f"\n⛔ Si el cliente expresa queja, molestia o dice que lleva mucho tiempo esperando, usa [ESCALATE]."
                 )
             elif restante_cliente <= 3:
                 restante_txt = "menos de 5 minutos (casi listo)"

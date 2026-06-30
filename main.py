@@ -176,8 +176,8 @@ META_ACCESS_TOKEN = os.environ.get("META_ACCESS_TOKEN", "").strip()
 META_PHONE_NUMBER_ID = os.environ.get("META_PHONE_NUMBER_ID", "").strip()
 META_VERIFY_TOKEN = os.environ.get("META_VERIFY_TOKEN", "").strip()
 META_APP_SECRET = os.environ.get("META_APP_SECRET", "").strip()
-DELIVERY_SERVICE_PHONE = os.environ.get("DELIVERY_SERVICE_PHONE", "525513781963").strip()
-OWNER_PHONE = os.environ.get("OWNER_PHONE", "51953038816").strip()
+DELIVERY_SERVICE_PHONE = os.environ.get("DELIVERY_SERVICE_PHONE", "").strip()
+OWNER_PHONE = os.environ.get("OWNER_PHONE", "").strip()
 BASE_URL = os.environ.get("RAILWAY_PUBLIC_DOMAIN", "")
 PDF_URL = f"https://{BASE_URL}/static/carta.pdf" if BASE_URL else ""
 # ── Servicios de delivery (hasta 4 motorizados) ──────────────
@@ -533,7 +533,7 @@ async def handle_message(phone: str, message: str, phone_number_id: str = None):
                     f"pero no se detectó un monto:\n\n\"{message}\"\n\n"
                     f"Cliente: +{client_phone} — gestiona manualmente."
                 )
-                await send_whatsapp_message("51953038816", aviso_dueño, sending_id)
+                await send_whatsapp_message(OWNER_PHONE, aviso_dueño, sending_id)
                 msg_cliente = (
                     f"🙏 Estamos confirmando el costo de delivery con el motorizado, "
                     f"en un momento te avisamos. ¡Gracias por tu paciencia!"
@@ -869,8 +869,7 @@ async def _notify_order_camino(order: dict):
             "✅ *¡Tu pedido está listo para recoger!*\n\n"
             f"🛒 {order['items']}\n"
             f"💰 {order['total']}\n\n"
-            "📍 Asoc. Ricardo Odonovan Mz H-5, calle Las Poncianas,\n"
-            "atrás del Terminal Flores\n\n"
+            f"📍 {os.environ.get('PICKUP_ADDRESS', '')}\n\n"
             "¡Te esperamos! 🌮"
         )
     else:

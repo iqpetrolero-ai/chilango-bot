@@ -41,7 +41,9 @@ def refresh_menu():
 _client = None
 
 PERU_TZ = timezone(timedelta(hours=-5))
-YAPE_PLIN_NUMBER = "953038816"
+YAPE_PLIN_NUMBER = os.environ.get("YAPE_PLIN_NUMBER", "")
+OWNER_NAME = os.environ.get("OWNER_NAME", "")
+PICKUP_ADDRESS = os.environ.get("PICKUP_ADDRESS", "")
 
 
 def get_client() -> AsyncAnthropic:
@@ -101,7 +103,7 @@ Tienes personalidad amigable, con onda mexicana auténtica. Eres entusiasta con 
 - Nombre: Chilango 🌮
 - Ciudad: Tacna, Perú — cobertura a todo Tacna
 - Modalidad: Delivery y recojo
-- Dirección para recojo: Asoc. Ricardo Odonovan Mz H-5, calle Las Poncianas, atrás del Terminal Flores
+- Dirección para recojo: {PICKUP_ADDRESS}
 - Horario: Viernes, Sábado y Domingo de 5:30pm a 11pm · Último pedido: 10:45pm
 - Instagram: @chilangotacna
 - Formas de pago: Yape · Plin · Contra entrega (NO se acepta tarjeta ni transferencia)
@@ -210,7 +212,7 @@ Si es de las incluidas → no la cobres por separado. Si es adicional → agrég
      con el mismo texto — espera que avance el flujo o pregunta solo: "¿A qué dirección te lo enviamos? 📍"
    - El cliente puede responder todo junto (ej: "delivery, Jr. Tacna 123, Yape").
      Procesa lo que dé. Si falta la dirección en delivery, pídela en un mensaje breve.
-   - Si es recojo: indica "Asoc. Ricardo Odonovan Mz H-5, calle Las Poncianas, atrás del Terminal Flores"
+   - Si es recojo: indica "{PICKUP_ADDRESS}"
      y registra "Recojo" como dirección.
    - NUNCA menciones horarios de recojo ni frases como "pasa a recogerlo en horario..."
    - Si el cliente pregunta cuánto falta ANTES de pedir, usa el tiempo del CONTEXTO ACTUAL.
@@ -224,7 +226,7 @@ Si es de las incluidas → no la cobres por separado. Si es adicional → agrég
    pídela PRIMERO: "¿A qué dirección te lo enviamos? 📍" — y SOLO tras recibirla indica el número
    de Yape/Plin con el monto. Nunca des el número de pago sin tener la dirección.
    Paso 1 — Indica el monto de comida + empaque y pide la captura:
-             "📲 Yapea o Plinea al *{YAPE_PLIN_NUMBER}* a nombre de *David Morales* por *S/ XX.XX*" y pide la captura.
+             "📲 Yapea o Plinea al *{YAPE_PLIN_NUMBER}* a nombre de *{OWNER_NAME}* por *S/ XX.XX*" y pide la captura.
              El monto es SOLO comida + empaque (S/2.00) — NO incluye delivery.
              El costo de delivery lo paga el cliente al motorizado en efectivo al momento de la entrega.
              NO incluyas ningún tag aún.
@@ -450,7 +452,7 @@ Si es de las incluidas → no la cobres por separado. Si es adicional → agrég
     - NO ofrezcas combos más baratos ni temas de comida — el problema es el delivery, no la comida.
     - Responde con empatía y ofrece DOS alternativas concretas:
       1. Recojo en local: "Puedes recoger en nuestro local sin costo de delivery:
-         Asoc. Ricardo Odonovan Mz H-5, calle Las Poncianas, atrás del Terminal Flores."
+         {PICKUP_ADDRESS}."
       2. Confirmar igual: "Si prefieres que te lo llevemos igual, el total sería S/ XX.XX."
     - Espera la decisión del cliente antes de emitir cualquier tag.
     - Si elige recojo → flujo normal con dirección "Recojo" y emite [PEDIDO_OK] al confirmar.
@@ -565,7 +567,7 @@ Si el cliente menciona EXPLÍCITAMENTE su propio nombre en la conversación
 Ponlo al final de tu respuesta, sin mostrarlo al cliente. No lo repitas en mensajes siguientes.
 
 IMPORTANTE — NUNCA uses [SAVE_NAME] para:
-- El nombre "David Morales" (es la dueña del negocio, no el cliente)
+- El nombre del dueño del negocio (no es el cliente)
 - Cualquier nombre proveniente del sistema (número de Yape, datos del restaurante, etc.)
 - Nombres que el cliente no haya dicho claramente que son suyos
 
@@ -588,7 +590,7 @@ async def _notify_reescalacion(phone_clean: str, user_msgs_sin_respuesta: int):
     try:
         token = os.environ.get("META_ACCESS_TOKEN", "").strip()
         pid = os.environ.get("META_PHONE_NUMBER_ID", "").strip()
-        owner = "51953038816"
+        owner = os.environ.get("OWNER_PHONE", "")
         if not token or not pid:
             print(f"[RE-ESCALATE] Faltan vars de entorno — no se re-notificó a {phone_clean}")
             return
@@ -627,7 +629,7 @@ async def _notify_queja(phone_clean: str, desc: str):
     try:
         token = os.environ.get("META_ACCESS_TOKEN", "").strip()
         pid = os.environ.get("META_PHONE_NUMBER_ID", "").strip()
-        owner = "51953038816"
+        owner = os.environ.get("OWNER_PHONE", "")
         if not token or not pid:
             print(f"[QUEJA] No se puede notificar: faltan vars de entorno")
             return

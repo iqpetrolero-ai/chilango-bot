@@ -852,6 +852,35 @@ def set_config(key: str, value: str):
         """, (key, value))
 
 
+def claim_promo_combo() -> bool:
+    """Atomically claims one free Combo Pa Ti Solito. Returns True if successful."""
+    with _conn() as c:
+        cur = c.execute(
+            "UPDATE config SET value = CAST(CAST(value AS INTEGER) - 1 AS TEXT) "
+            "WHERE key='promo_combos_gratis' AND CAST(value AS INTEGER) > 0"
+        )
+        return cur.rowcount > 0
+
+
+def restore_promo_combo():
+    """Restores one free combo slot (called on order cancellation)."""
+    with _conn() as c:
+        c.execute(
+            "UPDATE config SET value = CAST(MIN(CAST(value AS INTEGER) + 1, 5) AS TEXT) "
+            "WHERE key='promo_combos_gratis'"
+        )
+
+
+def get_latest_active_order_items(phone: str) -> str | None:
+    """Returns items string of the latest non-cancelled order for this phone."""
+    with _conn() as c:
+        row = c.execute(
+            "SELECT items FROM orders WHERE phone=? AND estado NOT IN ('Entregado ✅','Cancelado ❌') ORDER BY id DESC LIMIT 1",
+            (phone,)
+        ).fetchone()
+        return row["items"] if row else None
+
+
 # ── Escalación (bot en pausa por conversación) ────────────────
 
 def mark_escalated(phone: str):
@@ -1363,3 +1392,4 @@ def get_delivery_zones_summary() -> list[dict]:
 
     result.sort(key=lambda x: x["frecuencia"], reverse=True)
     return result
+

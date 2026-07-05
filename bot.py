@@ -41,9 +41,7 @@ def refresh_menu():
 _client = None
 
 PERU_TZ = timezone(timedelta(hours=-5))
-YAPE_PLIN_NUMBER = os.environ.get("YAPE_PLIN_NUMBER", "")
-OWNER_NAME = os.environ.get("OWNER_NAME", "")
-PICKUP_ADDRESS = os.environ.get("PICKUP_ADDRESS", "")
+YAPE_PLIN_NUMBER = "953038816"
 
 
 def get_client() -> AsyncAnthropic:
@@ -87,11 +85,6 @@ def mensaje_bienvenida() -> str:
         "Somos un restaurante mexicano de delivery en Tacna. "
         "Tenemos tacos, quesabirrias, burritos y todo lo que necesitas para taquear rico. 🌯\n\n"
         "🕒 *Horario:* Viernes, Sábado y Domingo · 5:30 pm a 11:00 pm · Último pedido: 10:45 pm.\n\n"
-        "📖 *¿Cómo hacer tu pedido?*\n"
-        "1️⃣ Escribe *'Ver carta'* para ver el menú\n"
-        "2️⃣ Dime qué quieres pedir (tacos, combos, quesabirrias...)\n"
-        "3️⃣ Confirma con *'sí, confirmo'* cuando estés listo\n"
-        "4️⃣ Dime tu dirección y cómo pagas ¡y listo! 🌮\n\n"
         "¿Qué te apetece hoy?"
     )
 
@@ -103,7 +96,7 @@ Tienes personalidad amigable, con onda mexicana auténtica. Eres entusiasta con 
 - Nombre: Chilango 🌮
 - Ciudad: Tacna, Perú — cobertura a todo Tacna
 - Modalidad: Delivery y recojo
-- Dirección para recojo: {PICKUP_ADDRESS}
+- Dirección para recojo: Asoc. Ricardo Odonovan Mz H-5, calle Las Poncianas, atrás del Terminal Flores
 - Horario: Viernes, Sábado y Domingo de 5:30pm a 11pm · Último pedido: 10:45pm
 - Instagram: @chilangotacna
 - Formas de pago: Yape · Plin · Contra entrega (NO se acepta tarjeta ni transferencia)
@@ -139,19 +132,10 @@ Si es de las incluidas → no la cobres por separado. Si es adicional → agrég
    Si escribe "2", inicia el flujo de pedido.
 
 2. PREGUNTAS: Responde con detalle y entusiasmo sobre ingredientes, tamaños, sabores.
-   ⚠️ REGLA CRÍTICA — PREGUNTAS INFORMATIVAS: Las siguientes preguntas se responden SIEMPRE,
-   sin importar si el cliente tiene un pedido en curso, no ha pedido nada, o acaba de llegar.
-   NUNCA digas "primero dime qué quieres pedir" antes de responder estas preguntas:
-   - Zona de cobertura / si hacen delivery a X lugar
-   - Costo de delivery
-   - Horario
-   - Formas de pago
-   - Dirección para recojo
-   Son preguntas informativas válidas en cualquier momento del flujo.
    - "¿Qué es la birria?" → Carne de res guisada en adobo especiado, jugosa y sabrosa
    - "¿Tienen opciones sin picante?" → Sí, puedes pedir tus tacos o birria sin salsa picante
    - "¿Cuánto demora el delivery?" → El motorizado llega a nuestro local en unos 10-15 min y de ahí sale a tu dirección; el tiempo total depende de tu zona
-   - "¿Tienen cobertura en mi zona?" / "¿Hacen delivery a X zona?" → Responde SIEMPRE así: "¡Depende de tu zona! 📍 El delivery lo maneja una empresa externa y no llegamos a todos los lugares. Dime tu dirección exacta y te confirmo si llegamos 🛵" ⛔ NUNCA digas "llegamos a todo Tacna" — eso no es cierto.
+   - "¿Tienen cobertura en mi zona?" → Sí, llegamos a todo Tacna
    - "¿Cuánto cuesta el delivery?" → El costo varía según tu zona; una vez que confirmes tu pedido te lo comunicamos. ⛔ NUNCA menciones cifras ni rangos de precio de delivery.
    - "¿Puedo pagar el delivery incluido en el pedido?" → ver punto 11
    - "¿Aceptan contra entrega?" → Sí, manejamos contra entrega. Trátalo exactamente igual que Efectivo en el flujo de pedido (mismo tag, mismo proceso).
@@ -185,13 +169,11 @@ Si es de las incluidas → no la cobres por separado. Si es adicional → agrég
 
      ⚠️ REGLA MATEMÁTICA OBLIGATORIA: El TOTAL siempre debe ser igual a Subtotal + S/ 2.00 de empaque. Verifica la suma antes de escribirla. Ejemplo: si el subtotal es S/ 32.00, el TOTAL debe ser S/ 34.00. Nunca pongas el mismo valor en Subtotal y TOTAL.
 
-     ✅ ¿Confirmamos tu pedido? Responde *'sí, confirmo'* para continuar.
-
      ⛔ NO agregues preguntas de dirección, modalidad ni pago en este mensaje — el sistema
      enviará botones de confirmación automáticamente. Espera a que el cliente confirme.
 
    - Cuando el cliente confirme el pedido (diga "Sí, confirmo el pedido", "confirmo", "dale",
-     "sí", "listo", o presione el botón de confirmación), ENTONCES pregunta en UN SOLO MENSAJE:
+     "sí", o presione el botón de confirmación), ENTONCES pregunta en UN SOLO MENSAJE:
      "¿Te lo llevamos a domicilio o recoges en el local? Si es delivery, dime tu dirección
      (calle, número y referencia). ¿Y cómo pagas: Yape, Plin o contra entrega? 🌮"
 
@@ -212,7 +194,7 @@ Si es de las incluidas → no la cobres por separado. Si es adicional → agrég
      con el mismo texto — espera que avance el flujo o pregunta solo: "¿A qué dirección te lo enviamos? 📍"
    - El cliente puede responder todo junto (ej: "delivery, Jr. Tacna 123, Yape").
      Procesa lo que dé. Si falta la dirección en delivery, pídela en un mensaje breve.
-   - Si es recojo: indica "{PICKUP_ADDRESS}"
+   - Si es recojo: indica "Asoc. Ricardo Odonovan Mz H-5, calle Las Poncianas, atrás del Terminal Flores"
      y registra "Recojo" como dirección.
    - NUNCA menciones horarios de recojo ni frases como "pasa a recogerlo en horario..."
    - Si el cliente pregunta cuánto falta ANTES de pedir, usa el tiempo del CONTEXTO ACTUAL.
@@ -226,7 +208,7 @@ Si es de las incluidas → no la cobres por separado. Si es adicional → agrég
    pídela PRIMERO: "¿A qué dirección te lo enviamos? 📍" — y SOLO tras recibirla indica el número
    de Yape/Plin con el monto. Nunca des el número de pago sin tener la dirección.
    Paso 1 — Indica el monto de comida + empaque y pide la captura:
-             "📲 Yapea o Plinea al *{YAPE_PLIN_NUMBER}* a nombre de *{OWNER_NAME}* por *S/ XX.XX*" y pide la captura.
+             "📲 Yapea o Plinea al *{YAPE_PLIN_NUMBER}* a nombre de *David Morales* por *S/ XX.XX*" y pide la captura.
              El monto es SOLO comida + empaque (S/2.00) — NO incluye delivery.
              El costo de delivery lo paga el cliente al motorizado en efectivo al momento de la entrega.
              NO incluyas ningún tag aún.
@@ -309,17 +291,8 @@ Si es de las incluidas → no la cobres por separado. Si es adicional → agrég
    TÚ NO TIENES INFORMACIÓN del estado real — eso lo maneja el equipo en el panel interno.
    Inventar el estado genera confusión y reclamos.
 
-   ⚠️ PEDIDO NO CONFIRMADO — REGLA CRÍTICA:
-   Si el cliente pregunta "¿ya llegó?", "¿cuándo llega?", "¿dónde está mi pedido?", "¿ya salió?"
-   u otra pregunta sobre su pedido Y en el contexto del sistema dice que NO tiene ningún pedido
-   confirmado (no aparece "⚠️ PEDIDO YA REGISTRADO EN ESTA SESIÓN"), responde EXACTAMENTE así:
-   "Chilanguit@, revisé y aún no tenemos un pedido confirmado tuyo 🤔
-   ¿Quizás faltó confirmar? Dime *'sí, confirmo'* o armamos uno nuevo 🌮"
-   ⛔ NUNCA inventes que hay un pedido en camino si no aparece confirmado en el contexto.
-
    SOLO si el cliente pregunta EXPLÍCITAMENTE por su pedido (ej: "¿ya salió?", "¿dónde está?",
-   "¿ya lo mandaron?") Y SÍ tiene un pedido confirmado en el contexto, responde de forma genérica
-   y tranquilizadora:
+   "¿ya lo mandaron?"), responde de forma genérica y tranquilizadora:
    - "¡El equipo ya está en ello! En cuanto salga te avisamos 🌮"
    Máximo 2 líneas. No menciones tiempos en estas respuestas.
 
@@ -452,7 +425,7 @@ Si es de las incluidas → no la cobres por separado. Si es adicional → agrég
     - NO ofrezcas combos más baratos ni temas de comida — el problema es el delivery, no la comida.
     - Responde con empatía y ofrece DOS alternativas concretas:
       1. Recojo en local: "Puedes recoger en nuestro local sin costo de delivery:
-         {PICKUP_ADDRESS}."
+         Asoc. Ricardo Odonovan Mz H-5, calle Las Poncianas, atrás del Terminal Flores."
       2. Confirmar igual: "Si prefieres que te lo llevemos igual, el total sería S/ XX.XX."
     - Espera la decisión del cliente antes de emitir cualquier tag.
     - Si elige recojo → flujo normal con dirección "Recojo" y emite [PEDIDO_OK] al confirmar.
@@ -567,7 +540,7 @@ Si el cliente menciona EXPLÍCITAMENTE su propio nombre en la conversación
 Ponlo al final de tu respuesta, sin mostrarlo al cliente. No lo repitas en mensajes siguientes.
 
 IMPORTANTE — NUNCA uses [SAVE_NAME] para:
-- El nombre del dueño del negocio (no es el cliente)
+- El nombre "David Morales" (es la dueña del negocio, no el cliente)
 - Cualquier nombre proveniente del sistema (número de Yape, datos del restaurante, etc.)
 - Nombres que el cliente no haya dicho claramente que son suyos
 
@@ -582,14 +555,6 @@ repetirlo. Una vez que el cliente responde (acepta, rechaza o modifica), ⛔ NO 
 el pedido anterior ni uses frases como "la última vez fue...", "igual que antes", "como la vez pasada"
 dentro del mismo flujo de pedido. El cliente ya tomó su decisión — seguir mencionando el historial
 es ruido innecesario que hace el flujo más largo y robótico.
-
-━━━ PROGRAMA DE FIDELIDAD — AVISO AL SALUDAR ━━━
-Si el PERFIL DEL CLIENTE incluye "PREMIO PENDIENTE", menciona su premio DE FORMA EMOCIONANTE al
-inicio de la conversación, antes de cualquier otra cosa. Ejemplo:
-"¡Hola [nombre]! 🎉 ¡Tienes una *[premio]* gratis esperándote! Solo dímelo al pedir y te la aplico."
-Si el perfil incluye progreso de sellos (sin premio aún), menciónalo brevemente de forma motivadora
-UNA SOLA VEZ al inicio: "¡Ya llevas X/Y para tu [próximo premio]! 🌮"
-NO repitas esta información durante el flujo del pedido — solo al saludar.
 """
 
 
@@ -598,7 +563,7 @@ async def _notify_reescalacion(phone_clean: str, user_msgs_sin_respuesta: int):
     try:
         token = os.environ.get("META_ACCESS_TOKEN", "").strip()
         pid = os.environ.get("META_PHONE_NUMBER_ID", "").strip()
-        owner = os.environ.get("OWNER_PHONE", "")
+        owner = "51953038816"
         if not token or not pid:
             print(f"[RE-ESCALATE] Faltan vars de entorno — no se re-notificó a {phone_clean}")
             return
@@ -637,7 +602,7 @@ async def _notify_queja(phone_clean: str, desc: str):
     try:
         token = os.environ.get("META_ACCESS_TOKEN", "").strip()
         pid = os.environ.get("META_PHONE_NUMBER_ID", "").strip()
-        owner = os.environ.get("OWNER_PHONE", "")
+        owner = "51953038816"
         if not token or not pid:
             print(f"[QUEJA] No se puede notificar: faltan vars de entorno")
             return
@@ -717,6 +682,15 @@ async def _parse_and_save_order(phone: str, reply: str) -> tuple[str, bool, bool
     fields, reply = _extract_tag(reply, "PEDIDO_OK")
     if fields:
         order_confirmed = True
+        # Claim free combo atomically if this order includes one
+        from datetime import date as _date2
+        _promo_ok = db.get_config("promo_mexico", "0") == "1" and datetime.now(PERU_TZ).date() == _date2(2026, 7, 5)
+        if _promo_ok and "pa ti solito" in fields["items"].lower() and "gratis" in fields["items"].lower():
+            claimed = db.claim_promo_combo()
+            if not claimed:
+                print(f"[PROMO] ⚠️ Race condition: combo gratis agotado para {phone} — se honora igualmente")
+            else:
+                print(f"[PROMO] 🎉 Combo gratis reclamado para {phone}")
         await save_order(phone, fields["items"], fields["total"], fields["pago"], fields["dir"], fields.get("notas", ""))
         try:
             db.save_customer_profile(phone_clean,
@@ -725,49 +699,6 @@ async def _parse_and_save_order(phone: str, reply: str) -> tuple[str, bool, bool
                                      ultimo_pago=fields["pago"])
         except Exception as e:
             print(f"[PERFIL] Error al guardar perfil tras PEDIDO_OK: {e}")
-        # Programa de fidelidad: sello si el total califica
-        try:
-            total_val = db._parse_total_loyalty(fields.get("total", ""))
-            if total_val >= db.SELLO_MIN_TOTAL:
-                loyalty = db.add_sello(phone_clean)
-                sellos = loyalty["sellos"]
-                if loyalty["reward_unlocked"]:
-                    nivel_num = db._REWARD_NIVEL_NUM.get(loyalty["reward_key"], "")
-                    emoji = db._REWARD_EMOJIS.get(loyalty["reward_key"], "🎉")
-                    if loyalty["reward_key"] == "nivel_3":
-                        reply += (
-                            f"\n\n{emoji} *¡NIVEL {nivel_num} DESBLOQUEADO!*\n\n"
-                            f"¡*Eres Chilanguísimo/a!* 🌮🔥\n\n"
-                            f"Completaste *9 pedidos* y ganaste:\n"
-                            f"👉 *{loyalty['reward_label']}*\n\n"
-                            f"Dile al momento de ordenar: _\"tengo premio Chilango\"_\n"
-                            f"📍 Un premio por pedido · No acumulable con otras promos."
-                        )
-                    else:
-                        reply += (
-                            f"\n\n{emoji} *¡NIVEL {nivel_num} DESBLOQUEADO!*\n\n"
-                            f"Completaste *{sellos} pedidos* y ganaste:\n"
-                            f"👉 *{loyalty['reward_label']}*\n\n"
-                            f"Dile al momento de ordenar: _\"tengo premio Chilango\"_\n"
-                            f"📍 Un premio por pedido · No acumulable con otras promos."
-                        )
-                else:
-                    next_threshold = next((t for t in (3, 6, 9) if t > sellos), None)
-                    if next_threshold:
-                        next_reward = db.REWARD_LABELS[db._REWARD_THRESHOLDS[next_threshold]]
-                        reply += (
-                            f"\n\n⭐ *¡Sello ganado!*\n\n"
-                            f"Llevas *{sellos} / {next_threshold}* para tu *{next_reward}* 🤤\n\n"
-                            f"📍 Registro personal, no transferible."
-                        )
-            else:
-                reply += (
-                    f"\n\nℹ️ Este pedido no suma sello.\n"
-                    f"El mínimo para ganar sello es *S/{db.SELLO_MIN_TOTAL:.2f}*.\n\n"
-                    f"¡Vuelve pronto y aprovecha tu programa! 😊"
-                )
-        except Exception as e:
-            print(f"[LOYALTY] Error al procesar sello: {e}")
 
     # Modificación de pedido existente
     fields, reply = _extract_tag(reply, "PEDIDO_MOD")
@@ -1016,19 +947,6 @@ async def _call_claude(phone: str, messages: list) -> str:
                 parts.append(f"Último pedido: {profile['ultimo_pedido']}")
             if profile.get("ultimo_pago"):
                 parts.append(f"Método de pago habitual: {profile['ultimo_pago']}")
-            # Premio de fidelidad pendiente
-            loyalty = db.get_loyalty_info(phone_clean)
-            sellos = int(loyalty.get("sellos") or 0)
-            reward_pending = loyalty.get("reward_pending") or ""
-            if reward_pending and reward_pending in db.REWARD_LABELS:
-                reward_label = db.REWARD_LABELS[reward_pending]
-                parts.append(f"PREMIO PENDIENTE: {reward_label} (ganado por {sellos} pedidos anteriores)")
-            elif sellos > 0:
-                next_t = next((t for t in (3, 6, 9) if t > sellos), None)
-                if next_t:
-                    next_label = db.REWARD_LABELS[db._REWARD_THRESHOLDS[next_t]]
-                    parts.append(f"Programa de fidelidad: lleva {sellos}/{next_t} sellos para ganar {next_label}")
-
             if parts:
                 profile_ctx = (
                     "\n\n━━━ PERFIL DEL CLIENTE (memoria de sesiones anteriores) ━━━\n"
@@ -1111,38 +1029,17 @@ async def _call_claude(phone: str, messages: list) -> str:
         # ── Contexto final para Claude ─────────────────────────────────────
         if restante_cliente is not None:
             # Hay pedido activo: decir cuánto FALTA, no cuánto tarda desde cero
-            if restante_cliente <= 0:
-                # El tiempo estimado ya venció — no dar cifras ficticias
-                tiempo_ctx = (
-                    f"\nTiempo RESTANTE para el pedido de ESTE cliente: el tiempo estimado ya transcurrió."
-                    f"\n⚠️ REGLA CRÍTICA: Si el cliente pregunta cuánto falta o cuándo llega, responde así:"
-                    f"\n'¡Ya casi, Chilanguit@! 🙏 El tiempo estimado ya pasó pero tu pedido sigue en proceso."
-                    f" Si hay algún inconveniente el equipo te escribe de inmediato."
-                    f" ¿Tienes algún problema con tu pedido o todo bien por ahora? 😊'"
-                    f"\n⛔ NUNCA inventes un tiempo nuevo ni digas '35 minutos' ni ninguna cifra."
-                    f"\n⛔ Si el cliente expresa queja, molestia o dice que lleva mucho tiempo esperando, usa [ESCALATE]."
-                )
-            elif restante_cliente <= 3:
+            if restante_cliente <= 3:
                 restante_txt = "menos de 5 minutos (casi listo)"
-                tiempo_ctx = (
-                    f"\nTiempo RESTANTE para el pedido de ESTE cliente: {restante_txt}"
-                    f"\n⚠️ Usa SOLO este dato cuando el cliente pregunte cuánto falta."
-                    f"\nNO uses el tiempo base del plato — el pedido ya lleva tiempo en cocina."
-                )
             elif restante_cliente <= 10:
                 restante_txt = f"~{restante_cliente} minutos"
-                tiempo_ctx = (
-                    f"\nTiempo RESTANTE para el pedido de ESTE cliente: {restante_txt}"
-                    f"\n⚠️ Usa SOLO este dato cuando el cliente pregunte cuánto falta."
-                    f"\nNO uses el tiempo base del plato — el pedido ya lleva tiempo en cocina."
-                )
             else:
                 restante_txt = f"~{restante_cliente}-{restante_cliente + 5} minutos"
-                tiempo_ctx = (
-                    f"\nTiempo RESTANTE para el pedido de ESTE cliente: {restante_txt}"
-                    f"\n⚠️ Usa SOLO este dato cuando el cliente pregunte cuánto falta."
-                    f"\nNO uses el tiempo base del plato — el pedido ya lleva tiempo en cocina."
-                )
+            tiempo_ctx = (
+                f"\nTiempo RESTANTE para el pedido de ESTE cliente: {restante_txt}"
+                f"\n⚠️ Usa SOLO este dato cuando el cliente pregunte cuánto falta."
+                f"\nNO uses el tiempo base del plato — el pedido ya lleva tiempo en cocina."
+            )
         else:
             # No hay pedido confirmado aún: tiempo estimado para nuevo pedido
             tiempo_ctx = (
@@ -1205,9 +1102,58 @@ async def _call_claude(phone: str, messages: list) -> str:
     except Exception as e:
         print(f"[AGOTADOS] Error al leer config: {e}")
 
+    promo_ctx = ""
+    try:
+        from datetime import date as _date
+        _promo_activa = db.get_config("promo_mexico", "0") == "1" and datetime.now(PERU_TZ).date() == _date(2026, 7, 5)
+        if _promo_activa:
+            _combos_left = int(db.get_config("promo_combos_gratis", "0"))
+            _combo_line = (
+                f"• Combo Pa Ti Solito — GRATIS 🇲🇽 ({_combos_left} disponibles). "
+                f"Escribe exactamente así en el campo items del tag: 'Combo Pa Ti Solito — GRATIS 🇲🇽' y NO lo sumes al total."
+                if _combos_left > 0 else
+                f"• Combo Pa Ti Solito — S/ 14.95 (combos gratis AGOTADOS)"
+            )
+            promo_ctx = (
+                f"\n\n🇲🇽 ━━━ PROMO ESPECIAL — ¡MÉXICO GANÓ! ━━━ 🇲🇽"
+                f"\nHOY toda la carta tiene 50% de descuento. Usa EXACTAMENTE estos precios (NO dividas):"
+                f"\n• Quesadilla — S/ 3.25"
+                f"\n• Quesabirria — S/ 5.00"
+                f"\n• Taco de Suadero — S/ 3.25"
+                f"\n• Taco Campechano — S/ 3.25"
+                f"\n• Taco de Pastor — S/ 3.25"
+                f"\n• Taco de Choriqueso — S/ 3.75"
+                f"\n• Gringa de Pastor — S/ 7.00"
+                f"\n• Esquites — S/ 4.00"
+                f"\n• Orden Quesadillas (3 und) — S/ 8.50"
+                f"\n• Nachos Chilangos — S/ 14.00"
+                f"\n• Orden Guacamole c/Totopos — S/ 2.00"
+                f"\n• Chilangazo — S/ 13.00"
+                f"\n• De Compas — S/ 28.75"
+                f"\n{_combo_line}"
+                f"\n• Agua de Horchata — S/ 4.00"
+                f"\n• Agua de Jamaica — S/ 3.50"
+                f"\n• Agua de Tamarindo — S/ 3.50"
+                f"\n• Chamoyada de Mango — S/ 6.50"
+                f"\n• Extra queso — S/ 1.00"
+                f"\n• Extra guacamole — S/ 1.00"
+                f"\n• Extra proteína — S/ 2.50"
+                f"\n• Salsa adicional — S/ 0.75"
+                f"\n• Empaque — S/ 2.00 (SIN descuento)"
+                f"\nREGLAS PROMO:"
+                f"\n1. Usa SIEMPRE los precios de la lista de arriba — NUNCA dividas por 2 ni calcules."
+                f"\n2. TOTAL = suma de items con descuento + S/ 2.00 empaque (empaque NO tiene descuento)."
+                f"\n3. Si el combo es gratis: ponlo como S/ 0.00 en el cálculo del total."
+                f"\n4. Menciona la promo al inicio: '¡Hoy toda la carta al 50% por el triunfo de México! 🇲🇽⚽'"
+                f"\n5. Máximo 1 combo gratis por pedido."
+            )
+    except Exception as _pe:
+        print(f"[PROMO] Error al leer config: {_pe}")
+
     dynamic_ctx = (
         profile_ctx
         + agotados_ctx
+        + promo_ctx
         + f"\n\n━━━ CONTEXTO ACTUAL ━━━"
         + f"\nHora actual en Tacna: {hora_tacna}"
         + tiempo_ctx

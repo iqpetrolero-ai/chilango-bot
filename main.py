@@ -707,7 +707,7 @@ async def receive_message(request: Request):
             media_id = message_data["image"]["id"]
             image_bytes, mime_type = await download_meta_image(media_id)
             if image_bytes:
-                reply, _ = await process_message_with_image(phone, image_bytes, mime_type)
+                reply, _, _ = await process_message_with_image(phone, image_bytes, mime_type)
                 if reply:
                     await send_whatsapp_message(phone, reply, phone_number_id)
             else:
@@ -3670,3 +3670,4 @@ if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
+

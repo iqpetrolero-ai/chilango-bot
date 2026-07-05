@@ -1002,6 +1002,9 @@ select.ctl{height:34px;border:1px solid var(--border);border-radius:8px;backgrou
 .btn-ghost.danger{color:var(--red);border-color:#F0CBC7}
 
 .pausa-banner{background:var(--red-bg);border:1px solid #F0CBC7;color:var(--red);border-radius:var(--radius);padding:9px 14px;font-size:13px;font-weight:600;margin:14px auto 0;max-width:1068px;display:flex;align-items:center;gap:8px}
+.promo-banner{background:#fff8e1;border:1px solid #f9a825;color:#e65100;border-radius:var(--radius);padding:9px 14px;font-size:13px;font-weight:600;margin:8px auto 0;max-width:1068px;display:flex;align-items:center;gap:8px}
+.btn-promo{background:#f9a825;color:#fff;border:none;border-radius:var(--radius);padding:6px 14px;font-size:13px;font-weight:600;cursor:pointer}
+.btn-promo.off{background:transparent;border:1px solid #f9a825;color:#f9a825}
 
 /* ── Agotados ── */
 .agotados{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:12px;overflow:hidden}
@@ -1166,6 +1169,7 @@ select.ctl{height:34px;border:1px solid var(--border);border-radius:8px;backgrou
 </nav>
 
 __PAUSA_BANNER__
+__PROMO_BANNER__
 
 <main class="wrap">
 
@@ -1186,6 +1190,7 @@ __PAUSA_BANNER__
       <button data-estado="Cancelado ❌" onclick="filterCards('Cancelado ❌',this)">Cancelados</button>
     </div>
     <button class="btn-ghost __PAUSA_CLS__" id="btnPausa" onclick="togglePausa()" data-pausado="__PAUSA_DATA__">__PAUSA_LABEL__</button>
+    __PROMO_BTN__
   </div>
 
   <div class="agotados __AGOTADOS_OPEN__" id="agotadosBar">
@@ -1797,6 +1802,22 @@ async function togglePausa() {
   } catch(e) { alert('Error: ' + e.message); }
 }
 
+async function togglePromoMexico() {
+  const btn = document.getElementById('btnPromo');
+  const activa = btn.dataset.activa === '1';
+  const nuevo = activa ? '0' : '1';
+  try {
+    const r = await fetch('/api/config/promo_mexico', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({value: nuevo})
+    });
+    const d = await r.json();
+    if (d.status === 'ok') location.reload();
+  } catch(e) { alert('Error: ' + e.message); }
+}
+
 /* ── Consultas de costo pendientes ── */
 async function checkPendingCostQueries() {
   try {
@@ -1921,6 +1942,8 @@ async def pedidos_panel(
 
     agotados_actual = await db.arun(db.get_config, "productos_agotados", "")
     bot_pausado = await db.arun(db.get_config, "bot_pausado", "0") == "1"
+    promo_activa = await db.arun(db.get_config, "promo_mexico", "0") == "1"
+    combos_gratis = int(await db.arun(db.get_config, "promo_combos_gratis", "0"))
 
     fechas_options = "".join(
         f'<option value="{f}" {"selected" if f == fecha_sel else ""}>{f}{" (hoy)" if f == hoy else ""}</option>'
@@ -1943,12 +1966,24 @@ async def pedidos_panel(
         pausa_label = '<i class="ti ti-player-pause"></i> Pausar bot'
         pausa_cls = ""
 
+    if promo_activa:
+        promo_banner = (f'<div class="promo-banner">🇲🇽⚽ Promo México activa — toda la carta al 50% · '
+                        f'Combos Pa Ti Solito gratis: {combos_gratis}/5</div>')
+        promo_btn = (f'<button class="btn-promo" id="btnPromo" onclick="togglePromoMexico()" '
+                     f'data-activa="1">🇲🇽 Desactivar promo</button>')
+    else:
+        promo_banner = ""
+        promo_btn = (f'<button class="btn-promo off" id="btnPromo" onclick="togglePromoMexico()" '
+                     f'data-activa="0">🇲🇽 Activar promo México</button>')
+
     fecha_label = f"Hoy · {fecha_sel}" if fecha_sel == hoy else fecha_sel
 
     page = (_PEDIDOS_TEMPLATE
             .replace("__FECHA_LABEL__", html.escape(fecha_label))
             .replace("__FECHAS_OPTIONS__", fechas_options)
             .replace("__PAUSA_BANNER__", pausa_banner)
+            .replace("__PROMO_BANNER__", promo_banner)
+            .replace("__PROMO_BTN__", promo_btn)
             .replace("__PAUSA_LABEL__", pausa_label)
             .replace("__PAUSA_CLS__", pausa_cls)
             .replace("__PAUSA_DATA__", "1" if bot_pausado else "0")
@@ -3245,6 +3280,22 @@ async def api_guardar_agotados(
     await db.arun(db.set_config, "productos_agotados", value)
     print(f"[CONFIG] Productos agotados actualizados: '{value}'")
     return JSONResponse({"status": "ok"})
+
+
+@app.post("/api/config/promo_mexico")
+async def api_toggle_promo_mexico(
+    request: Request,
+    credentials: HTTPBasicCredentials = Depends(verificar_admin)
+):
+    data = await request.json()
+    value = "1" if data.get("value") == "1" else "0"
+    await db.arun(db.set_config, "promo_mexico", value)
+    if value == "1":
+        await db.arun(db.set_config, "promo_combos_gratis", "5")
+        print("[PROMO] 🇲🇽 Promo México ACTIVADA — 5 combos gratis disponibles, carta al 50%")
+    else:
+        print("[PROMO] Promo México desactivada")
+    return JSONResponse({"status": "ok", "promo_activa": value == "1"})
 
 
 @app.post("/api/config/pausa")

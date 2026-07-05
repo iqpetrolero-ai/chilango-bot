@@ -241,8 +241,12 @@ async def cancel_order(phone: str):
     now = datetime.now(PERU_TZ)
     phone_clean = phone.replace("whatsapp:", "").replace("+", "")
 
+    items_before = db.get_latest_active_order_items(phone_clean)
     cancelled = db.cancel_latest_order(phone_clean)
     if cancelled:
+        if items_before and "gratis" in items_before.lower() and "pa ti solito" in items_before.lower():
+            db.restore_promo_combo()
+            print(f"[PROMO] 🔄 Combo gratis restaurado por cancelación — {phone_clean}")
         print(f"[PEDIDO CANCELADO] {now.strftime('%d/%m %H:%M')} | {phone_clean}")
         await _notify_owner(
             phone_clean, "—", "—", "—", now,
@@ -254,3 +258,4 @@ async def cancel_order(phone: str):
 
 def get_orders_count() -> int:
     return db.get_orders_count()
+

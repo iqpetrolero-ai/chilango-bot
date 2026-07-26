@@ -930,7 +930,9 @@ def _estimar_tiempo_por_items(items_str: str, pedidos_activos: int) -> str:
 async def _call_claude(phone: str, messages: list) -> str:
     # Filtrar campos extra (ts, etc.) que la API de Claude no acepta
     history = [{"role": m["role"], "content": m["content"]} for m in messages[-30:]]
-    hora_tacna = datetime.now(PERU_TZ).strftime("%H:%M")
+    _utc_now = datetime.now(timezone.utc)
+    hora_tacna = (_utc_now - timedelta(hours=5)).strftime("%H:%M")
+    print(f"[TZ] utc={_utc_now.strftime('%H:%M')} peru={hora_tacna}", flush=True)
     phone_clean = phone.replace("whatsapp:", "").replace("+", "")
 
     # Perfil del cliente — try/except para que un error de BD no bloquee la respuesta

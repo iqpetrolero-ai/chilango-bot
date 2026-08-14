@@ -697,7 +697,10 @@ async def receive_message(request: Request):
             if len(_processed_msg_ids) > 500:
                 _processed_msg_ids.popitem(last=False)  # elimina el más antiguo
 
-        phone = message_data["from"]
+        phone = message_data.get("from")
+        if not phone:
+            print(f"[ERROR WEBHOOK] Mensaje sin 'from': {json.dumps(message_data, ensure_ascii=False)}")
+            return JSONResponse({"status": "ok"})
         msg_type = message_data.get("type", "")
 
         if msg_type == "text":

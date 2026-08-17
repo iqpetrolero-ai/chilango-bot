@@ -1,4 +1,6 @@
 import os
+import re
+import unicodedata
 from datetime import datetime, timezone, timedelta
 
 import httpx
@@ -7,10 +9,149 @@ from openpyxl import load_workbook
 from openpyxl.styles import Font, PatternFill, Alignment
 
 import db
+from menu import EMPAQUE
 
 EXCEL_FILE = "pedidos_chilango.xlsx"
 PERU_TZ = timezone(timedelta(hours=-5))
 OWNER_PHONE = os.environ.get("OWNER_PHONE", "").strip()
+
+
+def _normalizar(texto: str) -> str:
+    """minúsculas, sin tildes, sin puntuación, sin 'de'/'del' — para comparar nombres de items."""
+    texto = texto.lower()
+    texto = unicodedata.normalize("NFKD", texto)
+    texto = "".join(c for c in texto if not unicodedata.combining(c))
+    texto = re.sub(r"[^a-z0-9\s]", " ", texto)
+    texto = re.sub(r"\b(de|del)\b", " ", texto)
+    return re.sub(r"\s+", " ", texto).strip()
+
+
+def _split_top_level(items: str) -> list[str]:
+    """Separa el texto de items por comas que NO estén dentro de paréntesis."""
+    segmentos, actual, profundidad = [], [], 0
+    for ch in items:
+        if ch == "(":
+            profundidad += 1
+            actual.append(ch)
+        elif ch == ")":
+            profundidad -= 1
+            actual.append(ch)
+        elif ch == "," and profundidad == 0:
+            segmentos.append("".join(actual))
+            actual = []
+        else:
+            actual.append(ch)
+    if actual:
+        segmentos.append("".join(actual))
+    return [s.strip() for s in segmentos if s.strip()]
+
+
+def calcular_total_esperado(items: str) -> float | None:
+    """Recalcula el total a partir de los precios reales del menú (BD).
+    Devuelve None si no se pudo verificar con confianza (mejor no alertar que alertar mal)."""
+    try:
+        menu_items = db.get_menu_items()
+    except Exception:
+        return None
+    precios = [(_normalizar(it["nombre"]), float(it["precio"])) for it in menu_items]
+    if not precios:
+        return None
+
+    total = 0.0
+    empaque_explicito = False
+    algo_coincidio = False
+
+    for seg in _split_top_level(items):
+        seg_low = seg.lower()
+
+        m_delivery = re.search(r"delivery\s*:?\s*s/\s*([\d.,]+)", seg_low)
+        if m_delivery:
+            total += float(m_delivery.group(1).replace(",", "."))
+            algo_coincidio = True
+            continue
+
+        m_empaque = re.search(r"empaque\s*:?\s*s/\s*([\d.,]+)", seg_low)
+        if m_empaque:
+            total += float(m_empaque.group(1).replace(",", "."))
+            empaque_explicito = True
+            algo_coincidio = True
+            continue
+
+        m_paren = re.search(r"\(([^()]*)\)", seg)
+        seg_sin_paren = re.sub(r"\([^()]*\)", "", seg).strip()
+        if m_paren:
+            paren_txt = m_paren.group(1).lower()
+            if "extra" in paren_txt or "con " in paren_txt:
+                # Ítem con extras/personalización dentro del paréntesis — precio ambiguo, no verificar.
+                return None
+
+        m_qty = re.match(r"^\s*(\d+)\s*x\s*(.+)$", seg_sin_paren, re.IGNORECASE)
+        qty, nombre = (int(m_qty.group(1)), m_qty.group(2)) if m_qty else (1, seg_sin_paren)
+
+        nombre_norm = _normalizar(nombre)
+        if not nombre_norm:
+            continue
+
+        candidatos = [p for n, p in precios if n and (n in nombre_norm or nombre_norm in n)]
+        if len(candidatos) != 1:
+            return None  # sin match único → mejor no verificar que arriesgar falso positivo
+
+        total += qty * candidatos[0]
+        algo_coincidio = True
+
+    if not algo_coincidio:
+        return None
+    if not empaque_explicito:
+        total += EMPAQUE
+    return round(total, 2)
+
+
+def _extraer_monto(total_str: str) -> float | None:
+    m = re.search(r"s/\s*([\d.,]+)", total_str.lower())
+    if not m:
+        return None
+    try:
+        return float(m.group(1).replace(",", "."))
+    except ValueError:
+        return None
+
+
+DELIVERY_MIN, DELIVERY_MAX = 4.00, 25.00  # rango típico visto en /admin/zonas-delivery
+
+
+def verificar_total(items: str, total_str: str, direccion: str = "") -> str:
+    """Devuelve un sufijo de alerta (para el WhatsApp del dueño) si el total del bot no
+    coincide con el recalculado desde los precios reales del menú. Cadena vacía si todo
+    bien o si no se pudo verificar con confianza.
+
+    Si el pedido es delivery y el costo de envío NO está desglosado dentro de `items`
+    (el bot a veces lo omite del tag aunque sí lo cobró), la diferencia observada podría
+    ser un delivery legítimo no itemizado. En ese caso solo se alerta si la diferencia
+    NO cae dentro del rango típico de costo de delivery (S/4–25) — una diferencia
+    negativa, casi nula o absurdamente grande no se explica por un delivery faltante."""
+    try:
+        calculado = calcular_total_esperado(items)
+        declarado = _extraer_monto(total_str)
+        if calculado is None or declarado is None:
+            return ""
+
+        diff = declarado - calculado
+        if abs(diff) <= 0.05:
+            return ""
+
+        es_recojo = direccion.strip().lower().startswith("recojo")
+        tiene_delivery_en_items = bool(re.search(r"delivery", items, re.IGNORECASE))
+        if not es_recojo and not tiene_delivery_en_items and DELIVERY_MIN <= diff <= DELIVERY_MAX:
+            return ""  # posible delivery legítimo no itemizado — no se puede verificar con confianza
+
+        return (
+            f"\n\n⚠️ *VERIFICAR TOTAL* — el bot cobró S/ {declarado:.2f} pero "
+            f"según los precios del menú (+ empaque{'' if es_recojo or tiene_delivery_en_items else ', sin contar delivery'}) "
+            f"sería S/ {calculado:.2f}. Revisa el pedido."
+        )
+    except Exception as e:
+        print(f"[VERIFICAR_TOTAL] Error: {e}")
+    return ""
 
 
 async def _send_whatsapp(to: str, body: str):
@@ -113,7 +254,7 @@ def _init_excel():
         wb.save(EXCEL_FILE)
 
 
-async def _notify_owner(phone_clean: str, items: str, total: str, metodo_pago: str, now: datetime, titulo: str = "🆕 *NUEVO PEDIDO — Chilango*", direccion: str = ""):
+async def _notify_owner(phone_clean: str, items: str, total: str, metodo_pago: str, now: datetime, titulo: str = "🆕 *NUEVO PEDIDO — Chilango*", direccion: str = "", alerta: str = ""):
     try:
         token = os.environ.get("META_ACCESS_TOKEN", "").strip()
         phone_number_id = os.environ.get("META_PHONE_NUMBER_ID", "").strip()
@@ -129,6 +270,7 @@ async def _notify_owner(phone_clean: str, items: str, total: str, metodo_pago: s
 
         if template_name:
             # ── Modo template (permanente, sin restricción de 24 h) ──────────
+            total_param = f"{total} ⚠️ VERIFICAR" if alerta else total
             payload = {
                 "messaging_product": "whatsapp",
                 "to": OWNER_PHONE,
@@ -141,7 +283,7 @@ async def _notify_owner(phone_clean: str, items: str, total: str, metodo_pago: s
                         "parameters": [
                             {"type": "text", "text": f"+{phone_clean}"},
                             {"type": "text", "text": items},
-                            {"type": "text", "text": total},
+                            {"type": "text", "text": total_param},
                             {"type": "text", "text": metodo_pago},
                             {"type": "text", "text": hora_str},
                         ],
@@ -161,6 +303,7 @@ async def _notify_owner(phone_clean: str, items: str, total: str, metodo_pago: s
                 f"💳 {pago_emoji}"
                 f"{dir_linea}\n"
                 f"🕒 {hora_str}"
+                f"{alerta}"
             )
             payload = {
                 "messaging_product": "whatsapp",
@@ -218,7 +361,10 @@ async def save_order(phone: str, items: str, total: str, metodo_pago: str = "Efe
     except Exception as e:
         print(f"[EXCEL] No se pudo guardar en Excel: {e}")
 
-    await _notify_owner(phone_clean, items, total, metodo_pago, now, direccion=direccion)
+    alerta = verificar_total(items, total, direccion)
+    if alerta:
+        print(f"[VERIFICAR_TOTAL] ⚠️ Posible total incorrecto — {phone_clean} | {total}")
+    await _notify_owner(phone_clean, items, total, metodo_pago, now, direccion=direccion, alerta=alerta)
 
 
 async def update_order(phone: str, items: str, total: str, metodo_pago: str = "Efectivo", direccion: str = "", notas: str = ""):
@@ -228,10 +374,14 @@ async def update_order(phone: str, items: str, total: str, metodo_pago: str = "E
     updated = db.update_latest_order(phone_clean, items, total, metodo_pago, direccion, notas)
     if updated:
         print(f"[PEDIDO MODIFICADO] {now.strftime('%d/%m %H:%M')} | {phone_clean} | {total} | {metodo_pago}")
+        alerta = verificar_total(items, total, direccion)
+        if alerta:
+            print(f"[VERIFICAR_TOTAL] ⚠️ Posible total incorrecto (modificación) — {phone_clean} | {total}")
         await _notify_owner(
             phone_clean, items, total, metodo_pago, now,
             titulo="✏️ *PEDIDO MODIFICADO — Chilango*",
             direccion=direccion,
+            alerta=alerta,
         )
     else:
         print(f"[PEDIDO MODIFICADO] No se encontró pedido activo para {phone_clean}")

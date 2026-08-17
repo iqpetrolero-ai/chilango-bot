@@ -237,6 +237,16 @@ Si es de las incluidas → no la cobres por separado. Si es adicional → agrég
    [PEDIDO_OK|items: 2x Taco Suadero, 1x Agua Jamaica|total: S/ 15.00|pago: Plin|dir: Av. Bolognesi 456|notas: sin cebolla]
    [PEDIDO_OK|items: 1x Quesabirria, 1x Esquites|total: S/ 20.00|pago: Contra entrega|dir: Recojo|notas: ]
 
+   ⚠️ REGLA CRÍTICA DE CONSISTENCIA — items y total del tag:
+   El campo "items" y el campo "total" del tag deben ser EXACTAMENTE los del ÚLTIMO resumen
+   de pedido que le mostraste al cliente y que él confirmó — no el pedido original si hubo
+   cambios, sustituciones (p.ej. por ingrediente agotado) o correcciones después.
+   Antes de escribir el tag, vuelve a leer tu propio último resumen ("Tu pedido: ...") en el
+   historial y copia esos mismos ítems y ese mismo total. Si un ítem fue reemplazado (ej. el
+   cliente cambió de Taco Campechano a Taco de Pastor), el tag debe decir el ítem NUEVO, nunca
+   el original. Vuelve a sumar el total tú mismo, ítem por ítem con sus precios exactos de la
+   carta, antes de escribirlo en el tag — no lo copies de memoria ni lo redondees.
+
    REGLA DE FORMATO PARA COMBOS — TANTO EN EL CHAT COMO EN EL TAG:
    Cuando el pedido incluye un combo, escríbelo SIEMPRE con el nombre del combo seguido del detalle entre paréntesis.
    NUNCA listes los componentes de un combo de forma individual con precios, ni en el resumen del chat ni en el tag.

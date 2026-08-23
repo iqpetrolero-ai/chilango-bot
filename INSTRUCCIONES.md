@@ -1,3 +1,4 @@
+[INSTRUCCIONES.md](https://github.com/user-attachments/files/31356010/INSTRUCCIONES.md)
 # 🌮 Guía de Instalación — Chilango Bot
 
 Sigue estos pasos **en orden**. No necesitas saber programar.
@@ -18,21 +19,35 @@ Tiempo estimado: **45 minutos** la primera vez.
 
 ---
 
-## PASO 2 — Crear cuenta en Twilio (WhatsApp)
+## PASO 2 — Crear tu app de WhatsApp en Meta (Meta for Developers)
 
-1. Ve a **https://www.twilio.com/try-twilio**
-2. Regístrate con tu email
-3. Verifica tu número de teléfono
-4. Una vez dentro del dashboard, anota estos dos datos:
-   - **Account SID** (empieza con `AC...`)
-   - **Auth Token** (haz clic en "show" para verlo)
+Este bot usa la **API oficial de WhatsApp de Meta** (no Twilio). Necesitas:
 
-### Activar el Sandbox de WhatsApp (para pruebas gratis)
+1. Ve a **https://developers.facebook.com** y crea una cuenta de desarrollador (con tu Facebook)
+2. Clic en **"My Apps" → "Create App"**
+3. Elige el tipo **"Business"** y ponle un nombre (ej. `chilango-bot`)
+4. Dentro de tu app, busca el producto **WhatsApp** y haz clic en **"Set up"**
+5. En **WhatsApp → API Setup** verás (para pruebas, gratis):
+   - Un **número de prueba de Meta** ya activo
+   - Un **token de acceso temporal** (dura 24h — luego generas uno permanente en el Paso 4)
+   - El **Phone number ID** (una serie de números, no tu teléfono)
+6. Anota estos datos, los usarás en el Paso 4:
+   - **Access Token** (empieza con `EAA...`)
+   - **Phone Number ID**
+7. Para probar: en la misma pantalla hay un campo "To" donde agregas tu número de WhatsApp personal como destinatario de prueba y puedes enviarte una plantilla de ejemplo
 
-1. En el menú izquierdo busca: **Messaging → Try it out → Send a WhatsApp message**
-2. Verás un número de Twilio y un código tipo `join palabra-palabra`
-3. Desde tu WhatsApp personal, envía ese mensaje al número de Twilio
-4. Listo — ya puedes recibir y enviar mensajes de prueba
+### Obtener el App Secret (necesario para seguridad del webhook)
+
+1. Ve a **Configuración de la app → Básica** (App Settings → Basic)
+2. Copia el **App Secret** (haz clic en "Show" y confirma tu contraseña de Facebook)
+3. Este valor va en la variable `META_APP_SECRET` — es lo que verifica que los mensajes que llegan al bot realmente vienen de Meta y no de un tercero. **No lo dejes vacío.**
+
+### Token permanente (para producción, cuando el bot ya no sea solo de prueba)
+
+El token temporal que anotaste arriba expira en 24 horas. Para producción:
+1. Crea un **System User** en Meta Business Suite (Configuración del negocio → Usuarios del sistema)
+2. Genera un token permanente para ese usuario con permisos `whatsapp_business_messaging` y `whatsapp_business_management`
+3. Necesitarás verificar tu negocio (Business Verification) para enviar mensajes fuera del modo de prueba
 
 ---
 
@@ -66,8 +81,14 @@ Tiempo estimado: **45 minutos** la primera vez.
    | Variable | Valor |
    |----------|-------|
    | `ANTHROPIC_API_KEY` | tu clave de Claude (del Paso 1) |
-   | `TWILIO_ACCOUNT_SID` | tu Account SID de Twilio |
-   | `TWILIO_AUTH_TOKEN` | tu Auth Token de Twilio |
+   | `META_ACCESS_TOKEN` | el Access Token de Meta (del Paso 2) |
+   | `META_PHONE_NUMBER_ID` | el Phone Number ID de Meta (del Paso 2) |
+   | `META_VERIFY_TOKEN` | invéntate una palabra/frase secreta (ej. `chilango2026verify`) — la usarás también en el Paso 4 |
+   | `META_APP_SECRET` | el App Secret de Meta (del Paso 2) — **obligatorio, no lo dejes vacío** |
+   | `ADMIN_PASSWORD` | una contraseña tuya para entrar al panel `/admin` (usuario fijo: `admin`) |
+   | `OWNER_PHONE` | tu número de WhatsApp (con código de país, sin `+`), para recibir notificaciones de pedidos |
+
+   Opcionales según lo que uses: `YAPE_PLIN_NUMBER`, `OWNER_NAME`, `PICKUP_ADDRESS`, `DELIVERY_SERVICE_PHONE`, `DELIVERY_1_PHONE`/`DELIVERY_1_NAME` (hasta `DELIVERY_4_...`).
 
 4. Railway reiniciará el bot automáticamente
 
@@ -78,23 +99,24 @@ Tiempo estimado: **45 minutos** la primera vez.
 
 ---
 
-## PASO 4 — Conectar Twilio con Railway
+## PASO 4 — Conectar Meta con Railway (configurar el webhook)
 
-1. Vuelve a Twilio → **Messaging → Try it out → Send a WhatsApp message**
-2. Baja hasta la sección **"Sandbox Settings"**
-3. En el campo **"When a message comes in"**, pega:
+1. Vuelve a **developers.facebook.com** → tu app → **WhatsApp → Configuration**
+2. En **"Webhook"**, haz clic en **"Edit"**
+3. En **"Callback URL"**, pega:
    ```
    https://TU-URL-DE-RAILWAY.up.railway.app/webhook
    ```
-   (reemplaza con tu URL real)
-4. Asegúrate que el método sea **HTTP POST**
-5. Haz clic en **Save**
+   (reemplaza con tu URL real del Paso 3.5)
+4. En **"Verify token"**, escribe **exactamente la misma palabra** que pusiste en la variable `META_VERIFY_TOKEN` en Railway
+5. Haz clic en **"Verify and save"** — Meta le hará una petición a tu bot para confirmar que responde correctamente; si `META_VERIFY_TOKEN` no coincide, fallará
+6. Debajo, en **"Webhook fields"**, busca **`messages`** y haz clic en **"Subscribe"** — sin este paso el bot nunca recibirá los mensajes de tus clientes
 
 ---
 
 ## PASO 5 — ¡Probar el bot!
 
-1. Desde tu WhatsApp, envía cualquier mensaje al número de Twilio
+1. Desde tu WhatsApp, envía cualquier mensaje al número de WhatsApp de Meta (el que anotaste en el Paso 2)
 2. El bot debería responder en segundos 🎉
 
 **Pruebas recomendadas:**
@@ -128,9 +150,9 @@ El archivo `pedidos_chilango.xlsx` se guarda en el servidor de Railway.
 | Servicio | Costo |
 |----------|-------|
 | Railway | ~$5/mes (plan Hobby) |
-| Twilio WhatsApp | ~$0.005 por mensaje (~S/ 0.02) |
+| WhatsApp Cloud API (Meta) | Las primeras 1,000 conversaciones/mes son gratis; luego cobra por conversación según el país |
 | Claude API (IA) | ~$0.01 por conversación completa |
-| **Total estimado** | **~$8-10/mes** |
+| **Total estimado** | **~$5-10/mes** (varía según volumen de mensajes) |
 
 ---
 
@@ -140,7 +162,7 @@ El archivo `pedidos_chilango.xlsx` se guarda en el servidor de Railway.
 Sí, pero solo responde pedidos cuando se lo indicas en el horario (Vie-Dom 5-11pm).
 
 **¿Puedo cambiar el menú?**
-Sí, edita el archivo `menu.py` y vuelve a subir a GitHub — Railway se actualiza solo.
+Sí, entra a `https://TU-URL-DE-RAILWAY.up.railway.app/admin/menu` (con tu usuario `admin` y `ADMIN_PASSWORD`) y edita precios, nombres o desactiva items — el cambio se aplica al bot de inmediato, sin reiniciar ni tocar código.
 
 **¿El bot habla solo español?**
 Sí, está configurado en español peruano/mexicano.
@@ -153,6 +175,6 @@ Claude (la IA) maneja conversaciones naturales, responderá amablemente y rediri
 ## Soporte
 
 Si algo no funciona, revisa:
-1. Que las variables de entorno estén bien escritas en Railway
-2. Que el webhook en Twilio tenga la URL correcta
+1. Que las variables de entorno estén bien escritas en Railway (sobre todo `META_ACCESS_TOKEN`, `META_PHONE_NUMBER_ID` y `META_APP_SECRET`)
+2. Que el webhook en Meta tenga la URL correcta, el `Verify token` coincida con `META_VERIFY_TOKEN`, y que estés suscrito al campo `messages`
 3. Los logs en Railway → pestaña "Deployments" → "View Logs"

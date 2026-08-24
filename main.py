@@ -60,7 +60,7 @@ async def lifespan(app: FastAPI):
                     )
                     await send_whatsapp_message(phone, recordatorio)
                     from datetime import datetime as _dt, timezone as _tz, timedelta as _td
-                    _ts = _dt.now(_tz(_td(hours=-5))).strftime("%H:%M")
+                    _ts = _dt.now(_tz(_td(hours=-5))).strftime("%d/%m/%Y %H:%M")
                     await db.arun(db.append_message, phone, "assistant", recordatorio, ts=_ts)
                     await db.arun(db.mark_reminder_sent, phone)
                     print(f"[RECORDATORIO] Enviado a {phone}")
@@ -81,7 +81,7 @@ async def lifespan(app: FastAPI):
                     )
                     await send_whatsapp_message(p["phone"], encuesta)
                     from datetime import datetime as _dt, timezone as _tz, timedelta as _td
-                    _ts = _dt.now(_tz(_td(hours=-5))).strftime("%H:%M")
+                    _ts = _dt.now(_tz(_td(hours=-5))).strftime("%d/%m/%Y %H:%M")
                     await db.arun(db.append_message, p["phone"], "assistant", encuesta, ts=_ts)
                     await db.arun(db.mark_survey_sent, p["id"])
                     print(f"[ENCUESTA] Enviada a {p['phone']}")
@@ -107,7 +107,7 @@ async def lifespan(app: FastAPI):
                         )
                         await send_whatsapp_message(p["phone"], followup)
                         from datetime import datetime as _dt, timezone as _tz, timedelta as _td
-                        _ts = _dt.now(_tz(_td(hours=-5))).strftime("%H:%M")
+                        _ts = _dt.now(_tz(_td(hours=-5))).strftime("%d/%m/%Y %H:%M")
                         await db.arun(db.append_message, p["phone"], "assistant", followup, ts=_ts)
                         await db.arun(db.mark_carta_followup_sent, p["phone"])
                         print(f"[CARTA FOLLOWUP] Enviado a {p['phone']}")
@@ -514,7 +514,7 @@ async def handle_message(phone: str, message: str, phone_number_id: str = None):
                     f"💰 *Total completo: S/ {total_num:.2f}*\n\n"
                     f"¿Confirmamos tu pedido con {pago_txt}? 😊"
                 )
-                _ts = _dt.now(_tz(_td(hours=-5))).strftime("%H:%M")
+                _ts = _dt.now(_tz(_td(hours=-5))).strftime("%d/%m/%Y %H:%M")
                 await db.arun(db.append_message, client_phone, "assistant", msg_cliente, ts=_ts)
                 await db.arun(db.mark_unread, client_phone)
                 await send_whatsapp_message(client_phone, msg_cliente, sending_id)
@@ -539,7 +539,7 @@ async def handle_message(phone: str, message: str, phone_number_id: str = None):
                     f"en un momento te avisamos. ¡Gracias por tu paciencia!"
                 )
                 from datetime import datetime as _dt, timezone as _tz, timedelta as _td
-                _ts = _dt.now(_tz(_td(hours=-5))).strftime("%H:%M")
+                _ts = _dt.now(_tz(_td(hours=-5))).strftime("%d/%m/%Y %H:%M")
                 await db.arun(db.append_message, client_phone, "assistant", msg_cliente, ts=_ts)
                 await db.arun(db.mark_unread, client_phone)
                 await send_whatsapp_message(client_phone, msg_cliente, sending_id)
@@ -562,7 +562,7 @@ async def handle_message(phone: str, message: str, phone_number_id: str = None):
         )
         if _es_confirmacion:
             from datetime import datetime as _dt, timezone as _tz, timedelta as _td
-            _ts = _dt.now(_tz(_td(hours=-5))).strftime("%H:%M")
+            _ts = _dt.now(_tz(_td(hours=-5))).strftime("%d/%m/%Y %H:%M")
             await db.arun(db.append_message, phone_clean, "user", f"✅ {message}", ts=_ts)
             await db.arun(db.mark_unread, phone_clean)
             print(f"[DELIVERY CONFIRM] {delivery_name} confirmó asignación: '{message}' → visible en panel")
@@ -723,7 +723,7 @@ async def receive_message(request: Request):
             phone_clean = phone.replace("whatsapp:", "").replace("+", "")
             from datetime import datetime, timezone, timedelta
             _PERU_TZ = timezone(timedelta(hours=-5))
-            now_ts = datetime.now(_PERU_TZ).strftime("%H:%M")
+            now_ts = datetime.now(_PERU_TZ).strftime("%d/%m/%Y %H:%M")
             if btn_id == "ver_carta":
                 await db.arun(db.append_message, phone, "user", "Ver carta", ts=now_ts)
                 await handle_message(phone, "1", phone_number_id)
@@ -1943,7 +1943,7 @@ async def pedidos_panel(
     cnt_yapeplin = sum(1 for p in pedidos if p.get("metodo_pago") in ("Yape/Plin", "Yape", "Plin") and p.get("estado") != "Cancelado ❌")
     cnt_efec = sum(1 for p in pedidos if p.get("metodo_pago") not in ("Yape/Plin", "Yape", "Plin") and p.get("estado") != "Cancelado ❌")
 
-    agotados_actual = await db.arun(db.get_config, "productos_agotados", "")
+    agotados_actual = await db.arun(db.get_productos_agotados_vigente)
     bot_pausado = await db.arun(db.get_config, "bot_pausado", "0") == "1"
     promo_activa = await db.arun(db.get_config, "promo_mexico", "0") == "1"
     combos_gratis = int(await db.arun(db.get_config, "promo_combos_gratis", "0"))
@@ -2204,7 +2204,7 @@ async def api_enviar_costo_delivery(
 
     # Agregar al historial de conversación para que el bot procese la confirmación
     from datetime import datetime as _dt, timezone as _tz, timedelta as _td
-    _ts = _dt.now(_tz(_td(hours=-5))).strftime("%H:%M")
+    _ts = _dt.now(_tz(_td(hours=-5))).strftime("%d/%m/%Y %H:%M")
     await db.arun(db.append_message, phone, "assistant", mensaje, ts=_ts)
 
     # Guardar en historial de costos (aprendizaje de zonas)
@@ -2862,7 +2862,7 @@ async def send_manual_message(
     # Enviar por WhatsApp
     await send_whatsapp_message(phone, message)
     # Guardar en historial marcado como manual (no lo procesa Claude como tag)
-    now_ts = datetime.now(PERU_TZ).strftime("%H:%M")
+    now_ts = datetime.now(PERU_TZ).strftime("%d/%m/%Y %H:%M")
     await db.arun(db.append_message, phone, "assistant", message, ts=now_ts, manual=True)
     await db.arun(db.mark_unread, phone)
     # Pausar el bot mientras el equipo maneja la conversación manualmente.
@@ -3280,7 +3280,7 @@ async def api_guardar_agotados(
 ):
     data = await request.json()
     value = data.get("value", "").strip()
-    await db.arun(db.set_config, "productos_agotados", value)
+    await db.arun(db.set_productos_agotados, value)
     print(f"[CONFIG] Productos agotados actualizados: '{value}'")
     return JSONResponse({"status": "ok"})
 
@@ -3378,6 +3378,7 @@ body{display:flex;flex-direction:column;overflow:hidden}
 .bubble.bot .sender{color:var(--green)}
 .bubble.manual .sender{color:var(--amber)}
 .msg-ts{font-size:10px;color:var(--text3);font-weight:400;margin-left:6px}
+.date-sep{align-self:center;background:var(--surface);border:1px solid var(--border);color:var(--text3);font-size:11px;font-weight:600;padding:4px 12px;border-radius:999px;margin:6px 0}
 .empty-state{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--text3);gap:10px;font-size:13.5px}
 .empty-state i{font-size:46px;color:var(--border2)}
 .tpl-bar{padding:8px 12px;background:var(--surface);border-top:1px solid var(--border);display:flex;gap:6px;flex-wrap:wrap;align-items:center;flex-shrink:0}
@@ -3428,18 +3429,55 @@ function esc(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\\n/g,'<br>');
 }
 
+function _splitTs(ts) {
+  // ts puede venir como "dd/mm/yyyy HH:MM" (formato actual) o "HH:MM" (mensajes
+  // antiguos guardados antes de que se empezara a registrar la fecha).
+  if (!ts) return {fecha: null, hora: ''};
+  const partes = ts.split(' ');
+  return partes.length === 2 ? {fecha: partes[0], hora: partes[1]} : {fecha: null, hora: ts};
+}
+
+function _fechaSepLabel(fechaStr) {
+  // fechaStr en formato dd/mm/yyyy
+  const [d, m, y] = fechaStr.split('/').map(Number);
+  const fecha = new Date(y, m - 1, d);
+  const hoy = new Date();
+  hoy.setHours(0,0,0,0);
+  const diffDias = Math.round((hoy - fecha) / 86400000);
+  if (diffDias === 0) return 'Hoy';
+  if (diffDias === 1) return 'Ayer';
+  const dias = ['domingo','lunes','martes','miércoles','jueves','viernes','sábado'];
+  if (diffDias > 1 && diffDias < 7) return dias[fecha.getDay()];
+  return fechaStr;
+}
+
 function buildBubble(m) {
   const isManual = !!m.manual;
   const lado  = isManual ? 'manual' : (m.role === 'user' ? 'cliente' : 'bot');
   const label = isManual
     ? '<i class="ti ti-headset"></i> Equipo'
     : (m.role === 'user' ? 'Cliente' : '<i class="ti ti-robot"></i> Chili');
-  const tsHtml = m.ts ? `<span class="msg-ts">${m.ts}</span>` : '';
+  const {hora} = _splitTs(m.ts);
+  const tsHtml = hora ? `<span class="msg-ts">${hora}</span>` : '';
   const imgMatch = typeof m.content === 'string' && m.content.match(/^\[IMG:([^;]+);(.+)\]$/s);
   const bodyHtml = imgMatch
     ? `<img src="data:${imgMatch[1]};base64,${imgMatch[2]}" style="max-width:220px;max-height:300px;border-radius:6px;display:block;margin-top:4px;" />`
     : esc(m.content);
   return `<div class="bubble ${lado}"><div class="sender">${label}${tsHtml}</div>${bodyHtml}</div>`;
+}
+
+function buildBubblesConFecha(msgs) {
+  let out = '';
+  let lastFecha = undefined;
+  for (const m of msgs) {
+    const {fecha} = _splitTs(m.ts);
+    if (fecha && fecha !== lastFecha) {
+      out += `<div class="date-sep">${_fechaSepLabel(fecha)}</div>`;
+      lastFecha = fecha;
+    }
+    out += buildBubble(m);
+  }
+  return out;
 }
 
 function closeChat() {
@@ -3463,7 +3501,7 @@ function showChat(phone) {
   });
 
   const msgs = convs[phone] || [];
-  const bubbles = msgs.map(buildBubble).join('');
+  const bubbles = buildBubblesConFecha(msgs);
 
   const isEscalado = escaladoMap[phone] || false;
   const escaladoCtl = isEscalado
@@ -3606,7 +3644,7 @@ async function pollConversaciones() {
         const msgsEl = document.getElementById('msgs');
         if (msgsEl) {
           const atBottom = msgsEl.scrollHeight - msgsEl.scrollTop - msgsEl.clientHeight < 60;
-          const newBubbles = data.convs[activePhone].map(buildBubble).join('');
+          const newBubbles = buildBubblesConFecha(data.convs[activePhone]);
           if (msgsEl.innerHTML !== newBubbles) {
             msgsEl.innerHTML = newBubbles;
             if (atBottom) msgsEl.scrollTop = msgsEl.scrollHeight;

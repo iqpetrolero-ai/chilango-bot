@@ -1286,7 +1286,7 @@ async def process_message(phone: str, message: str) -> tuple[str, bool, bool]:
             db.mark_reescalation_sent(phone_clean_esc)
         return "", False, False  # Silencio total — el bot no responde nada al cliente
 
-    now_ts = datetime.now(PERU_TZ).strftime("%H:%M")
+    now_ts = datetime.now(PERU_TZ).strftime("%d/%m/%Y %H:%M")
 
     # Si hay una consulta de costo de delivery pendiente, no llamar a Claude —
     # responder automáticamente para evitar que invente el costo.
@@ -1333,7 +1333,7 @@ async def process_message_with_image(phone: str, image_bytes: bytes, mime_type: 
             reply_esc = "Nuestro equipo ya está atento a tu mensaje, en un momento te responden 🙏"
         return reply_esc, False
 
-    now_ts = datetime.now(PERU_TZ).strftime("%H:%M")
+    now_ts = datetime.now(PERU_TZ).strftime("%d/%m/%Y %H:%M")
     image_b64 = base64.standard_b64encode(image_bytes).decode("utf-8")
 
     messages = db.get_messages(phone)

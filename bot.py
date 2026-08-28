@@ -54,8 +54,16 @@ def get_client() -> AsyncAnthropic:
     return _client
 
 
+# Cierre temporal puntual (no confundir con TEST_MODE): fechas en que NO se atiende
+# pese a caer en día/horario normal. Formato "YYYY-MM-DD" en hora de Perú.
+# Quitar la fecha de este set (o dejarlo vacío) cuando el cierre ya no aplique.
+FECHAS_CERRADAS_TEMPORAL = {"2026-08-28"}
+
+
 def esta_en_horario() -> bool:
     ahora = datetime.now(PERU_TZ)
+    if ahora.strftime("%Y-%m-%d") in FECHAS_CERRADAS_TEMPORAL:
+        return False
     if ahora.weekday() not in (4, 5, 6):
         return False
     hora, minuto = ahora.hour, ahora.minute
@@ -68,6 +76,16 @@ def esta_en_horario() -> bool:
 
 
 def mensaje_fuera_horario() -> str:
+    ahora = datetime.now(PERU_TZ)
+    if ahora.strftime("%Y-%m-%d") in FECHAS_CERRADAS_TEMPORAL:
+        return (
+            "¡Hola! 👋 Gracias por escribirnos.\n\n"
+            "Hoy *no vamos a estar atendiendo pedidos* 😔\n\n"
+            "*Mañana volvemos con el horario normal:*\n"
+            "🕒 *Viernes, Sábado y Domingo* · 5:30 pm a 11:00 pm · Último pedido: 10:45 pm\n\n"
+            "Si quieres, escribe *carta* para ver nuestro menú mientras tanto. 🌮\n\n"
+            "¡Nos vemos pronto para taquear rico!"
+        )
     return (
         "¡Hola! 👋 Gracias por escribirnos.\n\n"
         "En este momento estamos cerrados 😔\n\n"

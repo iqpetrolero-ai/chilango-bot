@@ -231,11 +231,22 @@ Si es de las incluidas → no la cobres por separado. Si es adicional → agrég
              El costo de delivery lo paga el cliente al motorizado en efectivo al momento de la entrega.
              NO incluyas ningún tag aún.
              ⛔ NUNCA uses [CONSULTAR_COSTO] en este flujo — eso es solo para "delivery incluido" (ver sección 11).
-   Paso 2 — Cliente envía la captura: verifica el monto en la imagen.
-             * Monto correcto → confirma con mensaje breve y agrega [PEDIDO_OK|...]
-             * Monto menor    → indica la diferencia y pide que complete
-             * No se lee bien → pide captura más nítida
-   REGLA CRÍTICA: [PEDIDO_OK|...] va ÚNICAMENTE en el Paso 2. Nunca en el Paso 1.
+   Paso 2 — Cliente envía la captura: extrae el monto EXACTO que aparece en la imagen
+             (la cifra junto a "S/" en la captura de Yape/Plin) y compáralo, número por
+             número, contra el monto que TÚ pediste en el Paso 1.
+             * Monto igual o mayor → confirma con mensaje breve y agrega [PEDIDO_OK|...],
+               incluyendo SIEMPRE el campo monto_pagado con la cifra exacta que leíste
+               (no el monto que debía ser — el que REALMENTE aparece en la imagen).
+             * Monto menor    → indica la diferencia exacta y pide que complete. NO emitas [PEDIDO_OK].
+             * No se lee bien, está borrosa, cortada o el monto no es 100% claro
+               → pide captura más nítida. NO emitas [PEDIDO_OK]. Ante la duda, nunca asumas
+               que el monto es correcto.
+   REGLA CRÍTICA: [PEDIDO_OK|...] va ÚNICAMENTE en el Paso 2, y solo cuando el monto leído en
+   la imagen es igual o mayor al pedido. Nunca en el Paso 1. Nunca si tienes dudas sobre la cifra.
+   ⚠️ El campo monto_pagado es tu única oportunidad de reportar lo que realmente viste en la
+   imagen — el sistema lo verifica automáticamente contra el total. Si escribes ahí el monto
+   correcto en vez del que realmente aparece en la captura, el sistema no podrá detectar un
+   pago insuficiente.
 
    CONTRA ENTREGA:
    Cuando el cliente confirme → incluye [PEDIDO_OK|...] con mensaje breve de confirmación. Solo una vez.
@@ -249,11 +260,11 @@ Si es de las incluidas → no la cobres por separado. Si es adicional → agrég
    "¿en cuánto está listo?", "¿cuánto falta?" u otra pregunta directa sobre el tiempo.
    En ese caso usa el tiempo del CONTEXTO ACTUAL.
 
-   FORMATO EXACTO DEL TAG NUEVO PEDIDO (5 campos):
-   [PEDIDO_OK|items: <descripción>|total: S/ XX.XX|pago: <Yape|Plin|Contra entrega>|dir: <dirección o Recojo>|notas: <personalizaciones o dejar vacío>]
+   FORMATO EXACTO DEL TAG NUEVO PEDIDO (6 campos):
+   [PEDIDO_OK|items: <descripción>|total: S/ XX.XX|pago: <Yape|Plin|Contra entrega>|dir: <dirección o Recojo>|notas: <personalizaciones o dejar vacío>|monto_pagado: <cifra exacta leída en la captura de Yape/Plin, o vacío si es Contra entrega>]
    Ejemplos:
-   [PEDIDO_OK|items: 2x Taco Suadero, 1x Agua Jamaica|total: S/ 15.00|pago: Plin|dir: Av. Bolognesi 456|notas: sin cebolla]
-   [PEDIDO_OK|items: 1x Quesabirria, 1x Esquites|total: S/ 20.00|pago: Contra entrega|dir: Recojo|notas: ]
+   [PEDIDO_OK|items: 2x Taco Suadero, 1x Agua Jamaica|total: S/ 15.00|pago: Plin|dir: Av. Bolognesi 456|notas: sin cebolla|monto_pagado: S/ 15.00]
+   [PEDIDO_OK|items: 1x Quesabirria, 1x Esquites|total: S/ 20.00|pago: Contra entrega|dir: Recojo|notas: |monto_pagado: ]
 
    ⚠️ REGLA CRÍTICA DE CONSISTENCIA — items y total del tag:
    El campo "items" y el campo "total" del tag deben ser EXACTAMENTE los del ÚLTIMO resumen
@@ -653,6 +664,18 @@ async def _notify_queja(phone_clean: str, desc: str):
         print(f"[QUEJA] Excepción: {e}")
 
 
+def _extraer_monto_num(texto: str) -> float | None:
+    """Extrae la cifra numérica de un string tipo 'S/ 34.00'. None si no hay número reconocible."""
+    import re as _re
+    m = _re.search(r"(\d+(?:[.,]\d{1,2})?)", texto or "")
+    if not m:
+        return None
+    try:
+        return float(m.group(1).replace(",", "."))
+    except ValueError:
+        return None
+
+
 def _extract_save_name(reply: str) -> tuple[str | None, str]:
     """Extrae [SAVE_NAME|nombre: X] y devuelve (nombre, reply_limpio)."""
     marker = "[SAVE_NAME|nombre: "
@@ -669,7 +692,9 @@ def _extract_save_name(reply: str) -> tuple[str | None, str]:
 
 
 def _extract_tag(reply: str, tag_name: str) -> tuple[dict | None, str]:
-    """Extrae un tag del reply y devuelve (campos, reply_limpio)."""
+    """Extrae un tag del reply y devuelve (campos, reply_limpio).
+    Parsea cada parte por el NOMBRE del campo (no por posición fija), para que el
+    pedido no se pierda si Claude omite, reordena o agrega algún campo al tag."""
     marker = f"[{tag_name}|"
     if marker not in reply:
         return None, reply
@@ -678,12 +703,20 @@ def _extract_tag(reply: str, tag_name: str) -> tuple[dict | None, str]:
         end = reply.index("]", start)
         tag = reply[start: end + 1]
         parts = tag[len(marker):-1].split("|")
+
+        raw: dict = {}
+        for part in parts:
+            if ":" in part:
+                k, v = part.split(":", 1)
+                raw[k.strip().lower()] = v.strip()
+
         fields = {
-            "items": parts[0].replace("items: ", "").strip(),
-            "total": parts[1].replace("total: ", "").strip(),
-            "pago":  parts[2].replace("pago: ", "").strip()  if len(parts) > 2 else "Efectivo",
-            "dir":   parts[3].replace("dir: ", "").strip()   if len(parts) > 3 else "",
-            "notas": parts[4].replace("notas: ", "").strip() if len(parts) > 4 else "",
+            "items": raw.get("items", ""),
+            "total": raw.get("total", ""),
+            "pago":  raw.get("pago", "Efectivo"),
+            "dir":   raw.get("dir", ""),
+            "notas": raw.get("notas", ""),
+            "monto_pagado": raw.get("monto_pagado", ""),
         }
         reply_clean = (reply[:start] + reply[end + 1:]).strip()
         return fields, reply_clean
@@ -709,6 +742,29 @@ async def _parse_and_save_order(phone: str, reply: str) -> tuple[str, bool, bool
     # Pedido nuevo
     fields, reply = _extract_tag(reply, "PEDIDO_OK")
     if fields:
+        # ── Verificación determinística del monto pagado (Yape/Plin) ──────────
+        # No confiar únicamente en el criterio de Claude al leer la captura: si la
+        # cifra que él mismo reportó haber visto en la imagen (monto_pagado) es menor
+        # al total del pedido, se rechaza la confirmación aunque Claude haya emitido
+        # el tag [PEDIDO_OK]. Esto evita confirmar pedidos por errores de juicio del
+        # modelo al comparar montos, aunque la lectura de la cifra sea correcta.
+        monto_insuficiente = False
+        if fields["pago"] in ("Yape", "Plin") and fields.get("monto_pagado"):
+            monto_pagado_num = _extraer_monto_num(fields["monto_pagado"])
+            total_num = _extraer_monto_num(fields["total"])
+            if monto_pagado_num is not None and total_num is not None and monto_pagado_num < total_num - 0.05:
+                monto_insuficiente = True
+
+        if monto_insuficiente:
+            diff = round(total_num - monto_pagado_num, 2)
+            reply = (
+                f"Vi que tu {fields['pago']} fue por S/ {monto_pagado_num:.2f}, pero tu pedido es "
+                f"de S/ {total_num:.2f} — todavía faltarían S/ {diff:.2f}. ¿Me envías la diferencia "
+                f"o el comprobante completo? 🙏"
+            )
+            print(f"[PAGO INSUFICIENTE] {phone}: leído S/{monto_pagado_num:.2f} vs total S/{total_num:.2f} — pedido NO confirmado")
+            return reply, needs_escalate, order_confirmed
+
         order_confirmed = True
         # Claim free combo atomically if this order includes one
         from datetime import date as _date2
@@ -1087,7 +1143,7 @@ async def _call_claude(phone: str, messages: list) -> str:
     # Productos agotados — leer desde BD en cada llamada
     agotados_ctx = ""
     try:
-        agotados = db.get_config("productos_agotados", "").strip()
+        agotados = db.get_productos_agotados_vigente().strip()
         if agotados:
             agotados_ctx = (
                 f"\n\n━━━ PRODUCTOS AGOTADOS HOY ━━━"
@@ -1248,7 +1304,7 @@ async def process_message(phone: str, message: str) -> tuple[str, bool, bool]:
             db.mark_reescalation_sent(phone_clean_esc)
         return "", False, False  # Silencio total — el bot no responde nada al cliente
 
-    now_ts = datetime.now(PERU_TZ).strftime("%H:%M")
+    now_ts = datetime.now(PERU_TZ).strftime("%d/%m/%Y %H:%M")
 
     # Si hay una consulta de costo de delivery pendiente, no llamar a Claude —
     # responder automáticamente para evitar que invente el costo.
@@ -1295,7 +1351,7 @@ async def process_message_with_image(phone: str, image_bytes: bytes, mime_type: 
             reply_esc = "Nuestro equipo ya está atento a tu mensaje, en un momento te responden 🙏"
         return reply_esc, False
 
-    now_ts = datetime.now(PERU_TZ).strftime("%H:%M")
+    now_ts = datetime.now(PERU_TZ).strftime("%d/%m/%Y %H:%M")
     image_b64 = base64.standard_b64encode(image_bytes).decode("utf-8")
 
     messages = db.get_messages(phone)

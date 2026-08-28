@@ -852,6 +852,23 @@ def set_config(key: str, value: str):
         """, (key, value))
 
 
+def get_productos_agotados_vigente() -> str:
+    """Lista de productos agotados, solo si fue marcada el día de hoy (hora Perú).
+    Si quedó de un día anterior (nadie la limpió), se considera vencida y no aplica."""
+    fecha_marcada = get_config("productos_agotados_fecha", "")
+    hoy = datetime.now(PERU_TZ).strftime("%d/%m/%Y")
+    if fecha_marcada != hoy:
+        return ""
+    return get_config("productos_agotados", "")
+
+
+def set_productos_agotados(value: str):
+    """Guarda la lista de agotados junto con la fecha de hoy, para que
+    get_productos_agotados_vigente() la descarte automáticamente al día siguiente."""
+    set_config("productos_agotados", value)
+    set_config("productos_agotados_fecha", datetime.now(PERU_TZ).strftime("%d/%m/%Y"))
+
+
 def claim_promo_combo() -> bool:
     """Atomically claims one free Combo Pa Ti Solito. Returns True if successful."""
     with _conn() as c:

@@ -12,3 +12,4 @@ build/
 venv/
 pedidos_chilango.xlsx
 static/carta.pdf
+static/*.py

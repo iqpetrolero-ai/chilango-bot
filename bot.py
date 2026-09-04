@@ -41,7 +41,10 @@ def refresh_menu():
 _client = None
 
 PERU_TZ = timezone(timedelta(hours=-5))
-YAPE_PLIN_NUMBER = "953038816"
+YAPE_PLIN_NUMBER = os.environ.get("YAPE_PLIN_NUMBER", "")
+OWNER_NAME = os.environ.get("OWNER_NAME", "")
+PICKUP_ADDRESS = os.environ.get("PICKUP_ADDRESS", "")
+OWNER_PHONE = os.environ.get("OWNER_PHONE", "").strip()
 
 
 def get_client() -> AsyncAnthropic:
@@ -112,9 +115,9 @@ Tienes personalidad amigable, con onda mexicana auténtica. Eres entusiasta con 
 
 ━━━ DATOS DEL RESTAURANTE ━━━
 - Nombre: Chilango 🌮
-- Ciudad: Tacna, Perú — cobertura a todo Tacna
+- Ciudad: Tacna, Perú — cobertura según zona (nunca prometas cobertura total, confirma dirección exacta)
 - Modalidad: Delivery y recojo
-- Dirección para recojo: Asoc. Ricardo Odonovan Mz H-5, calle Las Poncianas, atrás del Terminal Flores
+- Dirección para recojo: {PICKUP_ADDRESS}
 - Horario: Viernes, Sábado y Domingo de 5:30pm a 11pm · Último pedido: 10:45pm
 - Instagram: @chilangotacna
 - Formas de pago: Yape · Plin · Contra entrega (NO se acepta tarjeta ni transferencia)
@@ -153,7 +156,7 @@ Si es de las incluidas → no la cobres por separado. Si es adicional → agrég
    - "¿Qué es la birria?" → Carne de res guisada en adobo especiado, jugosa y sabrosa
    - "¿Tienen opciones sin picante?" → Sí, puedes pedir tus tacos o birria sin salsa picante
    - "¿Cuánto demora el delivery?" → El motorizado llega a nuestro local en unos 10-15 min y de ahí sale a tu dirección; el tiempo total depende de tu zona
-   - "¿Tienen cobertura en mi zona?" → Sí, llegamos a todo Tacna
+   - "¿Tienen cobertura en mi zona?" → ⛔ NUNCA prometas cobertura total ni afirmes que llegan a toda la ciudad. Pide la dirección exacta y confirma según la zona: "Cuéntame tu dirección exacta y te confirmo la cobertura 📍"
    - "¿Cuánto cuesta el delivery?" → El costo varía según tu zona; una vez que confirmes tu pedido te lo comunicamos. ⛔ NUNCA menciones cifras ni rangos de precio de delivery.
    - "¿Puedo pagar el delivery incluido en el pedido?" → ver punto 11
    - "¿Aceptan contra entrega?" → Sí, manejamos contra entrega. Trátalo exactamente igual que Efectivo en el flujo de pedido (mismo tag, mismo proceso).
@@ -212,7 +215,7 @@ Si es de las incluidas → no la cobres por separado. Si es adicional → agrég
      con el mismo texto — espera que avance el flujo o pregunta solo: "¿A qué dirección te lo enviamos? 📍"
    - El cliente puede responder todo junto (ej: "delivery, Jr. Tacna 123, Yape").
      Procesa lo que dé. Si falta la dirección en delivery, pídela en un mensaje breve.
-   - Si es recojo: indica "Asoc. Ricardo Odonovan Mz H-5, calle Las Poncianas, atrás del Terminal Flores"
+   - Si es recojo: indica "{PICKUP_ADDRESS}"
      y registra "Recojo" como dirección.
    - NUNCA menciones horarios de recojo ni frases como "pasa a recogerlo en horario..."
    - Si el cliente pregunta cuánto falta ANTES de pedir, usa el tiempo del CONTEXTO ACTUAL.
@@ -226,7 +229,7 @@ Si es de las incluidas → no la cobres por separado. Si es adicional → agrég
    pídela PRIMERO: "¿A qué dirección te lo enviamos? 📍" — y SOLO tras recibirla indica el número
    de Yape/Plin con el monto. Nunca des el número de pago sin tener la dirección.
    Paso 1 — Indica el monto de comida + empaque y pide la captura:
-             "📲 Yapea o Plinea al *{YAPE_PLIN_NUMBER}* a nombre de *David Morales* por *S/ XX.XX*" y pide la captura.
+             "📲 Yapea o Plinea al *{YAPE_PLIN_NUMBER}* a nombre de *{OWNER_NAME}* por *S/ XX.XX*" y pide la captura.
              El monto es SOLO comida + empaque (S/2.00) — NO incluye delivery.
              El costo de delivery lo paga el cliente al motorizado en efectivo al momento de la entrega.
              NO incluyas ningún tag aún.
@@ -464,7 +467,7 @@ Si es de las incluidas → no la cobres por separado. Si es adicional → agrég
     - NO ofrezcas combos más baratos ni temas de comida — el problema es el delivery, no la comida.
     - Responde con empatía y ofrece DOS alternativas concretas:
       1. Recojo en local: "Puedes recoger en nuestro local sin costo de delivery:
-         Asoc. Ricardo Odonovan Mz H-5, calle Las Poncianas, atrás del Terminal Flores."
+         {PICKUP_ADDRESS}."
       2. Confirmar igual: "Si prefieres que te lo llevemos igual, el total sería S/ XX.XX."
     - Espera la decisión del cliente antes de emitir cualquier tag.
     - Si elige recojo → flujo normal con dirección "Recojo" y emite [PEDIDO_OK] al confirmar.
@@ -579,7 +582,7 @@ Si el cliente menciona EXPLÍCITAMENTE su propio nombre en la conversación
 Ponlo al final de tu respuesta, sin mostrarlo al cliente. No lo repitas en mensajes siguientes.
 
 IMPORTANTE — NUNCA uses [SAVE_NAME] para:
-- El nombre "David Morales" (es la dueña del negocio, no el cliente)
+- El nombre "{OWNER_NAME}" (es el dueño del negocio, no el cliente)
 - Cualquier nombre proveniente del sistema (número de Yape, datos del restaurante, etc.)
 - Nombres que el cliente no haya dicho claramente que son suyos
 
@@ -602,8 +605,8 @@ async def _notify_reescalacion(phone_clean: str, user_msgs_sin_respuesta: int):
     try:
         token = os.environ.get("META_ACCESS_TOKEN", "").strip()
         pid = os.environ.get("META_PHONE_NUMBER_ID", "").strip()
-        owner = "51953038816"
-        if not token or not pid:
+        owner = OWNER_PHONE
+        if not token or not pid or not owner:
             print(f"[RE-ESCALATE] Faltan vars de entorno — no se re-notificó a {phone_clean}")
             return
         mensaje = (
@@ -641,8 +644,8 @@ async def _notify_queja(phone_clean: str, desc: str):
     try:
         token = os.environ.get("META_ACCESS_TOKEN", "").strip()
         pid = os.environ.get("META_PHONE_NUMBER_ID", "").strip()
-        owner = "51953038816"
-        if not token or not pid:
+        owner = OWNER_PHONE
+        if not token or not pid or not owner:
             print(f"[QUEJA] No se puede notificar: faltan vars de entorno")
             return
         mensaje = (

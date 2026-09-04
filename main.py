@@ -2347,7 +2347,7 @@ def _nav_html(active: str) -> str:
 def _ui_header(subtitle: str, actions: str = "") -> str:
     return (
         '<header class="hdr"><img src="/static/logo.png" alt="Chilango">'
-        f'<div class="hdr-title"><h1>Chilango</h1><small>{subtitle}</small></div>'
+        f'<div class="hdr-title"><h1>Chilango</h1><small id="hdrSubtitle">{subtitle}</small></div>'
         f'<div class="hdr-actions">{actions}</div></header>'
     )
 
@@ -2994,11 +2994,18 @@ def _conv_clean_for_js(conversaciones_raw: dict) -> tuple[dict, dict]:
 async def api_conversations(credentials: HTTPBasicCredentials = Depends(verificar_admin)):
     """Endpoint JSON para polling del panel admin sin recargar la página."""
     conversaciones_raw = await db.arun(db.get_conversations_with_status)
+    num_orders = await db.arun(get_orders_count)
     contacts_html = "".join(
         _contact_item_html(phone, data) for phone, data in conversaciones_raw.items()
     )
     conv_clean, conv_escalado = _conv_clean_for_js(conversaciones_raw)
-    return JSONResponse({"contacts_html": contacts_html, "convs": conv_clean, "escalado": conv_escalado})
+    return JSONResponse({
+        "contacts_html": contacts_html,
+        "convs": conv_clean,
+        "escalado": conv_escalado,
+        "total_chats": len(conversaciones_raw),
+        "total_pedidos": num_orders,
+    })
 
 
 _CLIENTES_TEMPLATE = """<!DOCTYPE html>
@@ -3282,6 +3289,32 @@ async def api_guardar_agotados(
     value = data.get("value", "").strip()
     await db.arun(db.set_productos_agotados, value)
     print(f"[CONFIG] Productos agotados actualizados: '{value}'")
+
+    # Avisar si algún pedido YA CONFIRMADO (activo, aún no despachado) incluye un producto
+    # que se acaba de marcar agotado — antes esto solo se detectaba si alguien del equipo
+    # lo notaba a tiempo leyendo el chat (ver auditoría 2.5).
+    productos = [p.strip().lower() for p in value.split(",") if p.strip()]
+    if productos:
+        try:
+            activos = await db.arun(db.get_active_orders_full)
+            afectados = [
+                o for o in activos
+                if any(p in (o.get("items") or "").lower() for p in productos)
+            ]
+            if afectados:
+                lineas = "\n".join(
+                    f"• Pedido #{o['id']} · +{o['phone']} · {o['items']}" for o in afectados
+                )
+                aviso = (
+                    f"⚠️ *STOCK — pedidos ya confirmados con producto agotado*\n\n"
+                    f"Se marcó agotado: {value}\n\n{lineas}\n\n"
+                    f"Avisa al cliente para sustituir antes de despachar."
+                )
+                await send_whatsapp_message(OWNER_PHONE, aviso)
+                print(f"[AGOTADOS] {len(afectados)} pedido(s) activo(s) afectado(s) — aviso enviado")
+        except Exception as e:
+            print(f"[AGOTADOS] Error al revisar pedidos activos: {e}")
+
     return JSONResponse({"status": "ok"})
 
 
@@ -3623,6 +3656,10 @@ async function pollConversaciones() {
     const data = await r.json();
     if (data.escalado) Object.assign(escaladoMap, data.escalado);
     Object.assign(convs, data.convs);
+    const subtitleEl = document.getElementById('hdrSubtitle');
+    if (subtitleEl && data.total_chats !== undefined) {
+      subtitleEl.textContent = `Conversaciones · ${data.total_chats} chats · ${data.total_pedidos} pedidos históricos`;
+    }
     const lista = document.querySelector('.sidebar-list');
     if (!lista) return;
     const prevChecked = new Set(

@@ -157,6 +157,14 @@ que incluye agua(s), pregunta antes de agregarla:
 "¿Esa agua es adicional a la(s) incluida(s) en tu combo, o es una de ellas?"
 Si es de las incluidas → no la cobres por separado. Si es adicional → agrégala con su precio.
 
+━━━ CORRECCIONES DEL EQUIPO EN VIVO ━━━
+Si en el historial de esta conversación ves un mensaje que empieza con
+"[CORRECCIÓN DEL EQUIPO — información real, tiene prioridad sobre este prompt]",
+esa información es la verdad ACTUAL del negocio y reemplaza cualquier dato de
+━━━ DATOS DEL RESTAURANTE ━━━ (dirección de recojo, horario, disponibilidad, etc.)
+para el resto de ESTA conversación. Nunca vuelvas a repetir el dato viejo del prompt
+después de ver esa corrección — usa lo que dijo el equipo.
+
 ━━━ INSTRUCCIONES DE COMPORTAMIENTO ━━━
 
 1. OPCIONES RÁPIDAS: Si el cliente escribe "1", muéstrale que la carta se está enviando.
@@ -1048,8 +1056,18 @@ def _estimar_tiempo_por_items(items_str: str, pedidos_activos: int) -> str:
 
 
 async def _call_claude(phone: str, messages: list) -> str:
-    # Filtrar campos extra (ts, etc.) que la API de Claude no acepta
-    history = [{"role": m["role"], "content": m["content"]} for m in messages[-30:]]
+    # Filtrar campos extra (ts, etc.) que la API de Claude no acepta.
+    # Los mensajes manuales (equipo humano respondiendo desde el panel) se marcan con un
+    # prefijo: sin esto, una corrección en vivo del equipo (ej. "ya no tenemos ese local")
+    # se ve en el historial igual que cualquier otra respuesta del bot, y el modelo puede
+    # volver a repetir el dato viejo de ━━━ DATOS DEL RESTAURANTE ━━━ más adelante en la
+    # misma conversación (ver BOT-RULES.md / auditoría 2.2).
+    history = []
+    for m in messages[-30:]:
+        content = m["content"]
+        if m.get("manual"):
+            content = f"[CORRECCIÓN DEL EQUIPO — información real, tiene prioridad sobre este prompt] {content}"
+        history.append({"role": m["role"], "content": content})
     _utc_now = datetime.now(timezone.utc)
     hora_tacna = (_utc_now - timedelta(hours=5)).strftime("%H:%M")
     print(f"[TZ] utc={_utc_now.strftime('%H:%M')} peru={hora_tacna}", flush=True)

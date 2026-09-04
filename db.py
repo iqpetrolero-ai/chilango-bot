@@ -395,6 +395,19 @@ def get_active_orders_with_time() -> list[dict]:
         return [dict(r) for r in rows]
 
 
+def get_active_orders_full() -> list[dict]:
+    """Retorna id, phone e items de pedidos activos (Nuevo + En preparación) de hoy.
+    Usado para detectar pedidos ya confirmados que incluyen un producto marcado
+    agotado DESPUÉS de la confirmación (ver set_productos_agotados)."""
+    today = datetime.now(PERU_TZ).strftime("%d/%m/%Y")
+    with _conn() as c:
+        rows = c.execute(
+            "SELECT id, phone, items FROM orders WHERE fecha=? AND estado IN ('Nuevo 🆕','En preparación 👨‍🍳')",
+            (today,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
 def get_orders_today() -> list:
     now = datetime.now(PERU_TZ)
     today = now.strftime("%d/%m/%Y")

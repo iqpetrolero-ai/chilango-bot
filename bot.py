@@ -4,7 +4,7 @@ import httpx
 from datetime import datetime, timezone, timedelta
 from anthropic import AsyncAnthropic
 from menu import MENU_TEXTO as _MENU_TEXTO_FALLBACK
-from orders import save_order, update_order, cancel_order, notify_delivery_cost_query
+from orders import save_order, update_order, cancel_order, notify_delivery_cost_query, calcular_total_esperado
 import db
 
 db.init_db()
@@ -63,11 +63,21 @@ def get_client() -> AsyncAnthropic:
 FECHAS_CERRADAS_TEMPORAL = {"2026-08-28"}
 
 
+def _ahora_peru() -> datetime:
+    """Hora actual en Peru (UTC-5), calculada desde UTC explícito.
+    NUNCA usar datetime.now(PERU_TZ) directo: ya se detectó que ese patrón puede fallar
+    en Railway (ver commit b9bb49a) — se migró _call_claude() a este cálculo el 26-jul,
+    pero esta_en_horario()/mensaje_fuera_horario() quedaron con el patrón viejo, lo que
+    causó que el bot dijera "hoy no estamos atendiendo" un sábado 19:31 (dentro de horario)."""
+    return datetime.now(timezone.utc) - timedelta(hours=5)
+
+
 def esta_en_horario() -> bool:
-    ahora = datetime.now(PERU_TZ)
+    ahora = _ahora_peru()
     if ahora.strftime("%Y-%m-%d") in FECHAS_CERRADAS_TEMPORAL:
         return False
     if ahora.weekday() not in (4, 5, 6):
+        print(f"[HORARIO] Fuera de horario por día — {ahora.strftime('%Y-%m-%d %H:%M')} (weekday={ahora.weekday()})")
         return False
     hora, minuto = ahora.hour, ahora.minute
     if hora < 17 or (hora == 17 and minuto < 30):
@@ -79,7 +89,7 @@ def esta_en_horario() -> bool:
 
 
 def mensaje_fuera_horario() -> str:
-    ahora = datetime.now(PERU_TZ)
+    ahora = _ahora_peru()
     if ahora.strftime("%Y-%m-%d") in FECHAS_CERRADAS_TEMPORAL:
         return (
             "¡Hola! 👋 Gracias por escribirnos.\n\n"
@@ -767,6 +777,29 @@ async def _parse_and_save_order(phone: str, reply: str) -> tuple[str, bool, bool
             )
             print(f"[PAGO INSUFICIENTE] {phone}: leído S/{monto_pagado_num:.2f} vs total S/{total_num:.2f} — pedido NO confirmado")
             return reply, needs_escalate, order_confirmed
+
+        # ── Verificación determinística del TOTAL contra los precios reales del menú ──
+        # Claude a veces suma mal el subtotal + empaque pese a la regla del prompt. En vez
+        # de confiar en su aritmética, se recalcula desde los precios reales (BD) y si no
+        # coincide (y la diferencia no se explica por un delivery no itemizado), se rechaza
+        # la confirmación y se le pide al cliente reconfirmar con el monto correcto — igual
+        # que ya se hace arriba con el monto pagado por Yape/Plin.
+        total_num = _extraer_monto_num(fields["total"])
+        total_esperado = calcular_total_esperado(fields["items"])
+        if total_num is not None and total_esperado is not None:
+            diff = round(total_num - total_esperado, 2)
+            es_recojo = fields["dir"].strip().lower().startswith("recojo")
+            tiene_delivery_en_items = "delivery" in fields["items"].lower()
+            delivery_no_itemizado = (not es_recojo and not tiene_delivery_en_items
+                                      and 4.00 <= diff <= 25.00)
+            if abs(diff) > 0.05 and not delivery_no_itemizado:
+                reply = (
+                    f"Uy, discúlpame — me equivoqué en la suma 🙏 El total correcto de tu pedido "
+                    f"es *S/ {total_esperado:.2f}* (te dije S/ {total_num:.2f} por error). "
+                    f"¿Lo confirmamos con el monto correcto?"
+                )
+                print(f"[TOTAL INCORRECTO] {phone}: bot dijo S/{total_num:.2f}, correcto S/{total_esperado:.2f} — pedido NO confirmado")
+                return reply, needs_escalate, order_confirmed
 
         order_confirmed = True
         # Claim free combo atomically if this order includes one

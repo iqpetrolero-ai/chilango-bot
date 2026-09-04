@@ -1,4 +1,5 @@
 import os
+import re
 import sqlite3
 import json
 from datetime import datetime, timezone, timedelta
@@ -971,13 +972,24 @@ def get_pending_reminders(minutos: int = 10, cooldown_min: int = 30) -> list[dic
         if last.get("role") != "assistant":
             continue
         content = str(last.get("content", "")).lower()
-        # No recordar si el pedido ya fue confirmado exitosamente
-        skip_keywords = ["pedido confirmado", "¡pedido confirmado", "confirmado! 🌮",
+        # No recordar si el pedido ya fue confirmado exitosamente. La IA redacta libremente
+        # ("pedido confirmado", "tu pedido está confirmado", "queda confirmado" ...), por eso
+        # se usa una regex tolerante en vez de frases literales — un keyword literal como
+        # "pedido confirmado" no calza con "pedido está confirmado" y deja pasar el recordatorio.
+        skip_keywords = ["¡pedido confirmado", "confirmado! 🌮",
                          "¡confirmado!", "pedido guardado", "¡con gusto", "en preparación"]
-        if any(k in content for k in skip_keywords):
+        ya_confirmado = (
+            any(k in content for k in skip_keywords)
+            or re.search(r"pedido\W+(?:\w+\W+){0,3}confirmad", content)
+            or re.search(r"confirmad\w*\W+(?:\w+\W+){0,3}pedido", content)
+        )
+        if ya_confirmado:
             continue
+        # "contra entrega" se excluye de este listado: aparece tanto en la pregunta de pago
+        # ("¿cómo pagas... o contra entrega?") como en el mensaje YA confirmado ("...lo llevamos
+        # a contra entrega"), así que por sí sola no distingue pendiente de confirmado.
         keywords = ["¿confirmamos", "confirmas", "plinea", "plina",
-                    "¿cómo pagas", "cómo pagas", "contra entrega", "total:"]
+                    "¿cómo pagas", "cómo pagas", "total:"]
         if any(k in content for k in keywords):
             result.append({"phone": r["phone"], "last_msg": last.get("content", "")})
     return result
